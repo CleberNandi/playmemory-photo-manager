@@ -1,16 +1,16 @@
-# Modelo conceitual candidato
+# Modelo conceitual da Foundation 01
 
-Este modelo é uma hipótese para discussão, não schema de produção.
+Este é o modelo conceitual aprovado pelos ADRs da Foundation 01. Ele define invariantes, não um schema físico de produção.
 
 ## Entidades e invariantes
 
 ### Asset
 
-Identidade lógica da mídia, independente do caminho. Campos candidatos: `id` (UUID), `kind` (`photo|video`), `content_hash` opcional/verificado, `byte_size`, `media_type`, `capture_time`, `capture_time_source`, `imported_at`, `status`. Um Asset pode ter várias localizações, tags e álbuns. O hash não deve ser a única identidade antes da leitura completa.
+Identidade lógica da mídia, independente do caminho. Campos conceituais: UUID aleatório e imutável, `kind` (`photo|video`), hash opcional com estado de verificação, tamanho, media type, projeção temporal selecionada e status. Um Asset pode ter várias localizações, tags e álbuns. SHA-256 é evidência de conteúdo, nunca a identidade lógica e nunca causa fusão automática.
 
 ### FileLocation
 
-Ocorrência física: `id`, `asset_id`, `root_id`, caminho relativo normalizado, identidade do filesystem quando disponível, tamanho/mtime observados, estado (`present|missing|moved_candidate|offline`), `last_seen_at`. Unique em `(root_id, relative_path)`. Separar localização de Asset permite reconhecer mudança sem trocar a identidade lógica.
+Ocorrência física: `id`, `asset_id`, `root_id`, caminho relativo normalizado, tipo de entrada, identidade do filesystem quando disponível, tamanho/mtime observados, estado (`present|missing|moved_candidate|offline`) e `last_seen_at`. Unique em `(root_id, relative_path)` para localizações ativas. Separar localização de Asset permite reconhecer mudança sem trocar a identidade lógica. Hardlinks podem ser várias localizações do mesmo Asset; symlinks não são seguidos por padrão.
 
 ### Album e AlbumAsset
 
@@ -18,11 +18,11 @@ Ocorrência física: `id`, `asset_id`, `root_id`, caminho relativo normalizado, 
 
 ### Tag e AssetTag
 
-`Tag` possui identidade, nome exibido e chave normalizada única; hierarquia fica adiada. `AssetTag` associa muitos-para-muitos, com origem (`user|imported`), confiança opcional e data. Sinônimos e taxonomia não entram no primeiro incremento.
+`Tag` possui identidade, nome exibido e chave única normalizada por NFKC, trim, whitespace colapsado e casefold, sem remoção de acentos. `AssetTag` associa muitos-para-muitos, com origem e data. Sinônimos, hierarquia e taxonomia ficam adiados.
 
 ### Metadata
 
-Valores extraídos e observáveis, separados de anotações do catálogo: `asset_id`, namespace (`exif|xmp|iptc|container|filesystem|sony`), chave, valor tipado/serializado, origem, data de extração e versão do extrator. Para GPS, armazenar acesso/política explícitos e evitar logs. Uma tabela larga com campos frequentes pode coexistir com dados brutos limitados; blobs completos não devem ser copiados sem necessidade.
+Valores extraídos e observáveis, separados de anotações: `asset_id`, namespace (`exif|xmp|iptc|container|filesystem|sony`), chave, valores bruto e tipado, origem, precisão/timezone quando temporal, data de extração e versão do extrator. Para GPS, armazenar acesso/política explícitos e evitar logs. Blobs completos não devem ser copiados sem necessidade.
 
 ### ImportSession
 
@@ -32,12 +32,13 @@ Unidade auditável: origem, destino, política, início/fim, estado e resumo. It
 
 Cache regenerável: `asset_id`, variante/tamanho, versão do gerador, orientação aplicada, hash/mtime da fonte e caminho do cache. Não é fonte de verdade; ausência apenas causa regeneração.
 
-## Tipos de suporte recomendados
+## Entidades de suporte exigidas por invariantes
 
-- `LibraryRoot`: raiz observada e sua disponibilidade, evitando caminhos absolutos espalhados.
-- `UserAnnotation`: título, descrição, rating 0–5 e favorito, separados do metadata extraído.
-- `AuditEvent`: operação explícita, ator, alvo, antes/depois e resultado.
-- `ReconciliationObservation`: evidência usada para propor que um arquivo ausente foi movido.
+- `LibraryRoot`: raiz observada e sua disponibilidade, necessária para distinguir `offline` de `missing` e evitar caminhos absolutos espalhados.
+- `UserAnnotation`: título, descrição, rating nulo ou 1–5, favorito independente e correção temporal, sempre separados de metadata extraída.
+- `ImportItem`: item subordinado à sessão, necessário para retomada e resultado auditável por arquivo.
+
+`AuditEvent` e uma entidade própria de `ReconciliationObservation` ficam adiados; a primeira implementação pode registrar evidências de reconciliação junto à localização/caso de uso sem antecipar um modelo genérico.
 
 ## Relações
 
@@ -49,13 +50,14 @@ Asset * ── * Album  (AlbumAsset)
 Asset * ── * Tag    (AssetTag)
 ImportSession 1 ── * ImportItem ── 0..1 Asset
 Asset 1 ── 0..1 UserAnnotation
+LibraryRoot 1 ── * FileLocation
 ```
 
 ## Datas e reconciliação
 
-Guardar o instante e sua proveniência: EXIF `DateTimeOriginal`, XMP/container, sidecar, mtime e data informada pelo usuário não são intercambiáveis. `capture_time` é uma projeção escolhida por política, com timezone/offset e precisão quando conhecidos.
+Guardar cada valor e sua proveniência: EXIF `DateTimeOriginal`, XMP/sidecar, container, mtime, importação e correção do usuário não são intercambiáveis. A data de captura no Asset é projeção escolhida pela política do ADR-002, aponta para a fonte e mantém timezone/offset e precisão quando conhecidos. Tempo sem timezone permanece local/flutuante e não é convertido para UTC.
 
-Para mudança externa, a reconciliação deve ser conservadora: caminho ausente -> procurar candidatos por identidade do filesystem -> tamanho + hash forte já conhecido -> pedir confirmação quando ambíguo. Nome, mtime ou perceptual hash isolados não autorizam religação.
+Para mudança externa, a reconciliação é conservadora: file-id estável na mesma raiz, desaparecimento do caminho anterior no mesmo ciclo e atributos compatíveis podem preservar automaticamente a localização; tamanho + SHA-256 verificado produz apenas candidato para confirmação. Nome, mtime, metadata ou hash perceptual isolados não autorizam religação. Conteúdo idêntico em caminhos distintos cria Assets distintos por padrão.
 
 ## SQLite
 

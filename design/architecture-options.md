@@ -50,12 +50,19 @@ DuplicateProvider
 
 Entradas usam referências estáveis e fatos mínimos (hash, dimensões, codec), nunca caminhos internos do Lab como contrato. Saídas são evidências e recomendações, não mutações. Toda substituição/remoção permanece caso de uso do Photo Manager com revisão humana e auditoria. ORB experimental não é incorporado.
 
+## Decisões da Foundation 01
+
+- [ADR-001](../docs/adr/ADR-001-asset-identity.md): UUID interno; caminho e hash são evidências, não identidade; reconciliação conservadora.
+- [ADR-002](../docs/adr/ADR-002-temporal-provenance.md): observações temporais preservadas com fonte, precisão e timezone; nenhuma conversão presumida para UTC.
+- [ADR-003](../docs/adr/ADR-003-annotations-and-metadata.md): álbuns/tags/anotações no SQLite, separados de metadata extraída; nenhuma escrita nos originais.
+
+Estas decisões mantêm o monólito local modular recomendado e não introduzem serviço HTTP, worker ou integração externa.
+
 ## Incrementos pequenos
 
-1. ADRs para identidade de Asset, política de datas e escrita de metadados.
-2. Protótipo descartável de schema + migrações usando arquivos sintéticos, não acervo pessoal.
-3. Scanner read-only com manifesto JSON e testes de EXIF ausente/divergente.
-4. Planejador de importação dry-run com colisões e retomada simulada.
-5. Catálogo mínimo e reconciliação de movimento por evidência forte.
-6. Somente então contratos de UI e thumbnails; integração de duplicatas depois.
+1. Traduzir os ADRs em um schema mínimo e migrações testadas com dados sintéticos.
+2. Scanner read-only com manifesto e testes de EXIF ausente/divergente.
+3. Planejador de importação dry-run com colisões e retomada simulada.
+4. Catálogo mínimo e reconciliação de movimento por evidência forte.
+5. Somente então contratos de UI e thumbnails; integração de duplicatas depois.
 
