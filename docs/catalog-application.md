@@ -24,9 +24,11 @@ Não há interfaces abstratas de repositório porque existe somente uma implemen
 - Annotation: consultar e definir separadamente rating, favorito, título e descrição.
 
 O UUID de Asset é gerado pela aplicação. Caminho, SHA-256 e `filesystem_id` nunca selecionam ou
-fundem Assets. A associação de álbum é idempotente: retorna `True` quando criada e `False` quando
-já existia. Associação duplicada de tag produz `DuplicateAssociationError`. Remoções de
-associação retornam se uma linha foi removida; não removem entidades nem mídia.
+fundem Assets. `create_asset` aceita hash somente como `unverified`; promover um SHA-256 a
+`verified` exigirá uma operação futura que represente a leitura integral bem-sucedida. A
+associação de álbum é idempotente: retorna `True` quando criada e `False` quando já existia.
+Associação duplicada de tag produz `DuplicateAssociationError`. Remoções de associação retornam
+se uma linha foi removida; não removem entidades nem mídia.
 
 Cada setter de anotação modifica exatamente um campo. Passar `None` para rating, título ou
 descrição é limpeza explícita; campos não mencionados são preservados. Favorito é booleano e
@@ -78,11 +80,13 @@ Estados de localização:
 - `moved_candidate`: evidências sugerem movimento, ainda sem reconciliação confirmada.
 
 O registro exige `last_seen_at`: esse valor é um atestado fornecido pelo chamador, não produzido
-ou verificado pela camada. `missing` é rejeitado em raiz offline e `offline` é rejeitado em raiz
-disponível. Não existe API para transição posterior: scanner/reconciliador deverá fornecer
-evidências e uma política aprovada antes dessa operação ser adicionada. O caminho relativo é
-lexical, canônico em sintaxe POSIX e não pode ser absoluto nem conter `..`; nenhum caminho é
-resolvido no filesystem.
+ou verificado pela camada. A criação pública aceita somente `present` em raiz disponível ou
+`offline` em raiz offline. `missing` e `moved_candidate` são estados persistíveis no modelo, mas
+não podem ser declarados por `register_location`: exigem evidência de varredura ou reconciliação
+que esta fundação deliberadamente não representa. Não existe API para transição posterior;
+scanner/reconciliador deverá fornecer evidências e uma política aprovada antes dessa operação ser
+adicionada. O caminho relativo é lexical, canônico em sintaxe POSIX e não pode ser absoluto nem
+conter `..`; nenhum caminho é resolvido no filesystem.
 
 ## Fora do escopo
 

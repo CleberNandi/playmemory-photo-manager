@@ -79,6 +79,10 @@ class Catalog:
                 raise InvalidInputError("sha256 must be 64 lowercase hexadecimal characters")
             if hash_state is HashState.ABSENT:
                 raise InvalidInputError("hash_state cannot be absent when sha256 is supplied")
+            if hash_state is HashState.VERIFIED:
+                raise InvalidInputError(
+                    "verified hashes require a future evidence-aware verification operation"
+                )
         identifier = str(uuid.uuid4())
         with self._write():
             self._repository.insert_asset(
@@ -88,19 +92,19 @@ class Catalog:
 
     def get_asset(self, asset_id: str) -> Asset:
         _uuid(asset_id, "asset_id")
-        asset = self._repository.get_asset(asset_id)
+        asset = self._read(self._repository.get_asset, asset_id)
         if asset is None:
             raise NotFoundError("asset does not exist")
         return asset
 
     def list_assets(self, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0) -> list[Asset]:
-        return self._repository.list_assets(*_page(limit, offset))
+        return self._read(self._repository.list_assets, *_page(limit, offset))
 
     def get_asset_locations(
         self, asset_id: str, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0
     ) -> list[FileLocation]:
         self.get_asset(asset_id)
-        return self._repository.list_asset_locations(asset_id, *_page(limit, offset))
+        return self._read(self._repository.list_asset_locations, asset_id, *_page(limit, offset))
 
     def register_root(
         self,
@@ -124,13 +128,13 @@ class Catalog:
 
     def get_root(self, root_id: str) -> LibraryRoot:
         _uuid(root_id, "root_id")
-        root = self._repository.get_root(root_id)
+        root = self._read(self._repository.get_root, root_id)
         if root is None:
             raise NotFoundError("library root does not exist")
         return root
 
     def list_roots(self, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0) -> list[LibraryRoot]:
-        return self._repository.list_roots(*_page(limit, offset))
+        return self._read(self._repository.list_roots, *_page(limit, offset))
 
     def register_location(
         self,
@@ -152,6 +156,13 @@ class Catalog:
         last_seen_at = _nonblank(last_seen_at, "last_seen_at")
         availability = _enum(LocationAvailability, availability, "availability")
         entry_type = _enum(EntryType, entry_type, "entry_type")
+        if availability in {
+            LocationAvailability.MISSING,
+            LocationAvailability.MOVED_CANDIDATE,
+        }:
+            raise InvalidInputError(
+                "missing and moved_candidate require a future evidence-aware transition"
+            )
         if (entry_type is EntryType.SYMLINK) != (symlink_target is not None):
             raise InvalidInputError("symlink_target is required only for symlink entries")
         for name, value in (
@@ -201,7 +212,7 @@ class Catalog:
 
     def get_location(self, location_id: str) -> FileLocation:
         _uuid(location_id, "location_id")
-        location = self._repository.get_location(location_id)
+        location = self._read(self._repository.get_location, location_id)
         if location is None:
             raise NotFoundError("file location does not exist")
         return location
@@ -210,10 +221,12 @@ class Catalog:
         self, root_id: str, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0
     ) -> list[FileLocation]:
         self.get_root(root_id)
-        return self._repository.list_root_locations(root_id, *_page(limit, offset))
+        return self._read(self._repository.list_root_locations, root_id, *_page(limit, offset))
 
     def create_album(self, name: str, *, description: str | None = None) -> Album:
         name = _nonblank(name, "name")
+        if description is not None and not isinstance(description, str):
+            raise InvalidInputError("description must be a string or null")
         identifier = str(uuid.uuid4())
         with self._write():
             self._repository.insert_album(identifier, name, description)
@@ -221,13 +234,13 @@ class Catalog:
 
     def get_album(self, album_id: str) -> Album:
         _uuid(album_id, "album_id")
-        album = self._repository.get_album(album_id)
+        album = self._read(self._repository.get_album, album_id)
         if album is None:
             raise NotFoundError("album does not exist")
         return album
 
     def list_albums(self, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0) -> list[Album]:
-        return self._repository.list_albums(*_page(limit, offset))
+        return self._read(self._repository.list_albums, *_page(limit, offset))
 
     def add_asset_to_album(self, album_id: str, asset_id: str) -> bool:
         _uuid(album_id, "album_id")
@@ -249,7 +262,7 @@ class Catalog:
         self, album_id: str, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0
     ) -> list[Asset]:
         self.get_album(album_id)
-        return self._repository.list_album_assets(album_id, *_page(limit, offset))
+        return self._read(self._repository.list_album_assets, album_id, *_page(limit, offset))
 
     def create_tag(self, display_name: str) -> Tag:
         if not isinstance(display_name, str):
@@ -267,13 +280,13 @@ class Catalog:
 
     def get_tag(self, tag_id: str) -> Tag:
         _uuid(tag_id, "tag_id")
-        tag = self._repository.get_tag(tag_id)
+        tag = self._read(self._repository.get_tag, tag_id)
         if tag is None:
             raise NotFoundError("tag does not exist")
         return tag
 
     def list_tags(self, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0) -> list[Tag]:
-        return self._repository.list_tags(*_page(limit, offset))
+        return self._read(self._repository.list_tags, *_page(limit, offset))
 
     def add_tag_to_asset(self, asset_id: str, tag_id: str) -> None:
         _uuid(asset_id, "asset_id")
@@ -298,11 +311,11 @@ class Catalog:
         self, asset_id: str, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0
     ) -> list[Tag]:
         self.get_asset(asset_id)
-        return self._repository.list_asset_tags(asset_id, *_page(limit, offset))
+        return self._read(self._repository.list_asset_tags, asset_id, *_page(limit, offset))
 
     def get_annotation(self, asset_id: str) -> Annotation | None:
         self.get_asset(asset_id)
-        return self._repository.get_annotation(asset_id)
+        return self._read(self._repository.get_annotation, asset_id)
 
     def set_rating(self, asset_id: str, rating: int | None) -> Annotation:
         if rating is not None and (
@@ -327,11 +340,12 @@ class Catalog:
         return self._set_annotation(asset_id, "description", description)
 
     def _set_annotation(self, asset_id: str, field: str, value: object) -> Annotation:
+        _uuid(asset_id, "asset_id")
         with self._write():
             if self._repository.get_asset(asset_id) is None:
                 raise InvalidReferenceError("asset does not exist")
             self._repository.update_annotation(asset_id, field, value)
-        annotation = self._repository.get_annotation(asset_id)
+        annotation = self._read(self._repository.get_annotation, asset_id)
         if annotation is None:  # pragma: no cover - guarded by the transaction above
             raise PersistenceError("annotation update did not persist")
         return annotation
@@ -348,14 +362,28 @@ class Catalog:
             yield
             self._connection.commit()
         except sqlite3.IntegrityError as error:
-            self._connection.rollback()
+            self._rollback_preserving(error)
             raise PersistenceError("unexpected catalog persistence failure") from error
         except sqlite3.DatabaseError as error:
-            self._connection.rollback()
+            self._rollback_preserving(error)
             raise PersistenceError("unexpected catalog persistence failure") from error
-        except Exception:
-            self._connection.rollback()
+        except Exception as error:
+            self._rollback_preserving(error)
             raise
+
+    def _rollback_preserving(self, original_error: BaseException) -> None:
+        """Attempt rollback without replacing the operation's original failure."""
+        try:
+            self._connection.rollback()
+        except sqlite3.DatabaseError:
+            original_error.add_note("catalog rollback also failed")
+
+    def _read(self, operation, *arguments):
+        """Keep SQLite implementation errors outside the public catalog contract."""
+        try:
+            return operation(*arguments)
+        except sqlite3.DatabaseError as error:
+            raise PersistenceError("unexpected catalog persistence failure") from error
 
 
 def _uuid(value: str, name: str) -> str:
