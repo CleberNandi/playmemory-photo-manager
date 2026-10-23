@@ -70,10 +70,12 @@ Nenhum gatilho complexo foi introduzido apenas para antecipar casos de uso ainda
 ## Migrações
 
 Arquivos seguem `NNN_nome.sql`, começam em 1 e precisam ser contíguos. Para cada migração, o
-executor calcula SHA-256 e passa em uma única chamada `executescript()` um script contendo
-`BEGIN IMMEDIATE`, DDL/DML, registro em `schema_migration`, atualização de `PRAGMA user_version`
-e `COMMIT`. Em erro, executa rollback explícito. Portanto, schema, histórico e `user_version`
-avançam juntos ou não avançam.
+executor calcula SHA-256, separa statements completos com o parser do SQLite e os executa sob
+um `BEGIN IMMEDIATE` controlado pelo runner. Controle transacional dentro do arquivo é negado;
+isso impede `COMMIT` prematuro de escapar da atomicidade. DDL/DML, registro em
+`schema_migration` e atualização de `PRAGMA user_version` são confirmados juntos. Em erro, o
+runner executa rollback explícito; schema, histórico e `user_version` avançam juntos ou não
+avançam.
 
 Na abertura, o executor rejeita: versão maior que a suportada, lacunas/nomes desconhecidos,
 histórico divergente de `user_version` e checksum aplicado diferente do SQL versionado. Reabrir
@@ -88,4 +90,8 @@ backup consistente e migração aditiva revisada.
 - O caminho do thumbnail referencia cache externo regenerável; sua gestão virá depois.
 - A camada de casos de uso para criação de todas as entidades ainda não existe; somente conexão,
   migração e operação segura de tags fazem parte desta fundação.
+- Escritas e `PRAGMA integrity_check` devem usar a conexão gerenciada: conexões SQLite puras não
+  conhecem as funções `is_uuid` e `normalize_tag` referenciadas pelas constraints do schema.
+- A normalização segue a base Unicode fornecida pelo runtime Python; uma atualização dessa base
+  deve ser tratada como mudança de compatibilidade e validada antes de editar tags existentes.
 - Concorrência remota, catálogo em share de rede e múltiplos escritores não são suportados.

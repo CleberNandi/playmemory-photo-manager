@@ -30,6 +30,7 @@ CREATE TABLE metadata (
     CHECK (temporal_local_value IS NOT NULL OR timezone_state IS NULL),
     CHECK ((timezone_state = 'offset') = (utc_offset_minutes IS NOT NULL)),
     CHECK ((timezone_state = 'named') = (timezone_name IS NOT NULL)),
+    CHECK (timezone_state IS NOT NULL OR timezone_name IS NULL),
     FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
 ) STRICT;
 
@@ -54,8 +55,10 @@ CREATE TABLE asset (
     CHECK ((captured_local_value IS NULL) = (captured_precision IS NULL)),
     CHECK ((captured_source_kind = 'none') = (captured_local_value IS NULL)),
     CHECK ((captured_source_kind = 'metadata') = (captured_metadata_id IS NOT NULL)),
+    CHECK (captured_local_value IS NOT NULL OR captured_timezone_state IS NULL),
     CHECK ((captured_timezone_state = 'offset') = (captured_offset_minutes IS NOT NULL)),
     CHECK ((captured_timezone_state = 'named') = (captured_timezone_name IS NOT NULL)),
+    CHECK (captured_timezone_state IS NOT NULL OR captured_timezone_name IS NULL),
     FOREIGN KEY (captured_metadata_id, id) REFERENCES metadata(id, asset_id) ON DELETE RESTRICT
 ) STRICT;
 
@@ -147,8 +150,10 @@ CREATE TABLE user_annotation (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     CHECK ((corrected_local_value IS NULL) = (corrected_precision IS NULL)),
+    CHECK (corrected_local_value IS NOT NULL OR corrected_timezone_state IS NULL),
     CHECK ((corrected_timezone_state = 'offset') = (corrected_offset_minutes IS NOT NULL)),
     CHECK ((corrected_timezone_state = 'named') = (corrected_timezone_name IS NOT NULL)),
+    CHECK (corrected_timezone_state IS NOT NULL OR corrected_timezone_name IS NULL),
     FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
 ) WITHOUT ROWID, STRICT;
 

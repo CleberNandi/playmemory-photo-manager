@@ -48,6 +48,7 @@ def _metadata(database: sqlite3.Connection, asset_id: str, **overrides: object) 
         "temporal_precision": "second",
         "timezone_state": "unknown",
         "utc_offset_minutes": None,
+        "timezone_name": None,
         "extractor_version": "test/1",
         "extracted_at": "2026-10-23T18:00:00Z",
         "conflict_group": None,
@@ -58,12 +59,12 @@ def _metadata(database: sqlite3.Connection, asset_id: str, **overrides: object) 
         """INSERT INTO metadata(
             id, asset_id, namespace, metadata_key, source, source_key, raw_value,
             interpreted_value, value_type, temporal_local_value, temporal_precision,
-            timezone_state, utc_offset_minutes, extractor_version, extracted_at,
+            timezone_state, utc_offset_minutes, timezone_name, extractor_version, extracted_at,
             conflict_group, is_conflicting
         ) VALUES (
             :id, :asset_id, :namespace, :metadata_key, :source, :source_key, :raw_value,
             :interpreted_value, :value_type, :temporal_local_value, :temporal_precision,
-            :timezone_state, :utc_offset_minutes, :extractor_version, :extracted_at,
+            :timezone_state, :utc_offset_minutes, :timezone_name, :extractor_version, :extracted_at,
             :conflict_group, :is_conflicting
         )""",
         values,
@@ -106,6 +107,29 @@ def test_invalid_timezone_representation_is_rejected(
 ) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         _metadata(database, asset_id, timezone_state="unknown", utc_offset_minutes=-180)
+
+
+def test_timezone_requires_a_temporal_value_and_consistent_state(
+    database: sqlite3.Connection, asset_id: str
+) -> None:
+    with pytest.raises(sqlite3.IntegrityError):
+        _metadata(
+            database,
+            asset_id,
+            temporal_local_value=None,
+            temporal_precision=None,
+            timezone_state=None,
+            timezone_name="Europe/Paris",
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        database.execute(
+            "UPDATE asset SET captured_timezone_state = 'unknown' WHERE id = ?", (asset_id,)
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        database.execute(
+            "INSERT INTO user_annotation(asset_id, corrected_timezone_name) VALUES (?, 'UTC')",
+            (asset_id,),
+        )
 
 
 def test_conflicting_sources_coexist(database: sqlite3.Connection, asset_id: str) -> None:

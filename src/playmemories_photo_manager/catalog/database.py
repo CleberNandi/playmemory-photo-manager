@@ -113,27 +113,54 @@ def apply_migrations(
     connection: sqlite3.Connection, *, migration_directory: Path | None = None
 ) -> int:
     """Apply pending migrations, each atomically with its history record."""
+    if connection.in_transaction:
+        raise MigrationError("migrations require a connection with no active transaction")
     migrations = _load_migrations(migration_directory)
     current = _validate_state(connection, migrations)
     for migration in migrations[current:]:
-        escaped_name = migration.name.replace("'", "''")
-        script = "\n".join(
-            (
-                "BEGIN IMMEDIATE;",
-                migration.sql,
-                "INSERT INTO schema_migration(version, name, checksum) "
-                f"VALUES ({migration.version}, '{escaped_name}', '{migration.checksum}');",
-                f"PRAGMA user_version = {migration.version};",
-                "COMMIT;",
-            )
-        )
+        statements = _split_sql_statements(migration.sql)
         try:
-            connection.executescript(script)
+            connection.execute("BEGIN IMMEDIATE")
+            connection.set_authorizer(_deny_transaction_control)
+            for statement in statements:
+                connection.execute(statement)
+            connection.set_authorizer(None)
+            connection.execute(
+                "INSERT INTO schema_migration(version, name, checksum) VALUES (?, ?, ?)",
+                (migration.version, migration.name, migration.checksum),
+            )
+            connection.execute(f"PRAGMA user_version = {migration.version}")
+            connection.commit()
         except sqlite3.Error as error:
+            connection.set_authorizer(None)
             if connection.in_transaction:
                 connection.rollback()
             raise MigrationError(f"migration {migration.name} failed") from error
     return len(migrations)
+
+
+def _split_sql_statements(script: str) -> list[str]:
+    """Split SQL without breaking compound statements such as triggers."""
+    statements: list[str] = []
+    pending: list[str] = []
+    for character in script:
+        pending.append(character)
+        candidate = "".join(pending)
+        if character == ";" and sqlite3.complete_statement(candidate):
+            statements.append(candidate)
+            pending.clear()
+    if "".join(pending).strip():
+        raise MigrationError("migration contains an incomplete SQL statement")
+    return statements
+
+
+def _deny_transaction_control(
+    action: int, _arg1: str | None, _arg2: str | None, _database: str | None, _trigger: str | None
+) -> int:
+    """Keep migration files from escaping the runner-owned transaction."""
+    if action in (sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT):
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
 
 
 def initialize_database(

@@ -69,6 +69,25 @@ def test_migrations_are_applied_in_numeric_order(tmp_path) -> None:
     connection.close()
 
 
+def test_multiple_statements_on_one_line_are_supported(tmp_path) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_compact.sql").write_text(
+        "CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, name TEXT, checksum TEXT);"
+        "CREATE TABLE first(value TEXT); CREATE TABLE second(value TEXT);",
+        encoding="utf-8",
+    )
+    connection = connect(tmp_path / "compact.sqlite3")
+    apply_migrations(connection, migration_directory=migrations)
+    assert {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name <> 'schema_migration'"
+        )
+    } == {"first", "second"}
+    connection.close()
+
+
 def test_failed_migration_is_atomic(tmp_path) -> None:
     migrations = tmp_path / "migrations"
     migrations.mkdir()
@@ -88,6 +107,41 @@ def test_failed_migration_is_atomic(tmp_path) -> None:
         ).fetchone()[0]
         == 0
     )
+    connection.close()
+
+
+def test_migration_cannot_commit_partial_ddl(tmp_path) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_broken.sql").write_text(
+        "CREATE TABLE schema_migration(version INTEGER PRIMARY KEY, name TEXT, checksum TEXT);\n"
+        "CREATE TABLE partial(value TEXT);\n"
+        "COMMIT;\n"
+        "THIS IS NOT SQL;\n",
+        encoding="utf-8",
+    )
+    connection = connect(tmp_path / "broken.sqlite3")
+    with pytest.raises(MigrationError):
+        apply_migrations(connection, migration_directory=migrations)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+    assert connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'").fetchone()[
+        0
+    ] == 0
+    connection.close()
+
+
+def test_incomplete_migration_is_rejected_before_execution(tmp_path) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_incomplete.sql").write_text(
+        "CREATE TABLE partial(value TEXT)", encoding="utf-8"
+    )
+    connection = connect(tmp_path / "incomplete.sqlite3")
+    with pytest.raises(MigrationError, match="incomplete"):
+        apply_migrations(connection, migration_directory=migrations)
+    assert connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'").fetchone()[
+        0
+    ] == 0
     connection.close()
 
 
