@@ -124,9 +124,10 @@ def test_migration_cannot_commit_partial_ddl(tmp_path) -> None:
     with pytest.raises(MigrationError):
         apply_migrations(connection, migration_directory=migrations)
     assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
-    assert connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'").fetchone()[
-        0
-    ] == 0
+    assert (
+        connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'").fetchone()[0]
+        == 0
+    )
     connection.close()
 
 
@@ -139,9 +140,10 @@ def test_incomplete_migration_is_rejected_before_execution(tmp_path) -> None:
     connection = connect(tmp_path / "incomplete.sqlite3")
     with pytest.raises(MigrationError, match="incomplete"):
         apply_migrations(connection, migration_directory=migrations)
-    assert connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'").fetchone()[
-        0
-    ] == 0
+    assert (
+        connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'").fetchone()[0]
+        == 0
+    )
     connection.close()
 
 
