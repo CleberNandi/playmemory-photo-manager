@@ -1,0 +1,36 @@
+# Third-party and potentially untrusted binaries
+*.exe
+*.dll
+*.msi
+*.cab
+*.zip
+*.7z
+*.iso
+artifacts/
+extracted/
+workbench/
+
+# Local catalogs, personal media, and generated analysis
+*.db
+*.sqlite
+*.sqlite3
+media/
+personal-data/
+generated/
+
+# Python and tools
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+*~
+.DS_Store
+
