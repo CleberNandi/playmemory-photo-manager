@@ -55,6 +55,26 @@ connection.close()
 Arquivos `*.db`, `*.sqlite` e `*.sqlite3` permanecem ignorados. Catálogos reais devem ficar
 fora do repositório e receber backup consistente pela API SQLite.
 
+## Foundation 03
+
+A camada de aplicação oferece contratos Python tipados e casos de uso transacionais para Assets,
+raízes, localizações, álbuns, tags e anotações. Ela reutiliza a conexão gerenciada da Foundation
+02, mantém SQL nos repositórios e não acessa mídia ou filesystem.
+
+```python
+from playmemories_photo_manager.catalog import Catalog, initialize_database
+
+connection = initialize_database("catalog.sqlite3")
+catalog = Catalog(connection)
+asset = catalog.create_asset("photo")
+album = catalog.create_album("Selecionadas")
+catalog.add_asset_to_album(album.id, asset.id)
+connection.close()
+```
+
+Os contratos, erros, paginação, transações e a semântica de disponibilidade estão documentados
+em [Camada de aplicação do catálogo](docs/catalog-application.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.
