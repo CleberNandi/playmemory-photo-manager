@@ -35,12 +35,15 @@ Isso mantém a proveniência da execução do scanner na fronteira de comparaç�
 - evidências físicas tipadas por identificador de localização, quando disponíveis;
 - uma versão ou marcador de leitura opcional fornecido pelo adapter que fez a consulta.
 
-O contrato reutiliza as entidades imutáveis da camada de catálogo. `LocationPhysicalEvidence`
+O contrato reutiliza as entidades imutáveis da camada de catálogo, mas o planner revalida em
+runtime os campos relevantes e as coerências do schema; não confia apenas em `frozen=True` nem em
+snapshots montados manualmente. `LocationPhysicalEvidence`
 apenas torna comparável o par `(device, file_id)` quando essa evidência foi previamente registrada
 com semântica compatível; o campo legado e opaco `FileLocation.filesystem_id` não é interpretado.
 O chamador não deve carregar o catálogo inteiro: deve consultar a raiz e o escopo necessários e
 montar um snapshot autocontido. `read_version` é rastreabilidade, não promessa de snapshot
-atômico ou isolamento que o adapter não tenha fornecido.
+atômico ou isolamento que o adapter não tenha fornecido. Versão ausente ou vazia deixa o plano
+inconclusivo, pois um aplicador futuro não teria marcador confiável para revalidação.
 
 `PlanningContext` liga explicitamente o ID e o caminho configurado da raiz ao caminho absoluto
 observado, ao escopo e, quando conhecida, à identidade física da raiz. O planner confere esses
@@ -50,7 +53,8 @@ valores contra avaliação e snapshot; não aceita equivalência por nome pareci
 
 `CatalogChangePlan` é uma dataclass congelada com status, itens ordenados, diagnósticos, versão de
 leitura e referências de execução/raiz/escopo. Seus campos
-`authorizes_catalog_mutation` e `permits_absence_conclusions` são sempre falsos nesta fundação.
+`authorizes_catalog_mutation` e `permits_absence_conclusions` são sempre falsos nesta fundação e
+não são parâmetros aceitos pelo construtor.
 
 - `known_location_observed`: arquivo diretamente observado no mesmo caminho de uma localização
   ativa. Preserva IDs existentes, mas não afirma igualdade de conteúdo, hash verificado ou

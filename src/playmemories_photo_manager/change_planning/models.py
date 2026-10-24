@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from playmemories_photo_manager.catalog import Asset, FileLocation, LibraryRoot
@@ -48,6 +48,7 @@ class DiagnosticCode(StrEnum):
     INCONCLUSIVE_EVIDENCE = "inconclusive_evidence"
     ABSENCE_NOT_AUTHORIZED = "absence_not_authorized"
     CONTENT_NOT_VERIFIED = "content_not_verified"
+    READ_VERSION_UNAVAILABLE = "read_version_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,5 +107,5 @@ class CatalogChangePlan:
     status: PlanStatus
     changes: tuple[PlannedChange, ...]
     diagnostics: tuple[PlanDiagnostic, ...]
-    permits_absence_conclusions: bool = False
-    authorizes_catalog_mutation: bool = False
+    permits_absence_conclusions: bool = field(default=False, init=False)
+    authorizes_catalog_mutation: bool = field(default=False, init=False)

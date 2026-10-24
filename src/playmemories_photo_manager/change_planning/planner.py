@@ -19,13 +19,22 @@ from playmemories_photo_manager.catalog import (
     EntryType as CatalogEntryType,
 )
 from playmemories_photo_manager.evidence import (
+    AssessmentReason,
     CoverageClassification,
+    DecisionImpediment,
     EvidenceAssessment,
+    EvidenceInference,
+    PortabilityLimitation,
     StructuralValidation,
 )
 from playmemories_photo_manager.scanner import (
     EntryObservation,
     EntryType,
+    EvidenceKind,
+    FailureKind,
+    FailureOperation,
+    ObservationFailure,
+    ObservedTimestamps,
     PhysicalIdentity,
     RootObservation,
     ScanScope,
@@ -64,6 +73,11 @@ def plan_changes(
     diagnostics.extend(_validate_context(assessment, catalog_snapshot, context))
     diagnostics.extend(_validate_snapshot(catalog_snapshot))
 
+    if catalog_snapshot.read_version is None or (
+        isinstance(catalog_snapshot.read_version, str) and not catalog_snapshot.read_version.strip()
+    ):
+        diagnostics.append(_warning(DiagnosticCode.READ_VERSION_UNAVAILABLE))
+
     if assessment.structural_validation is StructuralValidation.INVALID:
         diagnostics.append(_error(DiagnosticCode.INVALID_ASSESSMENT))
     if assessment.coverage is CoverageClassification.ROOT_UNAVAILABLE:
@@ -76,7 +90,11 @@ def plan_changes(
         diagnostics.append(_warning(DiagnosticCode.INCOMPLETE_COVERAGE))
 
     blocking = any(item.severity is DiagnosticSeverity.ERROR for item in diagnostics)
-    changes = _blocked_changes(assessment) if blocking else _compare(assessment, catalog_snapshot)
+    changes = (
+        _blocked_changes(assessment, diagnostics)
+        if blocking
+        else _compare(assessment, catalog_snapshot)
+    )
     all_diagnostics = tuple(
         diagnostics
         + [
@@ -150,7 +168,71 @@ def _validate_assessment(assessment: EvidenceAssessment) -> list[PlanDiagnostic]
         or not isinstance(assessment.inconclusive_entries, tuple)
         or not all(isinstance(item, EntryObservation) for item in assessment.accepted_entries)
         or not all(isinstance(item, EntryObservation) for item in assessment.inconclusive_entries)
+        or not isinstance(assessment.failures, tuple)
+        or not all(isinstance(item, ObservationFailure) for item in assessment.failures)
+        or not isinstance(assessment.inferences, tuple)
+        or not all(isinstance(item, EvidenceInference) for item in assessment.inferences)
+        or not isinstance(assessment.reasons, tuple)
+        or not all(isinstance(item, AssessmentReason) for item in assessment.reasons)
+        or not isinstance(assessment.portability_limitations, tuple)
+        or not all(
+            isinstance(item, PortabilityLimitation) for item in assessment.portability_limitations
+        )
+        or not isinstance(assessment.decision_impediments, tuple)
+        or not all(isinstance(item, DecisionImpediment) for item in assessment.decision_impediments)
     ):
+        return [_error(DiagnosticCode.INVALID_ASSESSMENT)]
+    entries = assessment.accepted_entries + assessment.inconclusive_entries
+    entry_paths = [item.relative_path for item in entries]
+    expected_coverage = {
+        ScanStatus.COMPLETE: (
+            CoverageClassification.COMPLETE_RECURSIVE_SCOPE
+            if assessment.scope.recursive
+            else CoverageClassification.COMPLETE_NON_RECURSIVE_SCOPE
+        ),
+        ScanStatus.PARTIAL: CoverageClassification.PARTIAL,
+        ScanStatus.CANCELLED: CoverageClassification.CANCELLED,
+        ScanStatus.ROOT_UNAVAILABLE: CoverageClassification.ROOT_UNAVAILABLE,
+        ScanStatus.FAILED: CoverageClassification.FAILED,
+    }[assessment.original_status]
+    invalid = (
+        assessment.scope.follows_links
+        or not isinstance(assessment.scope.recursive, bool)
+        or not _valid_scope_path(assessment.scope.relative_path)
+        or len(entry_paths) != len(set(entry_paths))
+        or any(not _valid_observation(item, assessment.scope) for item in entries)
+        or any(
+            item.evidence_kind is not EvidenceKind.DIRECT_OBSERVATION
+            for item in assessment.accepted_entries
+        )
+        or any(
+            item.evidence_kind is EvidenceKind.DIRECT_OBSERVATION
+            for item in assessment.inconclusive_entries
+        )
+        or (
+            assessment.structural_validation is StructuralValidation.VALID
+            and assessment.coverage is not expected_coverage
+        )
+        or (
+            assessment.structural_validation is StructuralValidation.INVALID
+            and assessment.coverage is not CoverageClassification.INVALID
+        )
+        or (
+            assessment.structural_validation is StructuralValidation.VALID
+            and assessment.coverage is CoverageClassification.INVALID
+        )
+        or (
+            assessment.original_status is ScanStatus.ROOT_UNAVAILABLE
+            and assessment.root is not None
+        )
+        or (
+            assessment.original_status is not ScanStatus.ROOT_UNAVAILABLE
+            and assessment.root is None
+        )
+        or not _valid_root(assessment.root)
+        or any(not _valid_failure(item, assessment.scope) for item in assessment.failures)
+    )
+    if invalid:
         return [_error(DiagnosticCode.INVALID_ASSESSMENT)]
     return []
 
@@ -174,7 +256,15 @@ def _validate_snapshot(snapshot: CatalogSnapshot) -> list[PlanDiagnostic]:
         not _uuid4(snapshot.library_root.id)
         or not isinstance(snapshot.library_root.normalized_path, str)
         or not snapshot.library_root.normalized_path
+        or not isinstance(snapshot.library_root.display_name, str)
+        or not snapshot.library_root.display_name.strip()
         or not isinstance(snapshot.library_root.availability, RootAvailability)
+        or not isinstance(snapshot.library_root.created_at, str)
+        or not snapshot.library_root.created_at
+        or (
+            snapshot.library_root.last_checked_at is not None
+            and not isinstance(snapshot.library_root.last_checked_at, str)
+        )
         or snapshot.effective_scope.follows_links
         or not _valid_scope_path(snapshot.effective_scope.relative_path)
         or not isinstance(snapshot.effective_scope.recursive, bool)
@@ -186,6 +276,7 @@ def _validate_snapshot(snapshot: CatalogSnapshot) -> list[PlanDiagnostic]:
             or asset.id in asset_ids
             or not isinstance(asset.kind, AssetKind)
             or not isinstance(asset.hash_state, HashState)
+            or not _valid_asset(asset)
         ):
             malformed = True
             continue
@@ -203,10 +294,14 @@ def _validate_snapshot(snapshot: CatalogSnapshot) -> list[PlanDiagnostic]:
             or not _in_scope(location.normalized_relative_path, snapshot.effective_scope)
             or not isinstance(location.availability, LocationAvailability)
             or not isinstance(location.entry_type, CatalogEntryType)
+            or not _valid_location(location, snapshot.library_root.availability)
         ):
             malformed = True
         location_ids.add(location.id)
         paths[location.normalized_relative_path].append(location)
+    locations_by_id = {
+        item.id: item for item in snapshot.locations if isinstance(item, FileLocation)
+    }
     evidence_ids: set[str] = set()
     identity_owners: defaultdict[PhysicalIdentity, set[str]] = defaultdict(set)
     for evidence in snapshot.physical_evidence:
@@ -219,7 +314,7 @@ def _validate_snapshot(snapshot: CatalogSnapshot) -> list[PlanDiagnostic]:
             malformed = True
             continue
         evidence_ids.add(evidence.location_id)
-        location = next(item for item in snapshot.locations if item.id == evidence.location_id)
+        location = locations_by_id[evidence.location_id]
         if location.availability is not LocationAvailability.MISSING:
             identity_owners[evidence.identity].add(location.asset_id)
     if malformed:
@@ -333,14 +428,19 @@ def _compare(
     return tuple(changes)
 
 
-def _blocked_changes(assessment: EvidenceAssessment) -> tuple[PlannedChange, ...]:
+def _blocked_changes(
+    assessment: EvidenceAssessment, diagnostics: list[PlanDiagnostic]
+) -> tuple[PlannedChange, ...]:
     entries = assessment.accepted_entries + assessment.inconclusive_entries
+    blocking_code = next(
+        item.code for item in diagnostics if item.severity is DiagnosticSeverity.ERROR
+    )
     return tuple(
         PlannedChange(
             ChangeClassification.BLOCKED,
             entry.relative_path,
             entry,
-            diagnostics=(_error(DiagnosticCode.INVALID_ASSESSMENT, entry.relative_path),),
+            diagnostics=(_error(blocking_code, entry.relative_path),),
         )
         for entry in sorted(entries, key=lambda item: item.relative_path)
     )
@@ -406,6 +506,124 @@ def _valid_identity(identity: object) -> bool:
         and isinstance(identity.file_id, int)
         and not isinstance(identity.file_id, bool)
         and identity.file_id > 0
+    )
+
+
+def _valid_root(root: RootObservation | None) -> bool:
+    return root is None or (
+        isinstance(root.requested_path, str)
+        and bool(root.requested_path)
+        and isinstance(root.absolute_path, str)
+        and bool(root.absolute_path)
+        and (root.physical_identity is None or _valid_identity(root.physical_identity))
+    )
+
+
+def _valid_observation(entry: EntryObservation, scope: ScanScope) -> bool:
+    if (
+        not _valid_path(entry.relative_path)
+        or not _in_scope(entry.relative_path, scope)
+        or not isinstance(entry.entry_type, EntryType)
+        or not isinstance(entry.timestamps, ObservedTimestamps)
+        or not isinstance(entry.evidence_kind, EvidenceKind)
+        or (entry.physical_identity is not None and not _valid_identity(entry.physical_identity))
+    ):
+        return False
+    if entry.entry_type is EntryType.FILE:
+        if (
+            not isinstance(entry.byte_size, int)
+            or isinstance(entry.byte_size, bool)
+            or entry.byte_size < 0
+        ):
+            return False
+    elif entry.byte_size is not None:
+        return False
+    return all(
+        value is None or (isinstance(value, int) and not isinstance(value, bool))
+        for value in (
+            entry.timestamps.modified_ns,
+            entry.timestamps.accessed_ns,
+            entry.timestamps.changed_ns,
+        )
+    )
+
+
+def _valid_failure(failure: ObservationFailure, scope: ScanScope) -> bool:
+    return (
+        (failure.relative_path is None or _valid_scope_path(failure.relative_path))
+        and (
+            failure.relative_path is None
+            or failure.relative_path == scope.relative_path
+            or _in_scope(failure.relative_path, scope)
+        )
+        and isinstance(failure.operation, FailureOperation)
+        and isinstance(failure.kind, FailureKind)
+        and isinstance(failure.compromises_coverage, bool)
+        and (
+            failure.error_code is None
+            or (isinstance(failure.error_code, int) and not isinstance(failure.error_code, bool))
+        )
+    )
+
+
+def _valid_asset(asset: Asset) -> bool:
+    valid_hash = (
+        asset.sha256 is None
+        and asset.hash_state is HashState.ABSENT
+        or isinstance(asset.sha256, str)
+        and len(asset.sha256) == 64
+        and all(character in "0123456789abcdef" for character in asset.sha256)
+        and asset.hash_state is not HashState.ABSENT
+    )
+    return (
+        valid_hash
+        and (
+            asset.byte_size is None
+            or (
+                isinstance(asset.byte_size, int)
+                and not isinstance(asset.byte_size, bool)
+                and asset.byte_size >= 0
+            )
+        )
+        and (asset.media_type is None or isinstance(asset.media_type, str))
+        and asset.status in {"active", "archived"}
+        and isinstance(asset.created_at, str)
+        and bool(asset.created_at)
+    )
+
+
+def _valid_location(location: FileLocation, root_state: RootAvailability) -> bool:
+    symlink_coherent = (location.entry_type is CatalogEntryType.SYMLINK) == isinstance(
+        location.symlink_target, str
+    )
+    availability_coherent = (
+        root_state is RootAvailability.AVAILABLE
+        and location.availability is not LocationAvailability.OFFLINE
+    ) or (
+        root_state is RootAvailability.OFFLINE
+        and location.availability in {LocationAvailability.OFFLINE, LocationAvailability.MISSING}
+    )
+    return (
+        symlink_coherent
+        and availability_coherent
+        and (location.filesystem_id is None or isinstance(location.filesystem_id, str))
+        and (
+            location.observed_byte_size is None
+            or (
+                isinstance(location.observed_byte_size, int)
+                and not isinstance(location.observed_byte_size, bool)
+                and location.observed_byte_size >= 0
+            )
+        )
+        and (
+            location.observed_mtime_ns is None
+            or (
+                isinstance(location.observed_mtime_ns, int)
+                and not isinstance(location.observed_mtime_ns, bool)
+                and location.observed_mtime_ns >= 0
+            )
+        )
+        and (location.last_seen_at is None or isinstance(location.last_seen_at, str))
     )
 
 

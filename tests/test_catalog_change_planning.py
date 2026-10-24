@@ -16,6 +16,7 @@ from playmemories_photo_manager.catalog import (
 )
 from playmemories_photo_manager.catalog import EntryType as CatalogEntryType
 from playmemories_photo_manager.change_planning import (
+    CatalogChangePlan,
     CatalogSnapshot,
     ChangeClassification,
     DiagnosticCode,
@@ -323,6 +324,23 @@ def test_invalid_assessment_blocks_all_observations() -> None:
     assert plan.changes[0].classification is ChangeClassification.BLOCKED
 
 
+@pytest.mark.parametrize(
+    "assessment",
+    [
+        replace(_assessment(), coverage="complete_recursive_scope"),
+        replace(_assessment(), accepted_entries=(_entry("../escape.jpg"),)),
+        replace(_assessment(), accepted_entries=(_entry(), _entry())),
+        replace(_assessment(), root=RootObservation(ROOT_PATH, ROOT_PATH, PhysicalIdentity(-1, 1))),
+    ],
+)
+def test_forged_assessment_contracts_block_all_observations(assessment) -> None:
+    plan = plan_changes(assessment, _snapshot(), _context())
+
+    assert plan.status is PlanStatus.BLOCKED
+    assert DiagnosticCode.INVALID_ASSESSMENT in _codes(plan)
+    assert all(item.classification is ChangeClassification.BLOCKED for item in plan.changes)
+
+
 def test_duplicate_active_paths_block_snapshot() -> None:
     locations = (
         _location(),
@@ -353,6 +371,50 @@ def test_malformed_snapshot_blocks(snapshot: CatalogSnapshot) -> None:
 
     assert plan.status is PlanStatus.BLOCKED
     assert DiagnosticCode.INVALID_SNAPSHOT in _codes(plan)
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        _snapshot(assets=(replace(_asset(), sha256="bad", hash_state=HashState.VERIFIED),)),
+        _snapshot(assets=(replace(_asset(), byte_size=-1),)),
+        _snapshot(locations=(replace(_location(), observed_mtime_ns=-1),)),
+        _snapshot(
+            locations=(
+                replace(
+                    _location(),
+                    entry_type=CatalogEntryType.SYMLINK,
+                    symlink_target=None,
+                ),
+            )
+        ),
+        _snapshot(locations=(replace(_location(), availability=LocationAvailability.OFFLINE),)),
+        replace(_snapshot(), read_version=42),
+    ],
+)
+def test_snapshot_fields_incompatible_with_sqlite_contract_block(snapshot) -> None:
+    plan = plan_changes(_assessment(), snapshot, _context())
+
+    assert plan.status is PlanStatus.BLOCKED
+    assert DiagnosticCode.INVALID_SNAPSHOT in _codes(plan)
+
+
+def test_offline_library_rejects_active_present_location() -> None:
+    snapshot = _snapshot()
+    offline_root = replace(snapshot.library_root, availability=RootAvailability.OFFLINE)
+
+    plan = plan_changes(_assessment(), replace(snapshot, library_root=offline_root), _context())
+
+    assert plan.status is PlanStatus.BLOCKED
+    assert DiagnosticCode.INVALID_SNAPSHOT in _codes(plan)
+
+
+def test_missing_or_blank_read_version_is_explicitly_inconclusive() -> None:
+    for version in (None, ""):
+        plan = plan_changes(_assessment(), replace(_snapshot(), read_version=version), _context())
+
+        assert plan.status is PlanStatus.INCONCLUSIVE
+        assert DiagnosticCode.READ_VERSION_UNAVAILABLE in _codes(plan)
 
 
 def test_contradictory_physical_identity_blocks_only_observed_path() -> None:
@@ -449,3 +511,14 @@ def test_planning_is_deterministic_immutable_and_has_no_side_effect_api() -> Non
         first.status = PlanStatus.BLOCKED  # type: ignore[misc]
     assert first.authorizes_catalog_mutation is False
     assert first.permits_absence_conclusions is False
+    with pytest.raises(TypeError):
+        CatalogChangePlan(
+            first.run_id,
+            first.library_root_id,
+            first.scope,
+            first.snapshot_read_version,
+            first.status,
+            first.changes,
+            first.diagnostics,
+            authorizes_catalog_mutation=True,
+        )
