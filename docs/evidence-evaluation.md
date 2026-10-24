@@ -45,8 +45,9 @@ recursivo completo. O segundo caso não cobre descendentes. `partial`, `cancelle
 recebe cobertura `invalid`, nenhuma entrada aceita e razões de erro.
 
 A validação verifica UUID v4 canônico, timestamps UTC ordenados, raiz exigida pelo status,
-caminhos relativos canônicos, duplicidades, tamanhos coerentes com o tipo, identidade física
-utilizável, relação entre diretórios observados e enumerados e coerência entre status e falhas.
+caminhos relativos canônicos e confinados ao escopo declarado, duplicidades, tipos de contrato em
+runtime, timestamps brutos, tamanhos coerentes com o tipo, identidade física utilizável e sem
+contradições, relação entre diretórios observados e enumerados e coerência entre status e falhas.
 Uma falha parcial nunca vira arquivo ausente; raiz indisponível nunca prova ausência.
 
 ## Proveniência e limites de certeza

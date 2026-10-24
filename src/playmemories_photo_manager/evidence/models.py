@@ -34,6 +34,7 @@ class ReasonSeverity(StrEnum):
 
 
 class ReasonCode(StrEnum):
+    INVALID_CONTRACT_TYPE = "invalid_contract_type"
     INVALID_RUN_ID = "invalid_run_id"
     INVALID_TIME_RANGE = "invalid_time_range"
     TIMESTAMPS_NOT_UTC = "timestamps_not_utc"
@@ -49,6 +50,7 @@ class ReasonCode(StrEnum):
     COVERED_DIRECTORY_NOT_OBSERVED = "covered_directory_not_observed"
     DIRECTORY_NOT_COVERED = "directory_not_covered"
     COMPLETE_HAS_FAILURES = "complete_has_failures"
+    COMPLETE_HAS_NON_DIRECT_EVIDENCE = "complete_has_non_direct_evidence"
     COMPLETE_ROOT_NOT_COVERED = "complete_root_not_covered"
     PARTIAL_WITHOUT_COVERAGE_FAILURE = "partial_without_coverage_failure"
     ROOT_FAILURE_REQUIRED = "root_failure_required"
@@ -57,6 +59,11 @@ class ReasonCode(StrEnum):
     NON_FILE_HAS_SIZE = "non_file_has_size"
     INVALID_BYTE_SIZE = "invalid_byte_size"
     INVALID_PHYSICAL_IDENTITY = "invalid_physical_identity"
+    INVALID_TIMESTAMP = "invalid_timestamp"
+    PATH_OUTSIDE_SCOPE = "path_outside_scope"
+    ENTRY_PARENT_NOT_OBSERVED = "entry_parent_not_observed"
+    PHYSICAL_IDENTITY_CONTRADICTION = "physical_identity_contradiction"
+    INVALID_ENVIRONMENT = "invalid_environment"
     UNCONFIRMED_INFERENCE = "unconfirmed_inference"
     POTENTIAL_HARDLINK = "potential_hardlink"
     NON_RECURSIVE_SCOPE = "non_recursive_scope"

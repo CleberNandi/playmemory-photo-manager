@@ -204,6 +204,13 @@ def test_same_size_without_physical_identity_produces_no_identity_inference() ->
     assert DecisionImpediment.CONTENT_NOT_VERIFIED in assessment.decision_impediments
 
 
+def test_different_sizes_without_physical_identity_are_independent_observations() -> None:
+    assessment = evaluate(_result(entries=(_entry("a.jpg", size=10), _entry("b.jpg", size=20))))
+
+    assert assessment.structural_validation is StructuralValidation.VALID
+    assert assessment.inferences == ()
+
+
 def test_symlink_is_direct_evidence_without_target_or_traversal_claim() -> None:
     link = _entry("shortcut", entry_type=EntryType.SYMLINK, size=None)
 
@@ -216,11 +223,23 @@ def test_symlink_is_direct_evidence_without_target_or_traversal_claim() -> None:
 def test_unconfirmed_input_is_kept_inconclusive() -> None:
     entry = _entry(evidence_kind=EvidenceKind.UNCONFIRMED_INFERENCE)
 
-    assessment = evaluate(_result(entries=(entry,)))
+    assessment = evaluate(_result(status=ScanStatus.CANCELLED, entries=(entry,), covered=()))
 
     assert assessment.accepted_entries == ()
     assert assessment.inconclusive_entries == (entry,)
     assert ReasonCode.UNCONFIRMED_INFERENCE in {reason.code for reason in assessment.reasons}
+
+
+def test_complete_result_cannot_depend_on_non_direct_evidence() -> None:
+    entry = _entry(evidence_kind=EvidenceKind.UNCONFIRMED_INFERENCE)
+
+    assessment = evaluate(_result(entries=(entry,)))
+
+    assert assessment.structural_validation is StructuralValidation.INVALID
+    assert assessment.accepted_entries == ()
+    assert ReasonCode.COMPLETE_HAS_NON_DIRECT_EVIDENCE in {
+        reason.code for reason in assessment.reasons
+    }
 
 
 def test_permission_and_disappearance_are_failures_not_negative_observations() -> None:
@@ -288,3 +307,85 @@ def test_evaluator_has_no_filesystem_sqlite_or_catalog_dependencies() -> None:
     assert "sqlite3" not in evaluator.__dict__
     assert "Catalog" not in evaluator.__dict__
     assert "Asset" not in evaluator.__dict__
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ({"started_at": "2026-10-24"}, ReasonCode.INVALID_CONTRACT_TYPE),
+        (
+            {"entries": (replace(_entry(), timestamps=ObservedTimestamps("bad", None, None)),)},
+            ReasonCode.INVALID_TIMESTAMP,
+        ),
+        (
+            {
+                "environment": ScanEnvironment(
+                    HostPlatform.WINDOWS, ConfinementKind.DESCRIPTOR_RELATIVE
+                )
+            },
+            ReasonCode.INVALID_ENVIRONMENT,
+        ),
+    ],
+)
+def test_manually_constructed_invalid_types_are_diagnostic_not_accepted(
+    mutation: dict[str, object], reason: ReasonCode
+) -> None:
+    assessment = evaluate(replace(_result(entries=(_entry(),)), **mutation))
+
+    assert assessment.structural_validation is StructuralValidation.INVALID
+    assert assessment.accepted_entries == ()
+    assert assessment.inferences == ()
+    assert reason in {item.code for item in assessment.reasons}
+
+
+def test_complete_result_rejects_entries_outside_declared_scope() -> None:
+    result = replace(
+        _result(entries=(_entry("outside.jpg"),), covered=("album",)),
+        scope=ScanScope("album", True, False),
+    )
+
+    assessment = evaluate(result)
+
+    assert assessment.coverage is CoverageClassification.INVALID
+    assert assessment.accepted_entries == ()
+    assert ReasonCode.PATH_OUTSIDE_SCOPE in {item.code for item in assessment.reasons}
+
+
+def test_non_recursive_result_rejects_descendant_observation() -> None:
+    directory = _entry("album", entry_type=EntryType.DIRECTORY, size=None)
+    result = _result(recursive=False, entries=(directory, _entry("album/photo.jpg")))
+
+    assessment = evaluate(result)
+
+    assert assessment.coverage is CoverageClassification.INVALID
+    assert ReasonCode.PATH_OUTSIDE_SCOPE in {item.code for item in assessment.reasons}
+
+
+def test_nested_entry_requires_observed_parent_directory() -> None:
+    assessment = evaluate(_result(entries=(_entry("album/photo.jpg"),)))
+
+    assert assessment.coverage is CoverageClassification.INVALID
+    assert ReasonCode.ENTRY_PARENT_NOT_OBSERVED in {item.code for item in assessment.reasons}
+
+
+def test_conflicting_physical_identity_does_not_produce_inference() -> None:
+    identity = PhysicalIdentity(7, 42)
+    result = _result(
+        entries=(
+            _entry("first.jpg", size=10, identity=identity),
+            _entry("second.jpg", size=11, identity=identity),
+        )
+    )
+
+    assessment = evaluate(result)
+
+    assert assessment.structural_validation is StructuralValidation.INVALID
+    assert assessment.accepted_entries == ()
+    assert assessment.inferences == ()
+    assert ReasonCode.PHYSICAL_IDENTITY_CONTRADICTION in {item.code for item in assessment.reasons}
+
+
+def test_evaluation_is_deterministic() -> None:
+    result = _result(entries=(_entry(identity=PhysicalIdentity(1, 2)),))
+
+    assert evaluate(result) == evaluate(result)

@@ -9,9 +9,11 @@ import pytest
 
 from playmemories_photo_manager.catalog import initialize_database
 from playmemories_photo_manager.scanner import (
+    ConfinementKind,
     EntryType,
     EvidenceKind,
     FailureKind,
+    HostPlatform,
     ScanOptions,
     ScanStatus,
     scan,
@@ -35,6 +37,31 @@ def test_empty_root_is_complete(tmp_path: Path) -> None:
     assert result.scope.relative_path == "."
     assert result.scope.follows_links is False
     assert result.started_at <= result.finished_at
+    assert result.environment is not None
+    assert result.environment.platform is (
+        HostPlatform.WINDOWS
+        if os.name == "nt"
+        else HostPlatform.POSIX
+        if os.name == "posix"
+        else HostPlatform.OTHER
+    )
+    assert result.environment.confinement is (
+        ConfinementKind.DESCRIPTOR_RELATIVE
+        if scanner_service._descriptor_walk_supported()
+        else ConfinementKind.PATH_BASED
+    )
+
+
+def test_environment_records_path_fallback_when_descriptor_walk_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scanner_service, "_descriptor_walk_supported", lambda: False)
+
+    result = scan(tmp_path)
+
+    assert result.status is ScanStatus.COMPLETE
+    assert result.environment is not None
+    assert result.environment.confinement is ConfinementKind.PATH_BASED
 
 
 def test_files_subdirectories_unicode_and_deterministic_order(tmp_path: Path) -> None:
