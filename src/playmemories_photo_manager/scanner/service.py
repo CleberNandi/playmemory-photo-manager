@@ -9,14 +9,17 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from .models import (
+    ConfinementKind,
     EntryObservation,
     EntryType,
     FailureKind,
     FailureOperation,
+    HostPlatform,
     ObservationFailure,
     ObservedTimestamps,
     PhysicalIdentity,
     RootObservation,
+    ScanEnvironment,
     ScanOptions,
     ScanResult,
     ScanScope,
@@ -36,6 +39,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
     started_at = _now()
     run_id = str(uuid.uuid4())
     scope = ScanScope(relative_path=".", recursive=options.recursive, follows_links=False)
+    environment = _environment()
     entries: list[EntryObservation] = []
     failures: list[ObservationFailure] = []
     covered_directories: list[str] = []
@@ -53,6 +57,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
             covered_directories,
             entries,
             failures,
+            environment,
         )
 
     root_observation = RootObservation(
@@ -79,6 +84,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
             covered_directories,
             entries,
             failures,
+            environment,
         )
     if _is_reparse(root_stat) or _is_junction(absolute_root):
         failures.append(
@@ -99,6 +105,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
             covered_directories,
             entries,
             failures,
+            environment,
         )
     if not stat.S_ISDIR(root_stat.st_mode):
         failures.append(
@@ -119,6 +126,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
             covered_directories,
             entries,
             failures,
+            environment,
         )
 
     if _descriptor_walk_supported():
@@ -135,6 +143,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
                 covered_directories,
                 entries,
                 failures,
+                environment,
             )
         try:
             opened_root_stat = os.fstat(root_fd)
@@ -149,6 +158,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
                     covered_directories,
                     entries,
                     failures,
+                    environment,
                 )
             root_observation = RootObservation(
                 requested_path=os.fspath(root),
@@ -202,7 +212,23 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
         covered_directories,
         entries,
         failures,
+        environment,
     )
+
+
+def _environment() -> ScanEnvironment:
+    if os.name == "nt":
+        platform = HostPlatform.WINDOWS
+    elif os.name == "posix":
+        platform = HostPlatform.POSIX
+    else:
+        platform = HostPlatform.OTHER
+    confinement = (
+        ConfinementKind.DESCRIPTOR_RELATIVE
+        if _descriptor_walk_supported()
+        else ConfinementKind.PATH_BASED
+    )
+    return ScanEnvironment(platform=platform, confinement=confinement)
 
 
 def _descriptor_walk_supported() -> bool:
@@ -448,6 +474,7 @@ def _result(
     covered_directories: list[str],
     entries: list[EntryObservation],
     failures: list[ObservationFailure],
+    environment: ScanEnvironment,
 ) -> ScanResult:
     return ScanResult(
         run_id=run_id,
@@ -459,6 +486,7 @@ def _result(
         covered_directories=tuple(covered_directories),
         entries=tuple(entries),
         failures=tuple(failures),
+        environment=environment,
     )
 
 

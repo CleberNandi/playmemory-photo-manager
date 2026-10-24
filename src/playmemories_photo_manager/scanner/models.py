@@ -44,6 +44,17 @@ class FailureOperation(StrEnum):
     OBSERVE_ENTRY = "observe_entry"
 
 
+class HostPlatform(StrEnum):
+    POSIX = "posix"
+    WINDOWS = "windows"
+    OTHER = "other"
+
+
+class ConfinementKind(StrEnum):
+    DESCRIPTOR_RELATIVE = "descriptor_relative"
+    PATH_BASED = "path_based"
+
+
 @dataclass(frozen=True, slots=True)
 class ScanOptions:
     """Options deliberately limited to safe observation behavior."""
@@ -92,6 +103,12 @@ class RootObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class ScanEnvironment:
+    platform: HostPlatform
+    confinement: ConfinementKind
+
+
+@dataclass(frozen=True, slots=True)
 class EntryObservation:
     relative_path: str
     entry_type: EntryType
@@ -121,6 +138,7 @@ class ScanResult:
     covered_directories: tuple[str, ...]
     entries: tuple[EntryObservation, ...]
     failures: tuple[ObservationFailure, ...]
+    environment: ScanEnvironment | None = None
 
     @property
     def is_complete(self) -> bool:

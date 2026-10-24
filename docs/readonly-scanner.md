@@ -29,6 +29,8 @@ O exemplo pressupõe uma árvore sintética criada pelo chamador. A função nã
 - diretórios cuja enumeração de nomes terminou, em `covered_directories`;
 - tupla ordenada de `EntryObservation` e tupla de `ObservationFailure`;
 - `ScanStatus`, que expressa a completude global.
+- `ScanEnvironment`, que registra a família da plataforma e se a caminhada usou confinamento
+  relativo a descritores ou verificações baseadas em caminho.
 
 Cada entrada usa caminho relativo com `/` e preserva o texto fornecido pelo filesystem, sem NFKC,
 casefold ou tentativa de equivalência. O tipo é `file`, `directory`, `symlink`, `reparse_point` ou
