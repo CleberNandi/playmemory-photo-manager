@@ -53,6 +53,7 @@ class IngestionAuthorization:
     run_id: str
     library_root_id: str
     selections: tuple[CandidateSelection, ...]
+    decision_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)

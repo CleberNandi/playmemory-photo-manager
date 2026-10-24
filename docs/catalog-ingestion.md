@@ -56,16 +56,23 @@ Ela contém:
 - `run_id` e `library_root_id`;
 - referências não posicionais `(run_id, library_root_id, relative_path)`;
 - classificação de Asset e media type declarados para cada candidato selecionado.
+- fingerprint da decisão cobrindo exatamente o conjunto e as declarações selecionadas.
 
 `None` significa ausência de autorização. Uma autorização válida com seleção vazia significa a
 decisão explícita de não cadastrar candidato algum. Candidatos inexistentes, repetidos ou de outro
-plano são rejeitados. `CatalogChangePlan.authorizes_catalog_mutation` não participa da autorização.
+plano são rejeitados. Alterar ou ampliar uma autorização já emitida invalida o fingerprint da
+decisão. Esse mecanismo detecta alteração acidental ou estrutural, mas continua não sendo uma
+assinatura criptográfica contra um chamador hostil. `CatalogChangePlan.authorizes_catalog_mutation`
+não participa da autorização.
 
 Planos bloqueados, avaliações estruturalmente inválidas e mudanças inconclusivas são rejeitados.
 O schema atual não persiste identidade física da raiz. Por isso o plano preparado normalmente é
 `inconclusive` somente por `root_identity_unavailable`; a 04C.1 admite especificamente esse único
 limite quando a raiz foi escolhida explicitamente, o caminho absoluto coincide textualmente e
 todas as mudanças são determinadas. Qualquer outro warning de inconclusão impede aplicação.
+Assessments com cobertura incompleta, raiz indisponível ou confinamento não demonstrado também são
+rejeitados independentemente do status resumido pelo planner; isso exclui a caminhada path-based
+atual do Windows e resultados sem proveniência de ambiente.
 
 ## Transação e conflitos
 
@@ -82,6 +89,10 @@ antes da FileLocation causa rollback, portanto não deixa Asset órfão. Foreign
 único parcial do SQLite continuam sendo a última linha de defesa contra referências inválidas e
 caminhos ativos duplicados.
 
+Falha de commit inicia rollback. Se o próprio rollback falhar, o resultado é
+`transaction_failed`, informa que o estado transacional é incerto e o dono da conexão deve
+descartá-la ou fechá-la; nenhuma confirmação de persistência é emitida.
+
 O `read_version` é um digest determinístico do snapshot lógico usado pelo plano, não uma versão
 transacional do SQLite. Ele serve para rastreabilidade. A segurança de aplicação vem da
 revalidação sob `BEGIN IMMEDIATE` da raiz e dos caminhos selecionados; mudanças fora desses
@@ -97,6 +108,13 @@ recria. Se o caminho passou a pertencer a estado incompatível, o lote retorna c
 Essa idempotência é somente por cadastro de caminho e evidências registradas. Ela não prova que os
 bytes permaneceram estáveis. Dois caminhos, inclusive cópias byte a byte ou hardlinks, recebem
 Assets distintos nesta fundação; file-id nunca funde identidade lógica.
+
+Uma substituição física detectável no mesmo caminho ativo não cria, religa ou funde Asset nesta
+fase. Antes de reportar uma localização conhecida, o aplicador compara file-id namespaced, tamanho
+e mtime da observação com o snapshot. Divergência rejeita o proposal; igualdade continua sem provar
+estabilidade dos bytes, pois file-id pode ser reutilizado e tamanho/mtime podem coincidir.
+Um `filesystem_id` legado sem o prefixo produzido por este fluxo também bloqueia essa confirmação,
+em vez de ser interpretado com semântica inventada.
 
 ## Proveniência e TOCTOU
 

@@ -504,21 +504,29 @@ class Catalog:
             yield
             self._connection.commit()
         except sqlite3.IntegrityError as error:
-            self._rollback_preserving(error)
-            raise PersistenceError("unexpected catalog persistence failure") from error
+            rolled_back = self._rollback_preserving(error)
+            message = "unexpected catalog persistence failure"
+            if not rolled_back:
+                message += "; rollback also failed and transaction state is uncertain"
+            raise PersistenceError(message) from error
         except sqlite3.DatabaseError as error:
-            self._rollback_preserving(error)
-            raise PersistenceError("unexpected catalog persistence failure") from error
+            rolled_back = self._rollback_preserving(error)
+            message = "unexpected catalog persistence failure"
+            if not rolled_back:
+                message += "; rollback also failed and transaction state is uncertain"
+            raise PersistenceError(message) from error
         except Exception as error:
             self._rollback_preserving(error)
             raise
 
-    def _rollback_preserving(self, original_error: BaseException) -> None:
+    def _rollback_preserving(self, original_error: BaseException) -> bool:
         """Attempt rollback without replacing the operation's original failure."""
         try:
             self._connection.rollback()
         except sqlite3.DatabaseError:
             original_error.add_note("catalog rollback also failed")
+            return False
+        return True
 
     def _read(self, operation, *arguments):
         """Keep SQLite implementation errors outside the public catalog contract."""

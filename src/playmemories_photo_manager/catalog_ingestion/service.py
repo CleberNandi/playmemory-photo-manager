@@ -26,7 +26,11 @@ from playmemories_photo_manager.change_planning import (
     PlanStatus,
     plan_changes,
 )
-from playmemories_photo_manager.evidence import StructuralValidation, evaluate
+from playmemories_photo_manager.evidence import (
+    DecisionImpediment,
+    StructuralValidation,
+    evaluate,
+)
 from playmemories_photo_manager.scanner import PhysicalIdentity, ScanOptions, ScanScope, scan
 
 from .models import (
@@ -106,11 +110,14 @@ def authorize_ingestion(
             raise IngestionAuthorizationError("asset kind must be explicit")
         if selection.media_type is not None and not isinstance(selection.media_type, str):
             raise IngestionAuthorizationError("media type must be a string or null")
+    fingerprint = plan_fingerprint(plan)
+    ordered = tuple(sorted(selections, key=lambda item: item.candidate.relative_path))
     return IngestionAuthorization(
-        plan_fingerprint(plan),
+        fingerprint,
         plan.run_id,
         plan.library_root_id,
-        tuple(sorted(selections, key=lambda item: item.candidate.relative_path)),
+        ordered,
+        _decision_fingerprint(fingerprint, plan.run_id, plan.library_root_id, ordered),
     )
 
 
@@ -187,6 +194,17 @@ def apply_ingestion(
             tuple(registrations),
         )
     except CatalogStateConflictError as error:
+        if _rollback_failed(error):
+            return IngestionReport(
+                *base,
+                IngestionBatchStatus.TRANSACTION_FAILED,
+                _non_applied_items(
+                    proposal.plan,
+                    selected,
+                    IngestionItemDisposition.TRANSACTION_FAILED,
+                ),
+                f"{error}; rollback also failed and transaction state is uncertain",
+            )
         conflicts = set(error.relative_paths) or set(selected)
         return IngestionReport(
             *base,
@@ -365,6 +383,15 @@ def _proposal_error(proposal: IngestionProposal) -> str | None:
         return "assessment does not match the original scan result"
     if proposal.assessment.structural_validation is not StructuralValidation.VALID:
         return "assessment is structurally invalid"
+    unsupported_impediments = {
+        DecisionImpediment.STRUCTURALLY_INVALID,
+        DecisionImpediment.INCOMPLETE_COVERAGE,
+        DecisionImpediment.ROOT_UNAVAILABLE,
+        DecisionImpediment.CONFINEMENT_NOT_DEMONSTRATED,
+    }.intersection(proposal.assessment.decision_impediments)
+    if unsupported_impediments:
+        values = ", ".join(sorted(str(item) for item in unsupported_impediments))
+        return f"assessment has unsupported decision impediments: {values}"
     try:
         expected_plan = plan_changes(
             proposal.assessment,
@@ -375,6 +402,24 @@ def _proposal_error(proposal: IngestionProposal) -> str | None:
         return "proposal contains malformed planning inputs"
     if proposal.plan != expected_plan:
         return "plan does not match its assessment and catalog snapshot"
+    locations_by_id = {item.id: item for item in proposal.catalog_snapshot.locations}
+    for change in proposal.plan.changes:
+        if change.classification is not ChangeClassification.KNOWN_LOCATION_OBSERVED:
+            continue
+        location = locations_by_id.get(change.location_id)
+        if location is None:
+            return "known plan location is absent from the catalog snapshot"
+        observed_identity = _physical_identity_text(change.observation.physical_identity)
+        if location.filesystem_id is not None and (
+            not location.filesystem_id.startswith("scanner:")
+            or observed_identity != location.filesystem_id
+        ):
+            return f"physical identity changed at active path: {change.relative_path}"
+        if (
+            location.observed_byte_size != change.observation.byte_size
+            or location.observed_mtime_ns != change.observation.timestamps.modified_ns
+        ):
+            return f"observed attributes changed at active path: {change.relative_path}"
     if proposal.scan_result.run_id != proposal.plan.run_id:
         return "plan does not reference the original scan run"
     if proposal.scan_result.scope != proposal.plan.scope:
@@ -397,11 +442,43 @@ def _authorization_error(
         or authorization.library_root_id != plan.library_root_id
     ):
         return "authorization does not reference this concrete plan"
+    if authorization.decision_fingerprint != _decision_fingerprint(
+        fingerprint,
+        authorization.run_id,
+        authorization.library_root_id,
+        authorization.selections,
+    ):
+        return "authorization selections changed after the explicit decision"
     try:
         authorize_ingestion(plan, authorization.selections)
     except IngestionAuthorizationError as error:
         return str(error)
     return None
+
+
+def _decision_fingerprint(
+    fingerprint: str,
+    run_id: str,
+    root_id: str,
+    selections: tuple[CandidateSelection, ...],
+) -> str:
+    payload = {
+        "plan": fingerprint,
+        "run_id": run_id,
+        "root_id": root_id,
+        "selections": [
+            [
+                item.candidate.run_id,
+                item.candidate.library_root_id,
+                item.candidate.relative_path,
+                str(item.asset_kind),
+                item.media_type,
+            ]
+            for item in selections
+        ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _non_applied_items(
@@ -451,6 +528,10 @@ def _plan_items(
 
 def _physical_identity_text(identity: PhysicalIdentity | None) -> str | None:
     return None if identity is None else f"scanner:{identity.device}:{identity.file_id}"
+
+
+def _rollback_failed(error: BaseException) -> bool:
+    return any("rollback also failed" in note for note in getattr(error, "__notes__", ()))
 
 
 def _path_in_scope(path: str, scope: ScanScope) -> bool:

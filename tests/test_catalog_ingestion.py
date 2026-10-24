@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,7 +29,13 @@ from playmemories_photo_manager.catalog_ingestion import (
     plan_fingerprint,
     prepare_ingestion,
 )
-from playmemories_photo_manager.change_planning import PlanStatus
+from playmemories_photo_manager.change_planning import PlanStatus, plan_changes
+from playmemories_photo_manager.evidence import evaluate
+from playmemories_photo_manager.scanner import (
+    ConfinementKind,
+    HostPlatform,
+    ScanEnvironment,
+)
 
 JPEG_BYTES = b"\xff\xd8\xff\xe0synthetic-jpeg\xff\xd9"
 
@@ -211,7 +218,11 @@ def test_plan_inconsistent_with_its_snapshot_is_rejected(ingestion_setup) -> Non
     forged_plan = replace(proposal.plan, changes=())
     forged_proposal = replace(proposal, plan=forged_plan)
     authorization = IngestionAuthorization(
-        plan_fingerprint(forged_plan), forged_plan.run_id, forged_plan.library_root_id, ()
+        plan_fingerprint(forged_plan),
+        forged_plan.run_id,
+        forged_plan.library_root_id,
+        (),
+        "0" * 64,
     )
 
     report = apply_ingestion(catalog, forged_proposal, authorization)
@@ -322,6 +333,7 @@ def test_authorization_is_bound_to_plan_fingerprint(ingestion_setup) -> None:
                 AssetKind.PHOTO,
             ),
         ),
+        "0" * 64,
     )
     report = apply_ingestion(catalog, proposal, forged)
     assert report.status is IngestionBatchStatus.REJECTED
@@ -343,3 +355,136 @@ def test_existing_location_is_never_reported_as_new_creation(ingestion_setup) ->
     assert second_proposal.plan.changes[0].classification == "known_location_observed"
     location = catalog.list_root_locations(root.id)[0]
     assert location.availability is LocationAvailability.PRESENT
+
+
+def test_authorization_cannot_be_expanded_after_the_decision(ingestion_setup) -> None:
+    media_root, _connection, catalog, root = ingestion_setup
+    _write_jpegs(media_root, ("one.jpg", "two.jpg"))
+    proposal = prepare_ingestion(catalog, root.id, str(media_root))
+    authorization = authorize_ingestion(proposal.plan, (_selection(proposal, "one.jpg"),))
+    expanded = replace(
+        authorization,
+        selections=authorization.selections + (_selection(proposal, "two.jpg"),),
+    )
+
+    report = apply_ingestion(catalog, proposal, expanded)
+
+    assert report.status is IngestionBatchStatus.REJECTED
+    assert report.diagnostic == "authorization selections changed after the explicit decision"
+    assert catalog.list_assets() == []
+
+
+def test_path_based_or_unrecorded_confinement_cannot_be_applied(ingestion_setup) -> None:
+    media_root, _connection, catalog, root = ingestion_setup
+    _write_jpegs(media_root, ("one.jpg",))
+    original = prepare_ingestion(catalog, root.id, str(media_root))
+
+    for environment in (
+        ScanEnvironment(HostPlatform.WINDOWS, ConfinementKind.PATH_BASED),
+        None,
+    ):
+        scan_result = replace(original.scan_result, environment=environment)
+        assessment = evaluate(scan_result)
+        plan = plan_changes(assessment, original.catalog_snapshot, original.planning_context)
+        proposal = replace(original, scan_result=scan_result, assessment=assessment, plan=plan)
+        authorization = authorize_ingestion(plan, (_selection(proposal, "one.jpg"),))
+
+        report = apply_ingestion(catalog, proposal, authorization)
+
+        assert report.status is IngestionBatchStatus.REJECTED
+        assert "confinement_not_demonstrated" in report.diagnostic
+    assert catalog.list_assets() == []
+
+
+def test_commit_failure_rolls_back_the_batch(ingestion_setup) -> None:
+    media_root, connection, catalog, root = ingestion_setup
+    _write_jpegs(media_root, ("one.jpg",))
+    proposal = prepare_ingestion(catalog, root.id, str(media_root))
+
+    def deny_commit(action, argument, _arg2, _database, _trigger):
+        if action == sqlite3.SQLITE_TRANSACTION and argument == "COMMIT":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    connection.set_authorizer(deny_commit)
+    try:
+        report = apply_ingestion(catalog, proposal, _authorize_all(proposal))
+    finally:
+        connection.set_authorizer(None)
+
+    assert report.status is IngestionBatchStatus.TRANSACTION_FAILED
+    assert connection.in_transaction is False
+    assert connection.execute("SELECT count(*) FROM asset").fetchone()[0] == 0
+    assert connection.execute("SELECT count(*) FROM file_location").fetchone()[0] == 0
+
+
+def test_rollback_failure_is_explicit_and_connection_is_not_reused_silently(
+    ingestion_setup,
+) -> None:
+    media_root, connection, catalog, root = ingestion_setup
+    _write_jpegs(media_root, ("one.jpg",))
+    proposal = prepare_ingestion(catalog, root.id, str(media_root))
+
+    def deny_end_transaction(action, argument, _arg2, _database, _trigger):
+        if action == sqlite3.SQLITE_TRANSACTION and argument in {"COMMIT", "ROLLBACK"}:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    connection.set_authorizer(deny_end_transaction)
+    report = apply_ingestion(catalog, proposal, _authorize_all(proposal))
+    connection.set_authorizer(None)
+    try:
+        assert report.status is IngestionBatchStatus.TRANSACTION_FAILED
+        assert "rollback also failed" in report.diagnostic
+        assert connection.in_transaction is True
+    finally:
+        connection.rollback()
+    assert connection.execute("SELECT count(*) FROM asset").fetchone()[0] == 0
+    assert connection.execute("SELECT count(*) FROM file_location").fetchone()[0] == 0
+
+
+def test_historical_missing_path_can_be_registered_as_a_new_asset(ingestion_setup) -> None:
+    media_root, connection, catalog, root = ingestion_setup
+    _write_jpegs(media_root, ("reused.jpg",))
+    historical_asset = catalog.create_asset(AssetKind.PHOTO)
+    connection.execute(
+        """INSERT INTO file_location(
+            id, asset_id, library_root_id, normalized_relative_path, entry_type, availability
+        ) VALUES (?, ?, ?, 'reused.jpg', 'file', 'missing')""",
+        (str(uuid.uuid4()), historical_asset.id, root.id),
+    )
+    proposal = prepare_ingestion(catalog, root.id, str(media_root))
+
+    report = apply_ingestion(catalog, proposal, _authorize_all(proposal))
+
+    assert report.items[0].disposition is IngestionItemDisposition.CREATED
+    assert len(catalog.list_assets()) == 2
+    locations = catalog.list_root_locations(root.id)
+    assert {item.availability for item in locations} == {
+        LocationAvailability.MISSING,
+        LocationAvailability.PRESENT,
+    }
+
+
+def test_physical_replacement_at_an_active_path_does_not_create_or_merge_asset(
+    ingestion_setup,
+) -> None:
+    media_root, _connection, catalog, root = ingestion_setup
+    _write_jpegs(media_root, ("one.jpg",))
+    first_proposal = prepare_ingestion(catalog, root.id, str(media_root))
+    apply_ingestion(catalog, first_proposal, _authorize_all(first_proposal))
+    original_asset = catalog.list_assets()[0]
+    replacement = media_root / "replacement.tmp"
+    replacement.write_bytes(b"x" * len((media_root / "one.jpg").read_bytes()))
+    replacement.replace(media_root / "one.jpg")
+
+    second_proposal = prepare_ingestion(catalog, root.id, str(media_root))
+    report = apply_ingestion(
+        catalog, second_proposal, authorize_ingestion(second_proposal.plan, ())
+    )
+
+    assert report.status is IngestionBatchStatus.REJECTED
+    assert report.items[0].disposition is IngestionItemDisposition.BLOCKED
+    assert "changed at active path" in report.diagnostic
+    assert catalog.list_assets() == [original_asset]
+    assert len(catalog.list_root_locations(root.id)) == 1
