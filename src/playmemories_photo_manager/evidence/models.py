@@ -9,6 +9,8 @@ from playmemories_photo_manager.scanner import (
     EntryObservation,
     ObservationFailure,
     PhysicalIdentity,
+    RootObservation,
+    ScanScope,
     ScanStatus,
 )
 
@@ -117,6 +119,8 @@ class EvidenceInference:
 class EvidenceAssessment:
     run_id: str
     original_status: ScanStatus
+    root: RootObservation | None
+    scope: ScanScope
     coverage: CoverageClassification
     structural_validation: StructuralValidation
     accepted_entries: tuple[EntryObservation, ...]

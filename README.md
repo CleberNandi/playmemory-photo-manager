@@ -89,6 +89,14 @@ observações diretas, inferências inconclusivas, limitações de portabilidade
 decisões futuras. Ele não acessa filesystem ou SQLite e não altera o catálogo. Os contratos estão
 em [Avaliação de evidências do filesystem](docs/evidence-evaluation.md).
 
+## Foundation 04B.2
+
+O Change Planner puro compara evidências avaliadas com um snapshot lógico e limitado de uma raiz
+do catálogo. Ele distingue localização conhecida observada, candidato de arquivo novo, resultado
+inconclusivo e bloqueio, sem consultar SQLite ou filesystem e sem autorizar `missing`, importação,
+merge ou qualquer mutação. O contrato e as regras conservadoras estão em
+[Planejamento de mudanças do catálogo](docs/catalog-change-planning.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.

@@ -50,6 +50,8 @@ def evaluate(scan_result: ScanResult) -> EvidenceAssessment:
         return EvidenceAssessment(
             run_id=scan_result.run_id if isinstance(scan_result.run_id, str) else "",
             original_status=scan_result.status,
+            root=scan_result.root if isinstance(scan_result.root, RootObservation) else None,
+            scope=scan_result.scope,
             coverage=CoverageClassification.INVALID,
             structural_validation=StructuralValidation.INVALID,
             accepted_entries=(),
@@ -115,6 +117,8 @@ def evaluate(scan_result: ScanResult) -> EvidenceAssessment:
     return EvidenceAssessment(
         run_id=scan_result.run_id,
         original_status=scan_result.status,
+        root=scan_result.root,
+        scope=scan_result.scope,
         coverage=coverage,
         structural_validation=validation,
         accepted_entries=direct,

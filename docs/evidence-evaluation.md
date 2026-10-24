@@ -23,6 +23,7 @@ efeitos externos.
 
 `EvidenceAssessment` preserva `run_id` e `ScanStatus` da execução original e contém:
 
+- `root` e `scope`: raiz observada e escopo exato da execução original;
 - `coverage`: cobertura classificada no escopo declarado;
 - `structural_validation`: `valid` ou `invalid`;
 - `accepted_entries`: observações diretas aceitas de um resultado coerente;
@@ -90,7 +91,7 @@ uma decisão `missing`.
 
 ## Fronteira com a Foundation 04B.2
 
-Uma etapa futura poderá comparar avaliações com estado previamente conhecido e preparar planos de
-mudança. Ela deverá definir autorização, escopo de ausência, histórico e transações próprias. A
-04B.1 não consulta o catálogo, não decide persistência, não cria Assets, não registra
-FileLocations, não promove hashes e não reconcilia movimentos.
+O planejador posterior compara a avaliação com um snapshot explícito do catálogo. Preservar raiz
+e escopo permite que essa etapa confirme a correspondência sem consultar scanner, filesystem ou
+banco. A 04B.1 não decide persistência, não cria Assets, não registra FileLocations, não promove
+hashes e não reconcilia movimentos.
