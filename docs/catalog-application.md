@@ -22,6 +22,8 @@ Não há interfaces abstratas de repositório porque existe somente uma implemen
 - Album: criar, consultar, listar, adicionar/remover Asset e listar membros;
 - Tag: criar, consultar, listar, associar/remover de Asset e listar por Asset;
 - Annotation: consultar e definir separadamente rating, favorito, título e descrição.
+- Catalogação 04C.1: o aplicador usa uma operação interna e específica do catálogo para criar cada
+  par Asset e FileLocation sob uma única transação, revalidando raiz/caminhos antes da escrita.
 
 O UUID de Asset é gerado pela aplicação. Caminho, SHA-256 e `filesystem_id` nunca selecionam ou
 fundem Assets. `create_asset` aceita hash somente como `unverified`; promover um SHA-256 a
@@ -87,6 +89,10 @@ que esta fundação deliberadamente não representa. Não existe API para transi
 scanner/reconciliador deverá fornecer evidências e uma política aprovada antes dessa operação ser
 adicionada. O caminho relativo é lexical, canônico em sintaxe POSIX e não pode ser absoluto nem
 conter `..`; nenhum caminho é resolvido no filesystem.
+
+O lote especializado da 04C.1 aceita `last_seen_at = NULL`: o scanner atual não registra instante
+por entrada, e início/fim da execução não são substitutos semanticamente corretos. A proveniência
+da execução permanece no resultado tipado do fluxo, conforme `docs/catalog-ingestion.md`.
 
 ## Fora do escopo
 

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import PurePosixPath
 
 from .errors import (
+    CatalogStateConflictError,
     DuplicateAssociationError,
     InvalidInputError,
     InvalidReferenceError,
@@ -24,9 +25,12 @@ from .models import (
     AssetKind,
     EntryType,
     FileLocation,
+    FileRegistrationDisposition,
+    FileRegistrationResult,
     HashState,
     LibraryRoot,
     LocationAvailability,
+    NewFileRegistration,
     RootAvailability,
     Tag,
 )
@@ -222,6 +226,144 @@ class Catalog:
     ) -> list[FileLocation]:
         self.get_root(root_id)
         return self._read(self._repository.list_root_locations, root_id, *_page(limit, offset))
+
+    def _register_new_files_atomically(
+        self,
+        root_id: str,
+        expected_root_path: str,
+        registrations: tuple[NewFileRegistration, ...],
+    ) -> tuple[FileRegistrationResult, ...]:
+        """Create authorized file Assets and locations as one atomic catalog batch."""
+        _uuid(root_id, "root_id")
+        expected_root_path = _nonblank(expected_root_path, "expected_root_path")
+        if not isinstance(registrations, tuple) or not all(
+            isinstance(item, NewFileRegistration) for item in registrations
+        ):
+            raise InvalidInputError("registrations must be a tuple of NewFileRegistration")
+        paths: set[str] = set()
+        normalized: list[NewFileRegistration] = []
+        for registration in registrations:
+            path = _relative_path(registration.relative_path)
+            if path in paths:
+                raise InvalidInputError("registration paths must be unique")
+            paths.add(path)
+            kind = _enum(AssetKind, registration.kind, "kind")
+            if (
+                isinstance(registration.byte_size, bool)
+                or not isinstance(registration.byte_size, int)
+                or registration.byte_size < 0
+            ):
+                raise InvalidInputError("byte_size must be a non-negative integer")
+            if registration.media_type is not None and not isinstance(registration.media_type, str):
+                raise InvalidInputError("media_type must be a string or null")
+            if registration.filesystem_id is not None and not isinstance(
+                registration.filesystem_id, str
+            ):
+                raise InvalidInputError("filesystem_id must be a string or null")
+            if registration.observed_mtime_ns is not None and (
+                isinstance(registration.observed_mtime_ns, bool)
+                or not isinstance(registration.observed_mtime_ns, int)
+                or registration.observed_mtime_ns < 0
+            ):
+                raise InvalidInputError("observed_mtime_ns must be a non-negative integer or null")
+            normalized.append(
+                NewFileRegistration(
+                    path,
+                    kind,
+                    registration.byte_size,
+                    registration.media_type,
+                    registration.filesystem_id,
+                    registration.observed_mtime_ns,
+                )
+            )
+
+        results: list[FileRegistrationResult] = []
+        with self._write():
+            root = self._repository.get_root(root_id)
+            if root is None:
+                raise InvalidReferenceError("library root does not exist")
+            if root.normalized_path != expected_root_path:
+                raise CatalogStateConflictError(
+                    "library root path changed after planning", relative_paths=()
+                )
+            if root.availability is not RootAvailability.AVAILABLE:
+                raise CatalogStateConflictError(
+                    "library root is no longer available", relative_paths=()
+                )
+
+            existing_by_path: dict[str, FileLocation] = {}
+            conflicting_paths: list[str] = []
+            for registration in normalized:
+                existing = self._repository.get_active_location_by_path(
+                    root_id, registration.relative_path
+                )
+                if existing is None:
+                    continue
+                existing_asset = self._repository.get_asset(existing.asset_id)
+                if existing_asset is None:  # pragma: no cover - protected by the foreign key
+                    raise PersistenceError("location references a missing asset")
+                if not _same_observed_file(existing_asset, existing, registration):
+                    conflicting_paths.append(registration.relative_path)
+                else:
+                    existing_by_path[registration.relative_path] = existing
+            if conflicting_paths:
+                raise CatalogStateConflictError(
+                    "catalog paths changed after planning",
+                    relative_paths=tuple(sorted(conflicting_paths)),
+                )
+
+            for registration in normalized:
+                existing = existing_by_path.get(registration.relative_path)
+                if existing is not None:
+                    asset = self._repository.get_asset(existing.asset_id)
+                    if asset is None:  # pragma: no cover - protected by the foreign key
+                        raise PersistenceError("location references a missing asset")
+                    results.append(
+                        FileRegistrationResult(
+                            FileRegistrationDisposition.ALREADY_EXISTS, asset, existing
+                        )
+                    )
+                    continue
+                asset_id = str(uuid.uuid4())
+                location_id = str(uuid.uuid4())
+                self._repository.insert_asset(
+                    asset_id,
+                    registration.kind,
+                    None,
+                    HashState.ABSENT,
+                    registration.byte_size,
+                    registration.media_type,
+                )
+                location = FileLocation(
+                    id=location_id,
+                    asset_id=asset_id,
+                    library_root_id=root_id,
+                    normalized_relative_path=registration.relative_path,
+                    entry_type=EntryType.FILE,
+                    symlink_target=None,
+                    filesystem_id=registration.filesystem_id,
+                    observed_byte_size=registration.byte_size,
+                    observed_mtime_ns=registration.observed_mtime_ns,
+                    availability=LocationAvailability.PRESENT,
+                    last_seen_at=None,
+                )
+                try:
+                    self._repository.insert_location(location)
+                except sqlite3.IntegrityError as error:
+                    raise CatalogStateConflictError(
+                        "active path changed during registration",
+                        relative_paths=(registration.relative_path,),
+                    ) from error
+                asset = self._repository.get_asset(asset_id)
+                persisted_location = self._repository.get_location(location_id)
+                if asset is None or persisted_location is None:  # pragma: no cover
+                    raise PersistenceError("new file registration did not persist")
+                results.append(
+                    FileRegistrationResult(
+                        FileRegistrationDisposition.CREATED, asset, persisted_location
+                    )
+                )
+        return tuple(results)
 
     def create_album(self, name: str, *, description: str | None = None) -> Album:
         name = _nonblank(name, "name")
@@ -424,3 +566,19 @@ def _page(limit: int, offset: int) -> tuple[int, int]:
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
         raise InvalidInputError("offset must be a non-negative integer")
     return limit, offset
+
+
+def _same_observed_file(
+    asset: Asset, existing: FileLocation, registration: NewFileRegistration
+) -> bool:
+    return (
+        asset.kind is registration.kind
+        and asset.sha256 is None
+        and asset.hash_state is HashState.ABSENT
+        and asset.byte_size == registration.byte_size
+        and asset.media_type == registration.media_type
+        and existing.entry_type is EntryType.FILE
+        and existing.observed_byte_size == registration.byte_size
+        and existing.observed_mtime_ns == registration.observed_mtime_ns
+        and existing.filesystem_id == registration.filesystem_id
+    )

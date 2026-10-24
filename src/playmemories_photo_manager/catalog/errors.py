@@ -31,3 +31,11 @@ class InvariantViolationError(CatalogError):
 
 class PersistenceError(CatalogError):
     """SQLite failed in a way not represented by a more specific error."""
+
+
+class CatalogStateConflictError(CatalogError):
+    """Current catalog state conflicts with a previously planned registration."""
+
+    def __init__(self, message: str, *, relative_paths: tuple[str, ...]) -> None:
+        super().__init__(message)
+        self.relative_paths = relative_paths

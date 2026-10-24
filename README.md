@@ -97,6 +97,14 @@ inconclusivo e bloqueio, sem consultar SQLite ou filesystem e sem autorizar `mis
 merge ou qualquer mutação. O contrato e as regras conservadoras estão em
 [Planejamento de mudanças do catálogo](docs/catalog-change-planning.md).
 
+## Foundation 04C.1
+
+O primeiro fluxo vertical executa scanner, avaliação e planejamento antes de aceitar uma seleção
+explícita de candidatos. O lote autorizado cria Assets e FileLocations em uma única transação,
+revalida raiz e caminhos, evita duplicidade em reexecuções e nunca infere `missing`, hash ou merge.
+Contratos, autorização, conflitos, proveniência e limites de TOCTOU estão em
+[Catalogação controlada](docs/catalog-ingestion.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.

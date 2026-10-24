@@ -113,6 +113,15 @@ class CatalogRepository:
         ).fetchone()
         return _location(row) if row else None
 
+    def get_active_location_by_path(self, root_id: str, relative_path: str) -> FileLocation | None:
+        row = self.connection.execute(
+            """SELECT * FROM file_location
+            WHERE library_root_id = ? AND normalized_relative_path = ?
+                AND availability <> 'missing'""",
+            (root_id, relative_path),
+        ).fetchone()
+        return _location(row) if row else None
+
     def list_asset_locations(self, asset_id: str, limit: int, offset: int) -> list[FileLocation]:
         rows = self.connection.execute(
             """SELECT * FROM file_location WHERE asset_id = ?

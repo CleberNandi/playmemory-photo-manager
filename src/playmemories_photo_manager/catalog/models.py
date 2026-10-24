@@ -34,6 +34,11 @@ class EntryType(StrEnum):
     SYMLINK = "symlink"
 
 
+class FileRegistrationDisposition(StrEnum):
+    CREATED = "created"
+    ALREADY_EXISTS = "already_exists"
+
+
 @dataclass(frozen=True, slots=True)
 class Asset:
     id: str
@@ -69,6 +74,23 @@ class FileLocation:
     observed_mtime_ns: int | None
     availability: LocationAvailability
     last_seen_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class NewFileRegistration:
+    relative_path: str
+    kind: AssetKind
+    byte_size: int
+    media_type: str | None
+    filesystem_id: str | None
+    observed_mtime_ns: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class FileRegistrationResult:
+    disposition: FileRegistrationDisposition
+    asset: Asset
+    location: FileLocation
 
 
 @dataclass(frozen=True, slots=True)
