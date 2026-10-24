@@ -121,14 +121,66 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
             failures,
         )
 
-    cancelled, root_failed = _walk(
-        absolute_root,
-        PurePosixPath("."),
-        options,
-        covered_directories,
-        entries,
-        failures,
-    )
+    if _descriptor_walk_supported():
+        try:
+            root_fd = _open_directory(absolute_root)
+        except OSError as error:
+            failures.append(_failure(None, FailureOperation.OBSERVE_ROOT, error))
+            return _result(
+                run_id,
+                root_observation,
+                scope,
+                started_at,
+                ScanStatus.ROOT_UNAVAILABLE,
+                covered_directories,
+                entries,
+                failures,
+            )
+        try:
+            opened_root_stat = os.fstat(root_fd)
+            if not _same_object(root_stat, opened_root_stat):
+                failures.append(_changed_failure(None, FailureOperation.OBSERVE_ROOT))
+                return _result(
+                    run_id,
+                    root_observation,
+                    scope,
+                    started_at,
+                    ScanStatus.ROOT_UNAVAILABLE,
+                    covered_directories,
+                    entries,
+                    failures,
+                )
+            root_observation = RootObservation(
+                requested_path=os.fspath(root),
+                absolute_path=os.fspath(absolute_root),
+                physical_identity=_physical_identity(opened_root_stat),
+            )
+            cancelled, root_failed = _walk_fd(
+                root_fd,
+                PurePosixPath("."),
+                options,
+                covered_directories,
+                entries,
+                failures,
+            )
+            try:
+                final_root_stat = os.lstat(absolute_root)
+            except OSError as error:
+                failures.append(_failure(None, FailureOperation.OBSERVE_ROOT, error))
+            else:
+                if not _same_object(opened_root_stat, final_root_stat):
+                    failures.append(_changed_failure(None, FailureOperation.OBSERVE_ROOT))
+        finally:
+            os.close(root_fd)
+    else:
+        cancelled, root_failed = _walk(
+            absolute_root,
+            PurePosixPath("."),
+            options,
+            covered_directories,
+            entries,
+            failures,
+        )
     if cancelled:
         status = ScanStatus.CANCELLED
     elif root_failed:
@@ -151,6 +203,91 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
         entries,
         failures,
     )
+
+
+def _descriptor_walk_supported() -> bool:
+    return (
+        os.name != "nt"
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and os.scandir in os.supports_fd
+        and os.open in os.supports_dir_fd
+    )
+
+
+def _open_directory(path: str | os.PathLike[str], *, dir_fd: int | None = None) -> int:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    return os.open(path, flags, dir_fd=dir_fd)
+
+
+def _walk_fd(
+    directory_fd: int,
+    relative_directory: PurePosixPath,
+    options: ScanOptions,
+    covered_directories: list[str],
+    observations: list[EntryObservation],
+    failures: list[ObservationFailure],
+) -> tuple[bool, bool]:
+    if _cancelled(options):
+        return True, False
+    try:
+        with os.scandir(directory_fd) as iterator:
+            children = sorted(iterator, key=lambda item: item.name)
+    except OSError as error:
+        failures.append(
+            _failure(_display_path(relative_directory), FailureOperation.ENUMERATE_DIRECTORY, error)
+        )
+        return False, relative_directory == PurePosixPath(".")
+    covered_directories.append(_display_path(relative_directory))
+
+    for child in children:
+        if _cancelled(options):
+            return True, False
+        relative_path = relative_directory / child.name
+        try:
+            observed_stat = _stat_entry(child)
+            entry_type = _entry_type(child, observed_stat)
+        except OSError as error:
+            failures.append(
+                _failure(_display_path(relative_path), FailureOperation.OBSERVE_ENTRY, error)
+            )
+            continue
+        observations.append(_observation(relative_path, entry_type, observed_stat))
+        if entry_type is EntryType.DIRECTORY and options.recursive:
+            try:
+                child_fd = _open_directory(child.name, dir_fd=directory_fd)
+            except OSError as error:
+                failures.append(
+                    _failure(
+                        _display_path(relative_path),
+                        FailureOperation.ENUMERATE_DIRECTORY,
+                        error,
+                    )
+                )
+                continue
+            try:
+                if not _same_object(observed_stat, os.fstat(child_fd)):
+                    failures.append(
+                        _changed_failure(
+                            _display_path(relative_path), FailureOperation.ENUMERATE_DIRECTORY
+                        )
+                    )
+                    continue
+                cancelled, _ = _walk_fd(
+                    child_fd,
+                    relative_path,
+                    options,
+                    covered_directories,
+                    observations,
+                    failures,
+                )
+            finally:
+                os.close(child_fd)
+            if cancelled:
+                return True, False
+    if _cancelled(options):
+        return True, False
+    return False, False
 
 
 def _walk(
@@ -197,6 +334,8 @@ def _walk(
             )
             if cancelled:
                 return True, False
+    if _cancelled(options):
+        return True, False
     return False, False
 
 
@@ -261,6 +400,8 @@ def _failure(
         kind = FailureKind.PERMISSION_DENIED
     elif isinstance(error, FileNotFoundError):
         kind = FailureKind.DISAPPEARED
+    elif isinstance(error, NotADirectoryError):
+        kind = FailureKind.NOT_DIRECTORY
     else:
         kind = FailureKind.IO_ERROR
     return ObservationFailure(
@@ -269,6 +410,24 @@ def _failure(
         kind=kind,
         compromises_coverage=True,
         error_code=error.errno,
+    )
+
+
+def _changed_failure(relative_path: str | None, operation: FailureOperation) -> ObservationFailure:
+    return ObservationFailure(
+        relative_path=relative_path,
+        operation=operation,
+        kind=FailureKind.DISAPPEARED,
+        compromises_coverage=True,
+        error_code=None,
+    )
+
+
+def _same_object(first: os.stat_result, second: os.stat_result) -> bool:
+    return (first.st_dev, first.st_ino, stat.S_IFMT(first.st_mode)) == (
+        second.st_dev,
+        second.st_ino,
+        stat.S_IFMT(second.st_mode),
     )
 
 

@@ -149,6 +149,91 @@ def test_symlink_cannot_be_used_as_scan_root(tmp_path: Path) -> None:
     assert result.entries == ()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="descriptor-relative confinement is POSIX-only")
+def test_directory_replaced_by_external_symlink_is_not_traversed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child = tmp_path / "child"
+    child.mkdir()
+    _write(child / "inside.jpg")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-swap"
+    outside.mkdir()
+    _write(outside / "outside.jpg")
+    original_open = scanner_service._open_directory
+    swapped = False
+
+    def swap_then_open(path: str | os.PathLike[str], *, dir_fd: int | None = None) -> int:
+        nonlocal swapped
+        if os.fspath(path) == "child" and dir_fd is not None and not swapped:
+            swapped = True
+            child.rename(tmp_path / "original-child")
+            child.symlink_to(outside, target_is_directory=True)
+        return original_open(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(scanner_service, "_open_directory", swap_then_open)
+    result = scan(tmp_path)
+
+    assert result.status is ScanStatus.PARTIAL
+    assert "child/outside.jpg" not in {entry.relative_path for entry in result.entries}
+    assert any(failure.relative_path == "child" for failure in result.failures)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="descriptor-relative confinement is POSIX-only")
+def test_root_replaced_by_symlink_after_lstat_is_not_traversed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _write(outside / "outside.jpg")
+    original_lstat = scanner_service.os.lstat
+    swapped = False
+
+    def stat_then_swap(path: str | os.PathLike[str]) -> os.stat_result:
+        nonlocal swapped
+        observed = original_lstat(path)
+        if Path(path) == root and not swapped:
+            swapped = True
+            root.rename(tmp_path / "original-root")
+            root.symlink_to(outside, target_is_directory=True)
+        return observed
+
+    monkeypatch.setattr(scanner_service.os, "lstat", stat_then_swap)
+    result = scan(root)
+
+    assert result.status is ScanStatus.ROOT_UNAVAILABLE
+    assert result.entries == ()
+    assert result.failures
+
+
+@pytest.mark.skipif(os.name == "nt", reason="descriptor-relative confinement is POSIX-only")
+def test_root_path_change_during_enumeration_prevents_complete_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    _write(root / "photo.jpg")
+    original_stat = scanner_service._stat_entry
+    changed = False
+
+    def stat_then_replace_root(entry: os.DirEntry[str]) -> os.stat_result:
+        nonlocal changed
+        observed = original_stat(entry)
+        if not changed:
+            changed = True
+            root.rename(tmp_path / "original-root")
+            root.mkdir()
+        return observed
+
+    monkeypatch.setattr(scanner_service, "_stat_entry", stat_then_replace_root)
+    result = scan(root)
+
+    assert result.status is ScanStatus.PARTIAL
+    assert [entry.relative_path for entry in result.entries] == ["photo.jpg"]
+    assert any(failure.relative_path is None for failure in result.failures)
+
+
 @pytest.mark.parametrize("kind", ["missing", "file"])
 def test_unavailable_or_invalid_root_is_structured(tmp_path: Path, kind: str) -> None:
     root = tmp_path / kind
@@ -250,6 +335,21 @@ def test_cancellation_preserves_observations_without_claiming_completion(tmp_pat
     assert result.status is ScanStatus.CANCELLED
     assert [entry.relative_path for entry in result.entries] == ["a.jpg"]
     assert result.is_complete is False
+
+
+def test_cancellation_after_empty_directory_collection_is_honored(tmp_path: Path) -> None:
+    checks = 0
+
+    def cancellation_requested() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 2
+
+    result = scan(tmp_path, ScanOptions(cancellation_requested=cancellation_requested))
+
+    assert result.status is ScanStatus.CANCELLED
+    assert result.covered_directories == (".",)
+    assert result.entries == ()
 
 
 def test_scan_does_not_change_contents_or_create_files(tmp_path: Path) -> None:

@@ -60,6 +60,12 @@ são convertidos em diretório vazio. O resultado não afirma que qualquer camin
 - Não abre conteúdo, calcula hash, cria sidecar/thumbnail, muda permissões, move ou exclui entrada.
 - Usa `follow_symlinks=False`; symlinks, junctions e reparse points observados não são percorridos.
 - Uma raiz que seja symlink é rejeitada, impedindo redirecionamento implícito do escopo.
+- Em hosts POSIX que oferecem `dir_fd`, `O_DIRECTORY` e `O_NOFOLLOW`, a raiz e cada subdiretório
+  são abertos sem seguir links, e a recursão usa nomes relativos ao descritor do diretório pai.
+  A identidade observada antes da abertura é conferida contra o descritor aberto. Assim, uma troca
+  concorrente por symlink não redireciona a enumeração para fora da raiz; ela produz falha de
+  cobertura. A identidade associada ao caminho da raiz também é conferida ao final para detectar
+  substituições observáveis durante a enumeração.
 - Não há dependência ou chamada para a camada de catálogo.
 - A ordem é determinística pela ordenação textual dos nomes retornados pelo host.
 
@@ -77,6 +83,13 @@ Cada resultado é um conjunto de observações em instantes próximos, não um s
 entrada pode mudar entre `scandir` e `stat`, ou imediatamente após a observação. Desaparecimento
 detectado torna o resultado parcial; alterações não detectáveis nesse intervalo continuam sendo
 uma limitação. A 04A não abre descritores de conteúdo nem promete estabilidade para hashing.
+
+No Windows, Python não oferece neste contrato as mesmas primitivas POSIX de caminhada relativa a
+descritores. A implementação rejeita links e reparse points que observa, mas verificações por
+caminho não eliminam uma troca concorrente entre a classificação e a enumeração. Portanto, no
+Windows a 04A só é suportada para árvores que não sejam modificadas concorrentemente; seus
+resultados não devem fundamentar ausência quando essa precondição não puder ser assegurada. Não há
+promessa de confinamento equivalente ao POSIX contra um agente local concorrente.
 
 ## Integração futura com 04B
 
