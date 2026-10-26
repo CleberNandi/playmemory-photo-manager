@@ -114,6 +114,13 @@ como alternativa técnica. A decisão e os critérios estão em
 [ADR-004](docs/adr/ADR-004-product-architecture-and-desktop-shell.md) e no [documento de
 convergência](docs/product-architecture-convergence.md).
 
+## MVP Preview 02
+
+A API Python read-only da galeria oferece paginação keyset, detalhes de Asset com proveniência e
+um store POSIX confinado para thumbnails sintéticas pregeradas. Não há HTTP, decoder, frontend ou
+leitura de originais. Contratos, exemplos, plano SQLite e limites de segurança estão em
+[Gallery read model](docs/gallery-read-model.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.
