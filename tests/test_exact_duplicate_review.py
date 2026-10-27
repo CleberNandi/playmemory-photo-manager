@@ -130,6 +130,41 @@ def test_changed_bytes_mark_decision_stale_without_deleting_it(database, tmp_pat
     )
 
 
+def test_stale_decision_can_be_queried_repeatedly_without_writes(database, tmp_path) -> None:
+    digest, members = _group(database, tmp_path)
+    decision = save_exact_duplicate_decision(
+        database, sha256=digest, keep_location_id=members[0][1], reason="Explicit choice"
+    )
+    members[1][2].write_bytes(b"changed")
+    generate_exact_duplicate_plan(database)
+    stale_at = database.execute(
+        "SELECT stale_at FROM exact_duplicate_decision WHERE id = ?", (decision.id,)
+    ).fetchone()[0]
+    database_path = database.execute("PRAGMA database_list").fetchone()[2]
+    read_only = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+    read_only.row_factory = sqlite3.Row
+    statements: list[str] = []
+    read_only.set_trace_callback(statements.append)
+    try:
+        first = generate_exact_duplicate_plan(read_only)
+        second = generate_exact_duplicate_plan(read_only)
+    finally:
+        read_only.close()
+
+    assert first == second
+    assert first.groups[0].state is DuplicatePlanState.STALE
+    assert (
+        database.execute(
+            "SELECT stale_at FROM exact_duplicate_decision WHERE id = ?", (decision.id,)
+        ).fetchone()[0]
+        == stale_at
+    )
+    assert not any(
+        statement.lstrip().upper().startswith(("BEGIN", "UPDATE", "COMMIT", "ROLLBACK"))
+        for statement in statements
+    )
+
+
 def test_new_decision_preserves_stale_history(database, tmp_path) -> None:
     digest, members = _group(database, tmp_path)
     first = save_exact_duplicate_decision(
@@ -143,6 +178,29 @@ def test_new_decision_preserves_stale_history(database, tmp_path) -> None:
         "SELECT id, status FROM exact_duplicate_decision ORDER BY created_at, id"
     ).fetchall()
     assert {tuple(row) for row in rows} == {(first.id, "stale"), (second.id, "current")}
+
+
+def test_plan_loads_members_only_for_selected_decision(database, tmp_path) -> None:
+    digest, members = _group(database, tmp_path)
+    save_exact_duplicate_decision(
+        database, sha256=digest, keep_location_id=members[0][1], reason="First"
+    )
+    save_exact_duplicate_decision(
+        database, sha256=digest, keep_location_id=members[1][1], reason="Reconsidered"
+    )
+    statements: list[str] = []
+    database.set_trace_callback(statements.append)
+    try:
+        generate_exact_duplicate_plan(database)
+    finally:
+        database.set_trace_callback(None)
+
+    member_queries = [
+        statement
+        for statement in statements
+        if "FROM exact_duplicate_decision_member WHERE decision_id" in statement
+    ]
+    assert len(member_queries) == 1
 
 
 def test_catalog_dependencies_protect_candidate_and_block_plan(database, tmp_path) -> None:

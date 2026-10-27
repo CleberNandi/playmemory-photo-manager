@@ -114,7 +114,8 @@ def generate_exact_duplicate_plan(connection: sqlite3.Connection) -> ExactDuplic
             or decision.evidence_fingerprint != evidence_fingerprint(group.members)
             or decision.keep_location_id not in {member.location_id for member in group.members}
         ):
-            stale_ids.append(decision.id)
+            if decision.status is DuplicateDecisionStatus.CURRENT:
+                stale_ids.append(decision.id)
             planned.append(_stale_group(decision))
             continue
         if group is None:  # pragma: no cover - only possible for an inconsistent query snapshot
@@ -168,18 +169,17 @@ def _review_decisions(
     decisions: dict[tuple[str, int], ExactDuplicateDecision] = {}
     for row in rows:
         key = (row["sha256"], row["byte_size"])
-        decisions.setdefault(
-            key,
-            ExactDuplicateDecision(
-                id=row["id"],
-                sha256=row["sha256"],
-                byte_size=row["byte_size"],
-                keep_location_id=row["keep_location_id"],
-                reason=row["reason"],
-                evidence_fingerprint=row["evidence_fingerprint"],
-                status=DuplicateDecisionStatus(row["status"]),
-                members=_decision_members(connection, row["id"]),
-            ),
+        if key in decisions:
+            continue
+        decisions[key] = ExactDuplicateDecision(
+            id=row["id"],
+            sha256=row["sha256"],
+            byte_size=row["byte_size"],
+            keep_location_id=row["keep_location_id"],
+            reason=row["reason"],
+            evidence_fingerprint=row["evidence_fingerprint"],
+            status=DuplicateDecisionStatus(row["status"]),
+            members=_decision_members(connection, row["id"]),
         )
     return decisions
 
