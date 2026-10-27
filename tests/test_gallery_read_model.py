@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import sqlite3
 import uuid
 from pathlib import Path
@@ -70,14 +71,24 @@ def _location(
     *,
     relative_path: str | None = None,
     availability: str = "present",
+    entry_type: str = "file",
 ) -> str:
     identifier = _id(number)
     database.execute(
         """INSERT INTO file_location(
-            id, asset_id, library_root_id, normalized_relative_path, availability,
+            id, asset_id, library_root_id, normalized_relative_path, entry_type, symlink_target,
+            availability,
             observed_byte_size, observed_mtime_ns, last_seen_at
-        ) VALUES (?, ?, ?, ?, ?, 12, 42, '2026-01-02T00:00:00Z')""",
-        (identifier, asset_id, root_id, relative_path or f"folder/{number}.jpg", availability),
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 12, 42, '2026-01-02T00:00:00Z')""",
+        (
+            identifier,
+            asset_id,
+            root_id,
+            relative_path or f"folder/{number}.jpg",
+            entry_type,
+            "target.jpg" if entry_type == "symlink" else None,
+            availability,
+        ),
     )
     return identifier
 
@@ -245,6 +256,58 @@ def test_empty_metadata_means_not_extracted_and_does_not_invent_capture(
     assert details.capture is None
 
 
+def test_capture_without_timezone_remains_floating_local_time(
+    database: sqlite3.Connection,
+) -> None:
+    asset_id = _asset(database, 1)
+    database.execute(
+        """UPDATE asset SET captured_local_value = '2020-01-02T03:04:05',
+            captured_timezone_state = NULL, captured_precision = 'second',
+            captured_source_kind = 'manual', captured_selection_reason = 'user_supplied'
+            WHERE id = ?""",
+        (asset_id,),
+    )
+
+    details = GalleryQueries(database).get_asset_details(asset_id)
+
+    assert details.capture is not None
+    assert details.capture.local_value == "2020-01-02T03:04:05"
+    assert details.capture.timezone_state is None
+    assert details.capture.offset_minutes is None
+    assert details.capture.timezone_name is None
+
+
+def test_present_symlink_is_not_an_available_asset(database: sqlite3.Connection) -> None:
+    asset_id = _asset(database, 1)
+    root_id = _root(database, 101)
+    location_id = _location(database, 201, asset_id, root_id, entry_type="symlink")
+    queries = GalleryQueries(database)
+
+    item = queries.list_assets().items[0]
+    details = queries.get_asset_details(asset_id)
+
+    assert item.availability is AssetAvailability.UNAVAILABLE
+    assert details.availability is AssetAvailability.UNAVAILABLE
+    assert item.representative_location.id == location_id
+
+
+def test_regular_file_wins_over_symlink_and_keeps_asset_available(
+    database: sqlite3.Connection,
+) -> None:
+    asset_id = _asset(database, 1)
+    root_id = _root(database, 101)
+    _location(database, 201, asset_id, root_id, entry_type="symlink")
+    regular_id = _location(database, 202, asset_id, root_id)
+    queries = GalleryQueries(database)
+
+    item = queries.list_assets().items[0]
+    details = queries.get_asset_details(asset_id)
+
+    assert item.availability is AssetAvailability.AVAILABLE
+    assert details.availability is AssetAvailability.AVAILABLE
+    assert item.representative_location.id == regular_id
+
+
 def test_unknown_asset_details(database: sqlite3.Connection) -> None:
     with pytest.raises(AssetNotFoundError, match="asset not found"):
         GalleryQueries(database).get_asset_details(_id(999))
@@ -355,6 +418,16 @@ def test_thumbnail_rejects_symlink(tmp_path: Path) -> None:
     store = SyntheticThumbnailStore(cache, (_thumbnail_fixture(_id(1), _id(2)),))
 
     with pytest.raises(UnsafeThumbnailPathError):
+        store.open(_id(2))
+
+
+def test_thumbnail_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    os.mkfifo(cache / "fixture.png")
+    store = SyntheticThumbnailStore(cache, (_thumbnail_fixture(_id(1), _id(2)),))
+
+    with pytest.raises(UnsafeThumbnailPathError, match="not a regular file"):
         store.open(_id(2))
 
 

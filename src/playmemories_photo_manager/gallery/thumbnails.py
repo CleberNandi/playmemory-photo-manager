@@ -71,7 +71,7 @@ class SyntheticThumbnailStore:
         if fixture is None:
             raise ThumbnailNotFoundError("thumbnail not found")
         root_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        file_flags = os.O_RDONLY | os.O_NOFOLLOW
+        file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
         root_fd = -1
         file_fd = -1
         try:

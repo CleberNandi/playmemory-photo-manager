@@ -76,6 +76,7 @@ class GalleryQueries:
                             SELECT 1 FROM file_location fl
                             JOIN library_root lr ON lr.id = fl.library_root_id
                             WHERE fl.asset_id = a.id
+                              AND fl.entry_type = 'file'
                               AND fl.availability = 'present'
                               AND lr.availability = 'available'
                         ) THEN 'available'
@@ -237,6 +238,7 @@ class GalleryQueries:
                     SELECT 1 FROM file_location fl
                     JOIN library_root lr ON lr.id = fl.library_root_id
                     WHERE fl.asset_id = ? AND fl.availability = 'present'
+                      AND fl.entry_type = 'file'
                       AND lr.availability = 'available'
                 ) THEN 'available'
                 WHEN EXISTS (
@@ -396,23 +398,17 @@ def _location_rank(location: LocationSummary) -> tuple[int, str, str, str]:
     return rank, location.library_root_id, location.relative_path, location.id
 
 
-def _aggregate_availability(locations: tuple[LocationSummary, ...]) -> AssetAvailability:
-    if any(_location_rank(location)[0] == 0 for location in locations):
-        return AssetAvailability.AVAILABLE
-    if any(_location_rank(location)[0] == 1 for location in locations):
-        return AssetAvailability.OFFLINE
-    if locations:
-        return AssetAvailability.UNAVAILABLE
-    return AssetAvailability.NO_LOCATION
-
-
 def _capture(row: sqlite3.Row) -> CaptureProjection | None:
     if row["captured_local_value"] is None:
         return None
     return CaptureProjection(
         local_value=row["captured_local_value"],
         precision=row["captured_precision"],
-        timezone_state=TimezoneState(row["captured_timezone_state"]),
+        timezone_state=(
+            TimezoneState(row["captured_timezone_state"])
+            if row["captured_timezone_state"] is not None
+            else None
+        ),
         offset_minutes=row["captured_offset_minutes"],
         timezone_name=row["captured_timezone_name"],
         source_kind=row["captured_source_kind"],

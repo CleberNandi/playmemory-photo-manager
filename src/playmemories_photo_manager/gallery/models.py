@@ -52,7 +52,7 @@ class GalleryQuery:
 class CaptureProjection:
     local_value: str
     precision: str
-    timezone_state: TimezoneState
+    timezone_state: TimezoneState | None
     offset_minutes: int | None
     timezone_name: str | None
     source_kind: str
