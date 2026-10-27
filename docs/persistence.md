@@ -24,6 +24,8 @@ reconcilia localizações. Caminhos, datas e hashes são fatos fornecidos por fu
 | `user_annotation` | PK/FK `asset_id`; uma anotação corrente por Asset | cascata com Asset |
 | `metadata` | UUID; fato bruto/interpretado, origem, extrator e semântica temporal | cascata com Asset, salvo se selecionada pela projeção (`RESTRICT`) |
 | `thumbnail` | UUID; variante, dimensões, versão, fingerprint e caminho de cache | cascata com Asset; não contém BLOB |
+| `exact_duplicate_decision` | UUID; escolha, motivo, fingerprint e estado current/stale | referências `RESTRICT`; histórico não é apagado |
+| `exact_duplicate_decision_member` | snapshot dos Assets, FileLocations e evidência física | pertence à decisão; referências `RESTRICT` |
 | `schema_migration` | versão, nome, SHA-256 do SQL e instante aplicado | gerenciada somente pelo executor |
 
 `Metadata` é criada antes de `Asset` no SQL para permitir a referência circular declarativa:
@@ -52,6 +54,10 @@ por Asset/tag; thumbnails por Asset. O índice parcial único de localização c
 `(library_root_id, normalized_relative_path)` quando o estado não é `missing`. Assim, uma raiz
 offline preserva a ocupação do caminho, enquanto observações históricas missing não impedem uma
 nova localização ativa.
+
+A migração 002 acrescenta a revisão de duplicatas sem alterar tabelas ou identidades existentes.
+Há no máximo uma decisão `current` por `(sha256, byte_size)`; decisões substituídas ou invalidadas
+permanecem `stale`, com seus membros e fingerprint originais.
 
 ## Garantias da aplicação
 

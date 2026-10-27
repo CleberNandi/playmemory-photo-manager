@@ -68,3 +68,64 @@ class ExactDuplicateResult:
     issues: tuple[DuplicateIssue, ...]
     eligible_location_count: int
     hashed_location_count: int
+
+
+class DuplicateDecisionStatus(StrEnum):
+    CURRENT = "current"
+    STALE = "stale"
+
+
+class DuplicatePlanState(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    BLOCKED = "blocked"
+    STALE = "stale"
+
+
+class DuplicateBlockKind(StrEnum):
+    INCOMPLETE_COVERAGE = "incomplete_coverage"
+    HARDLINK = "hardlink"
+    IDENTITY_CONFLICT = "identity_conflict"
+    PROTECTED = "protected"
+    PRESERVED_COPY_UNVERIFIED = "preserved_copy_unverified"
+
+
+@dataclass(frozen=True, slots=True)
+class ExactDuplicateDecision:
+    id: str
+    sha256: str
+    byte_size: int
+    keep_location_id: str
+    reason: str
+    evidence_fingerprint: str
+    status: DuplicateDecisionStatus
+    members: tuple[DuplicateMember, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicatePlanMember:
+    member: DuplicateMember
+    keep: bool
+    candidate: bool
+    protected: bool
+    hardlinked: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicatePlanGroup:
+    sha256: str
+    byte_size: int
+    state: DuplicatePlanState
+    decision_id: str | None
+    reason: str | None
+    members: tuple[DuplicatePlanMember, ...]
+    blocks: tuple[DuplicateBlockKind, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExactDuplicatePlan:
+    groups: tuple[DuplicatePlanGroup, ...]
+    coverage: DuplicateCoverage
+    issues: tuple[DuplicateIssue, ...]
+    action_authorized: bool = False
+    operations_performed: bool = False

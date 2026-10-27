@@ -129,6 +129,14 @@ preservados; hardlinks, cobertura incompleta e alterações observáveis permane
 há persistência de decisões nem mutação de mídia. O contrato está em
 [Detecção read-only de duplicatas exatas](docs/exact-duplicates.md).
 
+## Duplicate Integration 01B
+
+A revisão humana persiste a ocorrência escolhida para preservação, motivo, membros e fingerprint
+das evidências. A geração do plano relê conteúdo e identidade física, preserva decisões obsoletas
+como `stale` e explicita cobertura parcial, proteções, hardlinks e conflitos. O resultado é sempre
+dry-run, sem autorização ou executor de operações físicas. O contrato permanece em
+[Duplicatas exatas, revisão e plano](docs/exact-duplicates.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -15,9 +16,10 @@ from playmemories_photo_manager.catalog.database import (
 
 def test_new_database_is_created_at_latest_version(tmp_path) -> None:
     connection = initialize_database(tmp_path / "new.sqlite3")
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
     assert [tuple(row) for row in connection.execute("SELECT version FROM schema_migration")] == [
-        (1,)
+        (1,),
+        (2,),
     ]
     assert connection.execute(
         "SELECT strict FROM pragma_table_list WHERE name = 'asset'"
@@ -37,9 +39,35 @@ def test_reexecution_does_not_reapply_migration(tmp_path) -> None:
     applied_at = first.execute("SELECT applied_at FROM schema_migration").fetchone()[0]
     first.close()
     second = initialize_database(path)
-    assert second.execute("SELECT count(*) FROM schema_migration").fetchone()[0] == 1
+    assert second.execute("SELECT count(*) FROM schema_migration").fetchone()[0] == 2
     assert second.execute("SELECT applied_at FROM schema_migration").fetchone()[0] == applied_at
     second.close()
+
+
+def test_existing_version_one_catalog_upgrades_without_changing_assets(tmp_path) -> None:
+    migration_directory = tmp_path / "version-one"
+    migration_directory.mkdir()
+    source = (
+        Path(__file__).parents[1]
+        / "src/playmemories_photo_manager/catalog/migrations/001_initial_schema.sql"
+    )
+    (migration_directory / source.name).write_text(
+        source.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    path = tmp_path / "catalog.sqlite3"
+    connection = initialize_database(path, migration_directory=migration_directory)
+    asset_id = "00000000-0000-4000-8000-000000000001"
+    connection.execute("INSERT INTO asset(id, kind) VALUES (?, 'photo')", (asset_id,))
+    connection.close()
+
+    upgraded = initialize_database(path)
+
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert upgraded.execute("SELECT id FROM asset").fetchone()[0] == asset_id
+    assert upgraded.execute(
+        "SELECT strict FROM pragma_table_list WHERE name = 'exact_duplicate_decision'"
+    ).fetchone()[0]
+    upgraded.close()
 
 
 def test_migrations_are_applied_in_numeric_order(tmp_path) -> None:

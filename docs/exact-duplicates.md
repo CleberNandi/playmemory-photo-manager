@@ -1,4 +1,4 @@
-# Detecção read-only de duplicatas exatas — Duplicate Integration 01A
+# Duplicatas exatas, revisão persistida e plano dry-run — Duplicate Integration 01A/01B
 
 ## Escopo e API
 
@@ -12,6 +12,30 @@ Cada localização permanece um membro independente, inclusive quando várias pe
 Asset. `physical_copy_count` conta pares distintos `(device, file_id)`; assim, duas localizações
 hardlinkadas continuam visíveis, mas não são apresentadas como duas cópias físicas independentes.
 Grupos e membros têm ordenação determinística.
+
+## Revisão humana e plano 01B
+
+`save_exact_duplicate_decision(connection, *, sha256, keep_location_id, reason)` executa uma nova
+detecção, exige que a ocorrência preservada pertença ao grupo exato verificado e persiste, em uma
+transação, a escolha explícita, o motivo não vazio, todos os membros e um fingerprint SHA-256
+canônico das evidências. O fingerprint inclui IDs de Asset, FileLocation e raiz, path relativo,
+tamanho, hash e identidade física observada. Salvar uma nova escolha para o mesmo grupo marca a
+anterior como `stale`, sem apagá-la.
+
+`generate_exact_duplicate_plan(connection)` executa novamente `find_exact_duplicates()`, compara
+as evidências físicas e SHA-256 com a decisão persistida e retorna grupos determinísticos nos
+estados `pending`, `ready`, `blocked` ou `stale`. Divergência marca a decisão como `stale`, mantém
+seus membros históricos e nunca atualiza silenciosamente o snapshot salvo. Decisões stale
+continuam consultáveis no plano até uma nova revisão explícita.
+
+Cada membro indica separadamente `keep`, candidato teórico, proteção e hardlink. Neste incremento,
+um Asset é protegido quando possui álbum, tag, anotação, metadata ou thumbnail catalogada. O grupo
+é bloqueado por cobertura incompleta, hardlink, mesma identidade física atribuída a Assets
+distintos, candidato protegido ou ausência de uma ocorrência preservada revalidada. Uma decisão
+humana não remove bloqueios.
+
+O plano é somente consultivo: `action_authorized` e `operations_performed` são sempre `False`.
+Não existe executor, autorização física, movimentação, exclusão, restauração ou consolidação.
 
 ## Cobertura e confinamento
 
@@ -33,6 +57,6 @@ filesystem, driver ou mídia remota.
 
 ## Fora de escopo
 
-Não há scanner ou CLI, persistência de decisão/hash, migração ou índice, similaridade visual,
-escolha de preservação, quarentena, restauração, interface ou mutação do catálogo/acervo. Igualdade
-binária não altera a identidade lógica: Assets, anotações e todas as FileLocations são preservados.
+Não há scanner ou CLI, persistência do hash no Asset, similaridade visual, quarentena, restauração,
+interface ou mutação física do acervo. Igualdade binária e escolha de preservação não alteram a
+identidade lógica: Assets, anotações e todas as FileLocations são preservados.
