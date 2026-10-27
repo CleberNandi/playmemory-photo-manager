@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import sqlite3
@@ -255,7 +256,7 @@ def test_verified_hash_mismatch_is_reported_as_changed(database, tmp_path: Path)
     assert {issue.kind for issue in result.issues} == {DuplicateIssueKind.FILE_CHANGED}
 
 
-@pytest.mark.parametrize("relative_path", ["../escape.jpg", "a//b.jpg"])
+@pytest.mark.parametrize("relative_path", [".", "../escape.jpg", "a//b.jpg"])
 def test_noncanonical_or_escaping_catalog_path_is_rejected(
     database, tmp_path: Path, relative_path: str
 ) -> None:
@@ -265,6 +266,28 @@ def test_noncanonical_or_escaping_catalog_path_is_rejected(
     result = find_exact_duplicates(database)
 
     assert result.issues[0].kind is DuplicateIssueKind.INVALID_PATH
+
+
+def test_symlink_in_location_ancestry_is_blocked(database, tmp_path: Path) -> None:
+    root_id = _root(database, tmp_path)
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    (tmp_path / "alias").symlink_to(actual, target_is_directory=True)
+    _location(database, _asset(database), root_id, "alias/one.jpg")
+
+    result = find_exact_duplicates(database)
+
+    assert result.issues[0].kind is DuplicateIssueKind.SYMLINK_BLOCKED
+
+
+def test_regular_file_in_location_ancestry_is_read_failure(database, tmp_path: Path) -> None:
+    root_id = _root(database, tmp_path)
+    _write(tmp_path, "not-a-directory", b"bytes")
+    _location(database, _asset(database), root_id, "not-a-directory/one.jpg")
+
+    result = find_exact_duplicates(database)
+
+    assert result.issues[0].kind is DuplicateIssueKind.READ_FAILED
 
 
 def test_symlink_in_root_ancestry_is_rejected(database, tmp_path: Path) -> None:
@@ -322,6 +345,100 @@ def test_change_during_hash_is_reported(database, tmp_path: Path, monkeypatch) -
 
     assert DuplicateIssueKind.FILE_CHANGED in {issue.kind for issue in result.issues}
     assert result.groups == ()
+
+
+def test_read_error_during_hash_is_reported_as_read_failure(
+    database, tmp_path: Path, monkeypatch
+) -> None:
+    root_id = _root(database, tmp_path)
+    for name in ("one.jpg", "two.jpg"):
+        path = _write(tmp_path, name, b"same")
+        _location(database, _asset(database), root_id, name, path=path)
+    from playmemories_photo_manager.duplicates import detector
+
+    def failing_read(_file_descriptor: int, _size: int) -> bytes:
+        raise OSError(errno.EIO, "injected read failure")
+
+    monkeypatch.setattr(detector.os, "read", failing_read)
+
+    result = find_exact_duplicates(database)
+
+    assert {issue.kind for issue in result.issues} == {DuplicateIssueKind.READ_FAILED}
+    assert result.groups == ()
+
+
+def test_root_descriptor_is_closed_when_fstat_fails(database, tmp_path: Path, monkeypatch) -> None:
+    root_id = _root(database, tmp_path)
+    _location(database, _asset(database), root_id, "one.jpg")
+    from playmemories_photo_manager.duplicates import detector
+
+    original_open = detector._open_absolute_directory
+    original_fstat = detector.os.fstat
+    original_close = detector.os.close
+    root_descriptors: set[int] = set()
+    closed: set[int] = set()
+
+    def tracking_open(path: str) -> int:
+        descriptor = original_open(path)
+        root_descriptors.add(descriptor)
+        return descriptor
+
+    def failing_fstat(descriptor: int):
+        if descriptor in root_descriptors:
+            raise OSError(errno.EIO, "injected fstat failure")
+        return original_fstat(descriptor)
+
+    def tracking_close(descriptor: int) -> None:
+        if descriptor in root_descriptors:
+            closed.add(descriptor)
+        original_close(descriptor)
+
+    monkeypatch.setattr(detector, "_open_absolute_directory", tracking_open)
+    monkeypatch.setattr(detector.os, "fstat", failing_fstat)
+    monkeypatch.setattr(detector.os, "close", tracking_close)
+
+    result = find_exact_duplicates(database)
+
+    assert result.issues[0].kind is DuplicateIssueKind.INVALID_PATH
+    assert closed == root_descriptors
+
+
+def test_root_descriptor_is_closed_when_snapshot_creation_fails(
+    database, tmp_path: Path, monkeypatch
+) -> None:
+    root_id = _root(database, tmp_path)
+    _location(database, _asset(database), root_id, "one.jpg")
+    from playmemories_photo_manager.duplicates import detector
+
+    original_open = detector._open_absolute_directory
+    original_snapshot = detector._snapshot
+    original_close = detector.os.close
+    root_descriptors: set[int] = set()
+    closed: set[int] = set()
+
+    def tracking_open(path: str) -> int:
+        descriptor = original_open(path)
+        root_descriptors.add(descriptor)
+        return descriptor
+
+    def failing_snapshot(info: os.stat_result):
+        if info.st_mode & 0o170000 == 0o040000:
+            raise RuntimeError("injected snapshot failure")
+        return original_snapshot(info)
+
+    def tracking_close(descriptor: int) -> None:
+        if descriptor in root_descriptors:
+            closed.add(descriptor)
+        original_close(descriptor)
+
+    monkeypatch.setattr(detector, "_open_absolute_directory", tracking_open)
+    monkeypatch.setattr(detector, "_snapshot", failing_snapshot)
+    monkeypatch.setattr(detector.os, "close", tracking_close)
+
+    with pytest.raises(RuntimeError, match="injected snapshot failure"):
+        find_exact_duplicates(database)
+
+    assert closed == root_descriptors
 
 
 def test_detection_does_not_persist_hashes(database, tmp_path: Path) -> None:

@@ -95,7 +95,11 @@ def find_exact_duplicates(connection: sqlite3.Connection) -> ExactDuplicateResul
         for (root_id, root_path), locations in sorted(by_root.items()):
             try:
                 root_fd = _open_absolute_directory(root_path)
-                root_snapshot = _snapshot(os.fstat(root_fd))
+                try:
+                    root_snapshot = _snapshot(os.fstat(root_fd))
+                except BaseException:
+                    os.close(root_fd)
+                    raise
                 root_descriptors[root_id] = (root_fd, root_snapshot)
             except (OSError, ValueError):
                 issues.extend(_issue(DuplicateIssueKind.INVALID_PATH, row) for row in locations)
@@ -136,11 +140,12 @@ def find_exact_duplicates(connection: sqlite3.Connection) -> ExactDuplicateResul
                     issues.append(_issue(DuplicateIssueKind.INVALID_PATH, candidate.catalog))
                     continue
                 except OSError as error:
-                    kind = (
-                        DuplicateIssueKind.SYMLINK_BLOCKED
-                        if error.errno == errno.ELOOP
-                        else DuplicateIssueKind.FILE_CHANGED
-                    )
+                    if error.errno == errno.ELOOP:
+                        kind = DuplicateIssueKind.SYMLINK_BLOCKED
+                    elif error.errno == errno.ESTALE:
+                        kind = DuplicateIssueKind.FILE_CHANGED
+                    else:
+                        kind = DuplicateIssueKind.READ_FAILED
                     issues.append(_issue(kind, candidate.catalog))
                     continue
                 if (
@@ -297,6 +302,7 @@ def _relative_parts(relative_path: str) -> tuple[str, ...]:
     pure = PurePosixPath(relative_path)
     if (
         not relative_path
+        or not pure.parts
         or pure.is_absolute()
         or pure.as_posix() != relative_path
         or any(part in {"", ".", ".."} for part in pure.parts)
@@ -312,11 +318,22 @@ def _open_regular(root_fd: int, relative_path: str):
     file_fd = None
     try:
         for part in parts[:-1]:
-            next_fd = os.open(
-                part,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                dir_fd=directory_fd,
-            )
+            try:
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory_fd,
+                )
+            except OSError as error:
+                if error.errno == errno.ENOTDIR:
+                    try:
+                        info = os.stat(part, dir_fd=directory_fd, follow_symlinks=False)
+                    except OSError:
+                        pass
+                    else:
+                        if stat.S_ISLNK(info.st_mode):
+                            raise OSError(errno.ELOOP, "symlink in location path") from error
+                raise
             os.close(directory_fd)
             directory_fd = next_fd
         flags = os.O_RDONLY | os.O_NOFOLLOW
