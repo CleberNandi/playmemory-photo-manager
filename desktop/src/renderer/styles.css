@@ -1,0 +1,28 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #242621; background: #f5f1e8; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 760px; min-height: 100vh; }
+button { font: inherit; }
+.shell { display: grid; grid-template-columns: 230px 1fr; min-height: 100vh; }
+aside { padding: 32px 22px; background: #1e2925; color: #f8f4e9; display: flex; flex-direction: column; }
+.brand { font-weight: 650; letter-spacing: -.02em; margin-bottom: 50px; }
+.brand span { display: inline-grid; place-items: center; width: 34px; height: 34px; margin-right: 8px; border-radius: 10px; background: #d7a44b; color: #1e2925; font-size: 13px; }
+nav { display: grid; gap: 8px; }
+nav button { border: 0; border-radius: 9px; padding: 12px 14px; text-align: left; color: #c9d0cb; background: transparent; }
+nav button.active { color: white; background: #33443d; }
+nav button:disabled { opacity: .42; }
+.privacy { margin-top: auto; color: #9eaaa4; font-size: 12px; line-height: 1.6; }
+main { padding: 44px 5vw; }
+header { display: flex; justify-content: space-between; align-items: end; border-bottom: 1px solid #d9d3c6; padding-bottom: 24px; }
+.eyebrow { margin: 0 0 4px; color: #8a6c35; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .13em; }
+h1 { margin: 0; font-family: Georgia, serif; font-size: 42px; font-weight: 500; }
+.offline { color: #507061; font-size: 13px; }
+.status { min-height: 480px; display: grid; place-content: center; justify-items: center; text-align: center; }
+.status-icon { width: 72px; height: 72px; display: grid; place-items: center; border: 1px solid #c9b992; border-radius: 22px; color: #9a7635; font-size: 32px; }
+.status h2 { margin: 22px 0 7px; font-family: Georgia, serif; font-weight: 500; font-size: 25px; }
+.status p { max-width: 480px; margin: 0; color: #6d7069; line-height: 1.6; }
+.status button { margin-top: 20px; padding: 10px 16px; border: 0; border-radius: 8px; background: #2e5547; color: white; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 22px; padding-top: 30px; }
+article { min-width: 0; }
+.placeholder { aspect-ratio: 1; border-radius: 12px; background: linear-gradient(145deg, #ddd6c8, #ebe6db); display: grid; place-items: center; color: #8d897f; font-size: 32px; }
+article h2 { margin: 10px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+article p { margin: 0; color: #72756e; font-size: 12px; }

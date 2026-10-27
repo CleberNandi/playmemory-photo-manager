@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist/main",
+    "rootDir": "src/main",
+    "strict": true,
+    "types": ["node"]
+  },
+  "include": ["src/main/**/*.ts"]
+}

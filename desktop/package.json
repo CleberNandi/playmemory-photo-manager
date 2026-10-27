@@ -1,0 +1,42 @@
+{
+  "name": "playmemories-photo-manager-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "dev": "concurrently -k \"vite\" \"tsc -p tsconfig.main.json --watch\" \"wait-on tcp:5173 file:dist/main/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "start": "pnpm build && electron .",
+    "test": "vitest run src",
+    "typecheck": "tsc -b",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.1.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "concurrently": "10.0.6",
+    "cross-env": "10.1.0",
+    "electron": "45.0.0",
+    "eslint": "10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5",
+    "wait-on": "9.5.1"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "packageManager": "pnpm@12.15.0"
+}

@@ -27,6 +27,12 @@ __pycache__/
 .mypy_cache/
 .cache/
 
+# Desktop frontend
+desktop/node_modules/
+desktop/dist/
+desktop/coverage/
+*.tsbuildinfo
+
 # Temporary files
 *.log
 *.tmp
