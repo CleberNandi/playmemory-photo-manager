@@ -121,6 +121,14 @@ um store POSIX confinado para thumbnails sintéticas pregeradas. Não há HTTP, 
 leitura de originais. Contratos, exemplos, plano SQLite e limites de segurança estão em
 [Gallery read model](docs/gallery-read-model.md).
 
+## Duplicate Integration 01A
+
+A API Python interna de duplicatas exatas pré-agrupa FileLocations por tamanho e confirma
+igualdade binária com SHA-256 sob leitura POSIX confinada. Assets e todas as localizações são
+preservados; hardlinks, cobertura incompleta e alterações observáveis permanecem explícitos. Não
+há persistência de decisões nem mutação de mídia. O contrato está em
+[Detecção read-only de duplicatas exatas](docs/exact-duplicates.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.
@@ -135,4 +143,3 @@ O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele
 - [Opções arquiteturais](design/architecture-options.md)
 - [Relatório consolidado](reports/discovery-01.md)
 - [Relatório do instalador Sony](reports/discovery-02-sony-installer.md)
-
