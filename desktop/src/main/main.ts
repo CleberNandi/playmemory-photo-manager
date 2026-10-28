@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, session } from "electron";
 import { join, resolve } from "node:path";
 import { PythonBackend } from "./backend.js";
 
 const backend = new PythonBackend();
 let quitting = false;
+
+backend.on("diagnostic", (message: string) => console.warn(message));
+backend.on("failure", (error: Error) => console.warn(`backend failure: ${error.message}`));
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -28,9 +31,15 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   ipcMain.handle("gallery:list", (_event, params: { pageSize?: number; after?: string | null }) =>
     backend.request("gallery.list", { page_size: params.pageSize, after: params.after }),
   );
+  ipcMain.handle("backend:retry", async () => {
+    await backend.restart();
+    return backend.request("gallery.list", { page_size: 24 });
+  });
   try { await backend.start(); } catch { /* Renderer presents a recoverable backend error. */ }
   createWindow();
   console.log("PlayMemories desktop ready (local backend supervised)");

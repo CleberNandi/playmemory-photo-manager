@@ -12,7 +12,7 @@ export function App() {
   const load = () => {
     setState({ kind: "loading" });
     void window.photoManager
-      .listGallery({ pageSize: 24 })
+      .retryGallery()
       .then((page) => setState({ kind: "ready", page }))
       .catch(() => setState({ kind: "error" }));
   };
