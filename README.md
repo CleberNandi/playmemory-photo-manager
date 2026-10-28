@@ -137,6 +137,13 @@ como `stale` e explicita cobertura parcial, proteções, hardlinks e conflitos. 
 dry-run, sem autorização ou executor de operações físicas. O contrato permanece em
 [Duplicatas exatas, revisão e plano](docs/exact-duplicates.md).
 
+## Desktop MVP D01
+
+O primeiro shell experimental abre uma janela Electron com React e consulta a galeria Python por
+uma ponte local `stdio` estreita e autenticada. Ele não expõe Node.js ao renderer, não abre porta
+de rede e não acessa originais. Execução, segurança e limitações estão documentadas em
+[Desktop MVP D01](docs/desktop-mvp-d01.md).
+
 ## Estado dos Discoveries
 
 O instalador `PMHOME_5501DL` não estava disponível durante o Discovery 01. Ele foi localizado posteriormente e analisado estaticamente no Discovery 02, sem execução ou Wine. A amostra é um instalador de rede parcial, não contém o payload principal e permanece isolada fora do controle de versão. Cada conclusão distingue documentação oficial, evidência do pacote, hipótese arquitetural e funcionalidade não confirmada.
