@@ -3,8 +3,9 @@
 ## Escopo e decisão
 
 O D01 implementa a PoC prevista no ADR-004, sem homologar Electron como shell definitivo. O
-renderer React acessa somente `window.photoManager.listGallery()`, exposto pelo preload. O processo
-principal inicia um backend Python por `uv`, gera um segredo efêmero e troca mensagens JSON por
+renderer React acessa somente `window.photoManager.listGallery()` e o retry controlado,
+expostos pelo preload. O processo
+principal inicia um backend Python por `uv run --offline`, gera um segredo efêmero e troca mensagens JSON por
 `stdio`; não existe listener de rede, HTTP ou acesso arbitrário ao filesystem.
 
 O backend aceita apenas `gallery.list` e `shutdown`. A primeira operação delega para
@@ -34,6 +35,12 @@ O comando deve abrir uma janela com a Biblioteca e o estado vazio confirmado pel
 a última janela solicita `shutdown`, aguarda o processo Python e escala para `SIGTERM`/`SIGKILL`
 somente em timeout. Falha de bootstrap, crash ou timeout aparece como estado recuperável e
 sanitizado na interface.
+
+No POSIX, `uv` e Python são iniciados em um grupo de processos dedicado; os sinais de encerramento
+são enviados ao grupo para não deixar descendentes órfãos. O retry encerra qualquer geração
+anterior antes de iniciar uma nova. Permissões Electron são negadas por padrão. A CSP de produção
+nega conexões; a CSP de desenvolvimento libera somente o WebSocket local do Vite em
+`127.0.0.1:5173`.
 
 ## Segurança e limitações verificáveis
 
