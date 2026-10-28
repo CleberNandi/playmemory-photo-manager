@@ -33,7 +33,10 @@ def _open_catalog(path: Path | None) -> sqlite3.Connection:
     if path is None:
         return initialize_database(":memory:")
     resolved = path.expanduser().resolve(strict=True)
-    uri = f"file:{resolved.as_posix()}?mode=ro&immutable=0"
+    # Path.as_uri() percent-encodes URI delimiters in filenames (notably # and ?).
+    # SQLite receives an unambiguous file URI while mode=ro prevents journals or
+    # accidental side databases from being created beside the catalog.
+    uri = f"{resolved.as_uri()}?mode=ro"
     connection = sqlite3.connect(uri, uri=True, isolation_level=None)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA query_only = ON")
