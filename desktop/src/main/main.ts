@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, session } from "electron";
 import { join, resolve } from "node:path";
+import { smoke } from "./smoke.js";
 import { PythonBackend } from "./backend.js";
 
 const backend = new PythonBackend();
@@ -16,7 +17,7 @@ function createWindow(): BrowserWindow {
     minHeight: 520,
     backgroundColor: "#f5f1e8",
     webPreferences: {
-      preload: join(import.meta.dirname, "preload.js"),
+      preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -41,7 +42,23 @@ app.whenReady().then(async () => {
     return backend.request("gallery.list", { page_size: 24 });
   });
   try { await backend.start(); } catch { /* Renderer presents a recoverable backend error. */ }
-  createWindow();
+  const window = createWindow();
+  if (process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1") {
+    const watchdog = setTimeout(() => {
+      console.error("SMOKE FAIL: timeout");
+      process.exitCode = 1;
+      app.quit();
+    }, 30_000);
+    window.webContents.once("render-process-gone", () => { process.exitCode = 1; app.quit(); });
+    window.webContents.once("did-finish-load", () => {
+      void smoke(window, backend).then(() => { clearTimeout(watchdog); app.quit(); }).catch((error: unknown) => {
+        clearTimeout(watchdog);
+        console.error(error);
+        process.exitCode = 1;
+        app.quit();
+      });
+    });
+  }
   console.log("PlayMemories desktop ready (local backend supervised)");
   const smokeExit = Number.parseInt(process.env.PLAYMEMORIES_DESKTOP_SMOKE_EXIT_MS ?? "", 10);
   if (Number.isFinite(smokeExit) && smokeExit > 0) setTimeout(() => app.quit(), smokeExit);

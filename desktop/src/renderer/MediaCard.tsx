@@ -1,0 +1,10 @@
+import { AvailabilityIndicator } from "./AvailabilityIndicator";
+import type { GalleryItem } from "./types";
+function getDisplayName(item: GalleryItem): string { return item.annotation.title?.trim() || item.representative_location?.relative_path.trim() || "Sem título"; }
+export function MediaCard({ item }: { item: GalleryItem }) {
+  const name = getDisplayName(item); const mediaLabel = item.kind === "video" ? "Vídeo" : "Foto";
+  return <article className="media-card" role="listitem">
+    <div className="media-placeholder" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">{item.kind === "video" ? <><rect x="8" y="11" width="32" height="26" rx="4" /><path d="m21 18 10 6-10 6z" /></> : <><rect x="7" y="10" width="34" height="28" rx="4" /><circle cx="17" cy="19" r="3" /><path d="m10 34 9-9 6 6 5-5 8 8" /></>}</svg><span className="media-kind">{mediaLabel}</span></div>
+    <div className="media-card-body"><h3 title={name}>{name}</h3><span className="sr-only">{mediaLabel}</span><AvailabilityIndicator availability={item.availability} /></div>
+  </article>;
+}

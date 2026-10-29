@@ -18,7 +18,7 @@ export interface GalleryPage {
 
 declare global {
   interface Window {
-    photoManager: {
+    photoManager?: {
       listGallery(params?: { pageSize?: number; after?: string | null }): Promise<GalleryPage>;
       retryGallery(): Promise<GalleryPage>;
     };
