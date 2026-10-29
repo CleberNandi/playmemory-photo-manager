@@ -5,6 +5,7 @@ import { PythonBackend } from "./backend.js";
 
 const backend = new PythonBackend();
 let quitting = false;
+let thumbnailRequests = 0;
 
 backend.on("diagnostic", (message: string) => console.warn(message));
 backend.on("failure", (error: Error) => console.warn(`backend failure: ${error.message}`));
@@ -37,6 +38,13 @@ app.whenReady().then(async () => {
   ipcMain.handle("gallery:list", (_event, params: { pageSize?: number; after?: string | null }) =>
     backend.request("gallery.list", { page_size: params.pageSize, after: params.after }),
   );
+  ipcMain.handle("thumbnail:get", async (_event, assetId: unknown) => {
+    if (typeof assetId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(assetId)) throw new Error("invalid asset identifier");
+    if (thumbnailRequests >= 4) throw new Error("thumbnail busy");
+    thumbnailRequests++;
+    try { return await backend.request("thumbnail.get", {asset_id: assetId}); }
+    finally { thumbnailRequests--; }
+  });
   ipcMain.handle("backend:retry", async () => {
     await backend.restart();
     return backend.request("gallery.list", { page_size: 24 });

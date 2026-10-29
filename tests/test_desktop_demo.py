@@ -56,7 +56,8 @@ def test_demo_bootstrap_never_opens_a_catalog_path(monkeypatch):
     def forbidden(_path):
         pytest.fail("demo attempted to open a filesystem catalog")
 
-    def inspect(connection, _token):
+    def inspect(connection, _token, *, demo=False):
+        assert demo
         assert len(_dispatch(connection, "gallery.list", {})["items"]) == 24
         return 0
 

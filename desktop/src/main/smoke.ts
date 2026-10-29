@@ -38,14 +38,16 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
       }
       const visible = await evaluate<string[]>('Array.from(document.querySelectorAll(".media-card h3"), title => title.textContent)');
       if (new Set(visible).size !== count || JSON.stringify(visible) !== JSON.stringify(expected.slice(0, count))) throw new Error("renderer duplicated, lost or reordered assets");
+      await waitFor(`document.querySelectorAll(".synthetic-thumbnail").length === ${count} && [...document.querySelectorAll(".synthetic-thumbnail")].every(img => img.complete && img.naturalWidth === 256 && img.naturalHeight === 160)`);
+      console.log(`SMOKE thumbnails PASS: ${count} decoded PNGs`);
       console.log(`SMOKE pagination PASS: ${count} cards, exact backend order`);
     }
     if (expected.length !== 73) throw new Error("lost assets");
     await waitFor('document.querySelector(".pagination")?.textContent.includes("Fim da biblioteca")');
-    await writeFile("/tmp/playmemories-d02b1-gallery.png", (await window.webContents.capturePage()).toPNG());
+    await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'listGallery,retryGallery') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'getThumbnail,listGallery,retryGallery') throw new Error("unexpected bridge exposure");
   if (await evaluate<boolean>('typeof process !== "undefined" || typeof require !== "undefined"')) throw new Error("Node exposed to renderer");
   for (const [width, height] of [[1180, 760], [860, 560], [760, 560], [760, 520]]) {
     window.setSize(width, height);
@@ -65,6 +67,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
   await waitFor('!!document.querySelector("[role=alert] button")');
   await evaluate('document.querySelector("[role=alert] button").click()');
   await waitFor(ready);
+  if (demo) await waitFor('document.querySelectorAll(".synthetic-thumbnail").length === 24 && [...document.querySelectorAll(".synthetic-thumbnail")].every(img => img.complete && img.naturalWidth === 256)');
   const withoutPreload = new BrowserWindow({width: 760, height: 560, webPreferences: {sandbox: true, contextIsolation: true, nodeIntegration: false}});
   try {
     await withoutPreload.loadFile(resolve(import.meta.dirname, "../renderer/index.html"));
