@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
+import { DuplicatesView } from "./DuplicatesView";
 import { MediaCard } from "./MediaCard";
 import type { GalleryPage } from "./types";
 
@@ -13,8 +14,11 @@ async function requestGallery(retry = false): Promise<GalleryPage> {
 type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
 
 export function App() {
+  const [view, setView] = useState<"gallery" | "duplicates">("gallery");
+  const [generation, setGeneration] = useState(0);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [selected, setSelected] = useState<string | null>(null);
+  useEffect(() => window.photoManager?.onBackendReset?.(() => { setGeneration((n) => n + 1); if (view === "duplicates") setSelected(null); }), [view]);
   const origin = useRef<HTMLButtonElement | null>(null);
   const closeDetails = () => { setSelected(null); origin.current?.focus(); };
   const [paging, setPaging] = useState(false);
@@ -46,13 +50,13 @@ export function App() {
   }, []);
 
   return <div className="app-shell">
-    <Sidebar />
+    <Sidebar view={view} onNavigate={(next) => { setSelected(null); setView(next); }} />
     <main className="workspace">
       <header className="page-header">
-        <div><p className="eyebrow">Sua coleção</p><h1>Biblioteca</h1></div>
+        <div><p className="eyebrow">Sua coleção</p><h1>{view === "gallery" ? "Biblioteca" : "Duplicatas exatas"}</h1></div>
         <div className="local-status"><Icon name="shield" /><span>Operação local</span></div>
       </header>
-      <div className="content" aria-busy={state.kind === "loading" || paging}>
+      <div hidden={view !== "gallery"} className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
         {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. Adicionar pastas e catalogar fotos estará disponível em uma próxima etapa." note="Nada foi importado ou alterado nos seus arquivos." />}
@@ -66,24 +70,25 @@ export function App() {
           </div>
         </section>}
       </div>
+      {view === "duplicates" && <DuplicatesView key={generation} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={(id, button) => {origin.current = button; setSelected(id);}} />}
     </main>
     {selected && <AssetDetailsPanel assetId={selected} onClose={closeDetails} />}
   </div>;
 }
 
-export function Sidebar() {
+export function Sidebar({view = "gallery", onNavigate}: {view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void}) {
   return <aside className="sidebar">
     <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span className="brand-name">PlayMemories<span className="sr-only"> Photo Manager</span></span></div>
     <nav className="primary-nav" aria-label="Principal">
-      <p className="nav-label">Coleção</p><NavItem icon="library" label="Biblioteca" active /><NavItem icon="album" label="Álbuns" disabled />
-      <p className="nav-label nav-label-tools">Ferramentas</p><NavItem icon="tools" label="Ferramentas" disabled />
+      <p className="nav-label">Coleção</p><NavItem icon="library" label="Biblioteca" active={view === "gallery"} onClick={() => onNavigate?.("gallery")} /><NavItem icon="album" label="Álbuns" disabled />
+      <p className="nav-label nav-label-tools">Ferramentas</p><NavItem icon="album" label="Duplicatas exatas" active={view === "duplicates"} onClick={() => onNavigate?.("duplicates")} /><NavItem icon="tools" label="Ferramentas" disabled />
     </nav>
     <div className="sidebar-footer"><NavItem icon="settings" label="Configurações" disabled /><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Seus originais não são alterados.</span></p></div>
   </aside>;
 }
 
-function NavItem({ icon, label, active = false, disabled = false }: { icon: IconName; label: string; active?: boolean; disabled?: boolean }) {
-  return <button className={`nav-item${active ? " is-active" : ""}`} type="button" aria-current={active ? "page" : undefined} aria-label={disabled ? `${label} — em breve` : label} title={disabled ? `${label} — em breve` : label} disabled={disabled}>
+function NavItem({ icon, label, active = false, disabled = false, onClick }: { onClick?: () => void; icon: IconName; label: string; active?: boolean; disabled?: boolean }) {
+  return <button className={`nav-item${active ? " is-active" : ""}`} type="button" onClick={onClick} aria-current={active ? "page" : undefined} aria-label={disabled ? `${label} — em breve` : label} title={disabled ? `${label} — em breve` : label} disabled={disabled}>
     <Icon name={icon} /><span>{label}</span>{disabled && <span className="coming-soon" aria-hidden="true">Em breve</span>}
   </button>;
 }
