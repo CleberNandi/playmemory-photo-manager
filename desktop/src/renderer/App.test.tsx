@@ -40,3 +40,27 @@ describe("gallery lifecycle", () => {
     await mount(); await retry(); expect(host.querySelector('[role="alert"]')).not.toBeNull();
   });
 });
+
+
+it("uses the opaque cursor, blocks double clicks and retries without losing cards", async () => {
+  const item = (id: string) => ({asset_id: id, kind: "photo", media_type: "image/jpeg", availability: "available", annotation: {title: id, rating: null, favorite: false}, representative_location: null});
+  let finish!: (value: GalleryPage) => void;
+  const list = vi.fn().mockResolvedValueOnce({items: [item("first")], next_cursor: "opaque-cursor", has_more: true}).mockRejectedValueOnce(new Error("private path")).mockImplementationOnce(() => new Promise<GalleryPage>((resolve) => { finish = resolve; }));
+  window.photoManager = {listGallery: list, retryGallery: vi.fn()};
+  await mount();
+  await retry();
+  expect(host.querySelectorAll(".media-card")).toHaveLength(1);
+  expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  expect(host.textContent).not.toContain("private path");
+  await act(async () => {
+    const button = host.querySelector<HTMLButtonElement>(".primary-button")!;
+    button.click(); button.click();
+  });
+  expect(list).toHaveBeenCalledTimes(3);
+  expect(list).toHaveBeenLastCalledWith({pageSize: 24, after: "opaque-cursor"});
+  expect(host.textContent).toContain("Carregando…");
+  await act(async () => finish({items: [item("last")], next_cursor: null, has_more: false} as GalleryPage));
+  expect(host.querySelectorAll(".media-card")).toHaveLength(2);
+  expect(host.textContent).toContain("Fim da biblioteca");
+  expect(host.querySelector(".pagination button")).toBeNull();
+});
