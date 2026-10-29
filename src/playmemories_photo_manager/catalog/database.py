@@ -41,9 +41,9 @@ class Migration:
     checksum: str
 
 
-def connect(path: str | Path) -> sqlite3.Connection:
+def connect(path: str | Path, *, uri: bool = False, timeout: float = 5.0) -> sqlite3.Connection:
     """Open an operational connection with referential integrity enabled."""
-    connection = sqlite3.connect(path, isolation_level=None)
+    connection = sqlite3.connect(path, isolation_level=None, uri=uri, timeout=timeout)
     connection.row_factory = sqlite3.Row
     connection.create_function("is_uuid", 1, _is_uuid, deterministic=True)
     connection.create_function("normalize_tag", 1, normalize_tag, deterministic=True)
@@ -53,6 +53,65 @@ def connect(path: str | Path) -> sqlite3.Connection:
         connection.close()
         raise RuntimeError("SQLite foreign key enforcement could not be enabled")
     return connection
+
+
+class UpgradeRequiredError(IncompatibleSchemaError):
+    """A recognized older catalog requires an explicit future upgrade."""
+
+
+def validate_database(connection: sqlite3.Connection) -> None:
+    """Validate the current schema and data without migrations or persistent writes.
+
+    Compare stored DDL with a reference built only in memory. This deliberately rejects
+    edited DDL, including weakened constraints, extra triggers and missing indexes.
+    The caller owns the connection and must install the managed UDFs first.
+    """
+    if sqlite3.sqlite_version_info < (3, 37, 0):
+        raise IncompatibleSchemaError("SQLite 3.37 or newer is required")
+    if connection.in_transaction:
+        raise MigrationError("validation requires no active transaction")
+    reference = initialize_database(":memory:")
+    try:
+        connection.execute("BEGIN")
+        migrations = _load_migrations()
+        current = _validate_state(connection, migrations)
+        if current == 0:
+            raise IncompatibleSchemaError("not a catalog")
+        if current < len(migrations):
+            raise UpgradeRequiredError("explicit upgrade required")
+        sql = (
+            "SELECT type, name, tbl_name, sql FROM sqlite_schema "
+            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        )
+        actual = [tuple(row) for row in connection.execute(sql)]
+        expected = [tuple(row) for row in reference.execute(sql)]
+        if actual != expected:
+            raise IncompatibleSchemaError("catalog structure differs from supported schema")
+        # Inspect SQLite's parsed structures as well as the stored DDL text.
+        for row in reference.execute("SELECT name FROM sqlite_schema WHERE type = 'table'"):
+            table = row[0]
+            for pragma in ("table_xinfo", "foreign_key_list", "index_list"):
+                statement = f'PRAGMA {pragma}("{table}")'
+                if [tuple(r) for r in connection.execute(statement)] != [
+                    tuple(r) for r in reference.execute(statement)
+                ]:
+                    raise IncompatibleSchemaError("catalog table structure differs")
+        for row in reference.execute("SELECT name FROM sqlite_schema WHERE type = 'index'"):
+            statement = f'PRAGMA index_xinfo("{row[0]}")'
+            if [tuple(r) for r in connection.execute(statement)] != [
+                tuple(r) for r in reference.execute(statement)
+            ]:
+                raise IncompatibleSchemaError("catalog index structure differs")
+        if [row[0] for row in connection.execute("PRAGMA integrity_check")] != ["ok"]:
+            raise IncompatibleSchemaError("catalog integrity failed")
+        if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise IncompatibleSchemaError("catalog referential integrity failed")
+        if connection.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+            raise IncompatibleSchemaError("foreign keys are disabled")
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        reference.close()
 
 
 def _load_migrations(directory: Path | None = None) -> list[Migration]:

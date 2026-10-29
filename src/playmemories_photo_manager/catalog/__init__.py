@@ -3,8 +3,10 @@
 from .database import (
     IncompatibleSchemaError,
     MigrationError,
+    UpgradeRequiredError,
     connect,
     initialize_database,
+    validate_database,
 )
 from .errors import (
     CatalogError,
@@ -57,8 +59,10 @@ __all__ = [
     "RootAvailability",
     "Tag",
     "UniquenessConflictError",
+    "UpgradeRequiredError",
     "connect",
     "create_tag",
     "initialize_database",
     "normalize_tag",
+    "validate_database",
 ]
