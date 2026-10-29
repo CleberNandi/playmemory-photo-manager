@@ -20,6 +20,7 @@ declare global {
   interface Window {
     photoManager?: {
       listGallery(params?: { pageSize?: number; after?: string | null }): Promise<GalleryPage>;
+      getThumbnail?(assetId: string): Promise<unknown>;
       retryGallery(): Promise<GalleryPage>;
     };
   }
