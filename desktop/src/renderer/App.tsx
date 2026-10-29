@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { MediaCard } from "./MediaCard";
 import type { GalleryPage } from "./types";
 
@@ -13,6 +14,9 @@ type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
 
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [selected, setSelected] = useState<string | null>(null);
+  const origin = useRef<HTMLButtonElement | null>(null);
+  const closeDetails = () => { setSelected(null); origin.current?.focus(); };
   const [paging, setPaging] = useState(false);
   const [pageError, setPageError] = useState(false);
   const inFlight = useRef(false);
@@ -28,6 +32,7 @@ export function App() {
     finally { inFlight.current = false; setPaging(false); }
   };
   const load = () => {
+    setSelected(null);
     setPageError(false);
     setState({ kind: "loading" });
     void requestGallery(true).then((page) => setState({ kind: "ready", page })).catch(() => setState({ kind: "error" }));
@@ -53,7 +58,7 @@ export function App() {
         {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. Adicionar pastas e catalogar fotos estará disponível em uma próxima etapa." note="Nada foi importado ou alterado nos seus arquivos." />}
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <div className="section-heading"><div><p className="section-kicker">Todos os itens</p><h2 id="gallery-heading">Fotos e vídeos</h2></div><p className="result-count">{formatItemCount(state.page.items.length)}</p></div>
-          <div className="media-grid" role="list">{state.page.items.map((item) => <MediaCard key={item.asset_id} item={item} />)}</div>
+          <div className="media-grid" role="list">{state.page.items.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onSelect={(button) => { origin.current = button; setSelected(item.asset_id); }} />)}</div>
           <div className="pagination">
             {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
             {state.page.has_more ? <button className="primary-button" disabled={paging} onClick={() => void more()}>{paging ? "Carregando…" : pageError ? "Tentar carregar novamente" : "Carregar mais"}</button> : <p role="status">Fim da biblioteca</p>}
@@ -62,6 +67,7 @@ export function App() {
         </section>}
       </div>
     </main>
+    {selected && <AssetDetailsPanel assetId={selected} onClose={closeDetails} />}
   </div>;
 }
 
