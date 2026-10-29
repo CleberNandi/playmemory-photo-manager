@@ -126,14 +126,21 @@ def _write(sink: TextIO, payload: object) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--catalog", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--catalog", type=Path)
+    mode.add_argument("--demo", action="store_true")
     args = parser.parse_args()
     token = os.environ.get("PLAYMEMORIES_BRIDGE_TOKEN", "")
     if len(token) < 32:
         print("invalid bridge credentials", file=sys.stderr)
         return 2
     try:
-        connection = _open_catalog(args.catalog)
+        if args.demo:
+            from .demo import open_demo_catalog
+
+            connection = open_demo_catalog()
+        else:
+            connection = _open_catalog(args.catalog)
     except Exception:
         print("catalog could not be opened", file=sys.stderr)
         return 3

@@ -60,7 +60,8 @@ export class PythonBackend extends EventEmitter {
     });
     const child = this.spawnBackend(
       "uv",
-      ["run", "--offline", "python", "-m", "playmemories_photo_manager.desktop.bridge"],
+      ["run", "--offline", "python", "-m", "playmemories_photo_manager.desktop.bridge",
+        ...(process.env.PLAYMEMORIES_DESKTOP_DEMO === "1" ? ["--demo"] : [])],
       {
         cwd: repositoryRoot,
         detached: this.platform !== "win32",
