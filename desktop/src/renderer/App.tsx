@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MediaCard } from "./MediaCard";
 import type { GalleryPage } from "./types";
 
@@ -13,7 +13,22 @@ type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
 
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [paging, setPaging] = useState(false);
+  const [pageError, setPageError] = useState(false);
+  const inFlight = useRef(false);
+  const more = async () => {
+    if (inFlight.current || state.kind !== "ready" || !state.page.next_cursor) return;
+    inFlight.current = true;
+    setPaging(true);
+    setPageError(false);
+    try {
+      const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor });
+      setState({ kind: "ready", page: { ...page, items: [...state.page.items, ...page.items] } });
+    } catch { setPageError(true); }
+    finally { inFlight.current = false; setPaging(false); }
+  };
   const load = () => {
+    setPageError(false);
     setState({ kind: "loading" });
     void requestGallery(true).then((page) => setState({ kind: "ready", page })).catch(() => setState({ kind: "error" }));
   };
@@ -32,13 +47,18 @@ export function App() {
         <div><p className="eyebrow">Sua coleção</p><h1>Biblioteca</h1></div>
         <div className="local-status"><Icon name="shield" /><span>Operação local</span></div>
       </header>
-      <div className="content" aria-busy={state.kind === "loading"}>
+      <div className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
         {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. Adicionar pastas e catalogar fotos estará disponível em uma próxima etapa." note="Nada foi importado ou alterado nos seus arquivos." />}
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <div className="section-heading"><div><p className="section-kicker">Todos os itens</p><h2 id="gallery-heading">Fotos e vídeos</h2></div><p className="result-count">{formatItemCount(state.page.items.length)}</p></div>
           <div className="media-grid" role="list">{state.page.items.map((item) => <MediaCard key={item.asset_id} item={item} />)}</div>
+          <div className="pagination">
+            {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
+            {state.page.has_more ? <button className="primary-button" disabled={paging} onClick={() => void more()}>{paging ? "Carregando…" : pageError ? "Tentar carregar novamente" : "Carregar mais"}</button> : <p role="status">Fim da biblioteca</p>}
+            {pageError && <button className="primary-button" onClick={load}>Reabrir biblioteca</button>}
+          </div>
         </section>}
       </div>
     </main>
