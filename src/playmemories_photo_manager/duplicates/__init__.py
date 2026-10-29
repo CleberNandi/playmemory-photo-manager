@@ -1,6 +1,5 @@
 """Internal exact-duplicate read model."""
 
-from .detector import find_exact_duplicates
 from .models import (
     DuplicateBlockKind,
     DuplicateCoverage,
@@ -16,12 +15,25 @@ from .models import (
     ExactDuplicatePlan,
     ExactDuplicateResult,
 )
-from .review import (
-    DuplicateReviewError,
-    evidence_fingerprint,
-    generate_exact_duplicate_plan,
-    save_exact_duplicate_decision,
-)
+
+
+# Presentation consumers can reuse enums without loading physical analysis code.
+def __getattr__(name: str):
+    if name == "find_exact_duplicates":
+        from .detector import find_exact_duplicates
+
+        return find_exact_duplicates
+    if name in {
+        "DuplicateReviewError",
+        "evidence_fingerprint",
+        "generate_exact_duplicate_plan",
+        "save_exact_duplicate_decision",
+    }:
+        from . import review
+
+        return getattr(review, name)
+    raise AttributeError(name)
+
 
 __all__ = [
     "DuplicateBlockKind",
