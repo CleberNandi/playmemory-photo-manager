@@ -95,3 +95,38 @@ def open_demo_catalog() -> sqlite3.Connection:
     except Exception:
         connection.close()
         raise
+
+
+MAX_THUMBNAIL_BYTES = 12 * 1024
+THUMBNAIL_WIDTH = 256
+THUMBNAIL_HEIGHT = 160
+
+
+def synthetic_thumbnail(asset_id: str, kind: str) -> bytes:
+    """Create a bounded RGB PNG using only UUID bytes and simple geometry."""
+    import hashlib
+    import struct
+    import zlib
+
+    seed = hashlib.sha256(asset_id.encode("ascii")).digest()
+    rows = bytearray()
+    for y in range(THUMBNAIL_HEIGHT):
+        rows.append(0)  # PNG filter: none
+        for x in range(THUMBNAIL_WIDTH):
+            band = (x // (32 + seed[0] % 32) + y // 40) % 3
+            color = tuple(45 + seed[1 + band * 3 + c] % 160 for c in range(3))
+            if (x - (48 + seed[12] % 160)) ** 2 + (y - 45) ** 2 < 22**2:
+                color = (245, 222, 163)
+            if kind == "video" and 62 < y < 100 and 112 < x < 112 + (y - 62) // 2:
+                color = (255, 255, 255)
+            rows.extend(color)
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack("!I", len(data)) + tag + data + struct.pack("!I", zlib.crc32(tag + data))
+
+    image = b"\x89PNG\r\n\x1a\n"
+    image += chunk(b"IHDR", struct.pack("!2I5B", 256, 160, 8, 2, 0, 0, 0))
+    image += chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
+    if len(image) > MAX_THUMBNAIL_BYTES:
+        raise ValueError("synthetic thumbnail exceeds limit")
+    return image

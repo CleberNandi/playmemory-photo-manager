@@ -88,7 +88,7 @@ export class PythonBackend extends EventEmitter {
     await this.start(this.repositoryRoot || undefined);
   }
 
-  async request(method: "gallery.list", params: { page_size?: number; after?: string | null } = {}): Promise<unknown> {
+  async request(method: "gallery.list" | "thumbnail.get", params: { page_size?: number; after?: string | null; asset_id?: string } = {}): Promise<unknown> {
     if (!this.child || !this.readyPromise || this.state === "stopped") throw new Error("backend is not running");
     await this.readyPromise;
     return this.send(method, params, this.requestTimeoutMs);
@@ -162,6 +162,7 @@ export class PythonBackend extends EventEmitter {
   private consume(chunk: string, generation: number): void {
     if (generation !== this.generation) return;
     this.buffer += chunk;
+    if (this.buffer.length > 256 * 1024) { this.fail(new Error("backend response too large"), generation); return; }
     for (;;) {
       const newline = this.buffer.indexOf("\n");
       if (newline < 0) return;

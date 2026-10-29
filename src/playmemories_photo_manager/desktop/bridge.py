@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sqlite3
@@ -11,6 +12,7 @@ from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
 from typing import TextIO
+from uuid import UUID
 
 from playmemories_photo_manager.catalog import initialize_database
 from playmemories_photo_manager.gallery import GalleryQueries, GalleryQuery
@@ -47,7 +49,32 @@ def _open_catalog(path: Path | None) -> sqlite3.Connection:
     return connection
 
 
-def _dispatch(connection: sqlite3.Connection, method: str, params: object) -> object:
+def _dispatch(
+    connection: sqlite3.Connection, method: str, params: object, *, demo: bool = False
+) -> object:
+    if method == "thumbnail.get":
+        if not isinstance(params, dict) or set(params) != {"asset_id"}:
+            raise BridgeRequestError("expected asset_id only")
+        asset_id = params["asset_id"]
+        try:
+            if not isinstance(asset_id, str) or str(UUID(asset_id)) != asset_id:
+                raise ValueError
+        except (ValueError, AttributeError):
+            raise BridgeRequestError("asset_id must be a canonical UUID") from None
+        if not demo:
+            return None
+        row = connection.execute("SELECT kind FROM asset WHERE id = ?", (asset_id,)).fetchone()
+        if row is None:
+            return None
+        from .demo import synthetic_thumbnail
+
+        data = synthetic_thumbnail(asset_id, row[0])
+        return {
+            "media_type": "image/png",
+            "width": 256,
+            "height": 160,
+            "base64": base64.b64encode(data).decode("ascii"),
+        }
     if method == "gallery.list":
         if not isinstance(params, dict):
             raise BridgeRequestError("params must be an object")
@@ -75,6 +102,8 @@ def serve(
     token: str,
     source: TextIO = sys.stdin,
     sink: TextIO = sys.stdout,
+    *,
+    demo: bool = False,
 ) -> int:
     _write(sink, {"event": "ready", "protocol": 1})
     for raw_line in source:
@@ -94,7 +123,7 @@ def serve(
             method = request.get("method")
             if not isinstance(method, str):
                 raise BridgeRequestError("method must be text")
-            result = _dispatch(connection, method, request.get("params", {}))
+            result = _dispatch(connection, method, request.get("params", {}), demo=demo)
             _write(sink, {"id": request_id, "ok": True, "result": result})
             if method == "shutdown":
                 return 0
@@ -145,7 +174,7 @@ def main() -> int:
         print("catalog could not be opened", file=sys.stderr)
         return 3
     try:
-        return serve(connection, token)
+        return serve(connection, token, demo=args.demo)
     finally:
         connection.close()
 
