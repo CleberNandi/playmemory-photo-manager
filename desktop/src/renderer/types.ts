@@ -20,8 +20,28 @@ declare global {
   interface Window {
     photoManager?: {
       listGallery(params?: { pageSize?: number; after?: string | null }): Promise<GalleryPage>;
+      getAssetDetails?(assetId: string): Promise<DetailsResult>;
       getThumbnail?(assetId: string): Promise<unknown>;
       retryGallery(): Promise<GalleryPage>;
     };
   }
 }
+
+// Transport projection of the existing Python AssetDetails; no persistence model.
+export interface CaptureProjection {
+  local_value: string; precision: string; timezone_state: string | null;
+  offset_minutes: number | null; timezone_name: string | null;
+  source_kind: string; metadata_id: string | null; selection_reason: string | null;
+}
+export interface AssetDetails {
+  asset: {id: string; kind: string; sha256: string | null; hash_state: string; byte_size: number | null; media_type: string | null; status: string; created_at: string};
+  capture: CaptureProjection | null;
+  annotation: {asset_id: string; title: string | null; description: string | null; favorite: boolean; rating: number | null; created_at: string; updated_at: string} | null;
+  tags: {id: string; display_name: string; normalized_key: string; created_at: string}[];
+  metadata_state: "not_extracted" | "extracted";
+  metadata: {id: string; namespace: string; key: string; source: string; source_key: string; raw_value: string; interpreted_value: string | null; value_type: string; temporal_local_value: string | null; temporal_precision: string | null; timezone_state: string | null; utc_offset_minutes: number | null; timezone_name: string | null; extractor_version: string; extracted_at: string; parse_error: string | null; conflict_group: string | null; is_conflicting: boolean}[];
+  locations: {id: string; library_root_id: string; root_display_name: string; relative_path: string; entry_type: string; availability: string; root_availability: string; observed_byte_size: number | null; observed_mtime_ns: string | null; last_seen_at: string | null}[];
+  locations_truncated: boolean;
+  availability: Availability;
+}
+export type DetailsResult = {status: "ready"; details: AssetDetails} | {status: "not_found" | "invalid_request" | "temporarily_unavailable" | "internal_error"};

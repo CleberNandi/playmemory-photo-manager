@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("photoManager", {
   listGallery: (params: { pageSize?: number; after?: string | null } = {}) =>
     ipcRenderer.invoke("gallery:list", params),
+  getAssetDetails: (assetId: string) => ipcRenderer.invoke("asset:details", assetId),
   getThumbnail: (assetId: string) => ipcRenderer.invoke("thumbnail:get", assetId),
   retryGallery: () => ipcRenderer.invoke("backend:retry"),
 });
