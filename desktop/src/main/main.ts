@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, session } from "electron";
 import { join, resolve } from "node:path";
 import { smoke } from "./smoke.js";
+import { duplicatesRequest } from "./duplicates.js";
 import { PythonBackend } from "./backend.js";
 
 const backend = new PythonBackend();
@@ -53,8 +54,11 @@ app.whenReady().then(async () => {
     try { return await backend.request("thumbnail.get", {asset_id: assetId}); }
     finally { thumbnailRequests--; }
   });
+  ipcMain.handle("duplicates:list", (_event, params: unknown) => duplicatesRequest(backend, "duplicates.list", params));
+  ipcMain.handle("duplicates:group", (_event, params: unknown) => duplicatesRequest(backend, "duplicates.group", params));
   ipcMain.handle("backend:retry", async () => {
     await backend.restart();
+    for (const target of BrowserWindow.getAllWindows()) target.webContents.send("backend:reset");
     return backend.request("gallery.list", { page_size: 24 });
   });
   try { await backend.start(); } catch { /* Renderer presents a recoverable backend error. */ }
@@ -64,7 +68,7 @@ app.whenReady().then(async () => {
       console.error("SMOKE FAIL: timeout");
       process.exitCode = 1;
       app.quit();
-    }, 30_000);
+    }, 45_000);
     window.webContents.once("render-process-gone", () => { process.exitCode = 1; app.quit(); });
     window.webContents.once("did-finish-load", () => {
       void smoke(window, backend).then(() => { clearTimeout(watchdog); app.quit(); }).catch((error: unknown) => {

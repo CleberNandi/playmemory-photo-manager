@@ -51,8 +51,24 @@ def _open_catalog(path: Path | None) -> sqlite3.Connection:
 
 
 def _dispatch(
-    connection: sqlite3.Connection, method: str, params: object, *, demo: bool = False
+    connection: sqlite3.Connection,
+    method: str,
+    params: object,
+    *,
+    demo: bool = False,
+    duplicates: object = None,
 ) -> object:
+    if method in {"duplicates.list", "duplicates.group"}:
+        from .duplicates import DuplicatePresentation, synthetic_groups, validate_unavailable
+
+        if not demo:
+            return validate_unavailable(method, params)
+        presentation = (
+            duplicates
+            if duplicates is not None
+            else DuplicatePresentation(*synthetic_groups(connection))
+        )
+        return presentation.request(method, params)
     if method in {"thumbnail.get", "asset.details"}:
         if not isinstance(params, dict) or set(params) != {"asset_id"}:
             raise BridgeRequestError("expected asset_id only")
@@ -114,6 +130,9 @@ def serve(
     *,
     demo: bool = False,
 ) -> int:
+    from .duplicates import DuplicatePresentation, synthetic_groups
+
+    duplicates = DuplicatePresentation(*synthetic_groups(connection)) if demo else None
     _write(sink, {"event": "ready", "protocol": 1})
     for raw_line in source:
         if len(raw_line.encode("utf-8")) > MAX_MESSAGE_BYTES:
@@ -132,7 +151,9 @@ def serve(
             method = request.get("method")
             if not isinstance(method, str):
                 raise BridgeRequestError("method must be text")
-            result = _dispatch(connection, method, request.get("params", {}), demo=demo)
+            result = _dispatch(
+                connection, method, request.get("params", {}), demo=demo, duplicates=duplicates
+            )
             _write(sink, {"id": request_id, "ok": True, "result": result})
             if method == "shutdown":
                 return 0
@@ -168,7 +189,16 @@ def serve(
 
 
 def _write(sink: TextIO, payload: object) -> None:
-    sink.write(json.dumps(payload, default=_json_default, separators=(",", ":")) + "\n")
+    line = json.dumps(payload, default=_json_default, separators=(",", ":")) + "\n"
+    if len(line.encode("utf-8")) > 256 * 1024:
+        request_id = payload.get("id") if isinstance(payload, dict) else None
+        if not isinstance(request_id, str) or len(request_id) > 128:
+            request_id = None
+        line = (
+            json.dumps({"id": request_id, "ok": False, "error": {"code": "response_too_large"}})
+            + "\n"
+        )
+    sink.write(line)
     sink.flush()
 
 

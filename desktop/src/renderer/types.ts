@@ -22,6 +22,9 @@ declare global {
       listGallery(params?: { pageSize?: number; after?: string | null }): Promise<GalleryPage>;
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
       getThumbnail?(assetId: string): Promise<unknown>;
+      listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
+      getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;
+      onBackendReset?(listener: () => void): () => void;
       retryGallery(): Promise<GalleryPage>;
     };
   }
@@ -45,3 +48,28 @@ export interface AssetDetails {
   availability: Availability;
 }
 export type DetailsResult = {status: "ready"; details: AssetDetails} | {status: "not_found" | "invalid_request" | "temporarily_unavailable" | "internal_error"};
+
+export interface DuplicateMember {
+  asset_id: string; location_id: string; library_root_id: string;
+  root_display_name: string; relative_path: string;
+  location_source: "catalog_fixture" | "projection_fixture";
+  hardlinked: boolean; identity_conflict: boolean; protected: boolean | null; blocks: string[];
+}
+export interface DuplicateGroup {
+  group_key: string; sha256: string; byte_size: string; evidence_fingerprint: string | null;
+  occurrence_count: number; physical_copy_count: number; blocks: string[];
+  plan_state: "pending" | "ready" | "blocked" | "stale" | null;
+  review: {decision_id: string; status: "current" | "stale"; keep_location_id: string; reason: string} | null;
+}
+export interface DuplicatePage {
+  version: 1; snapshot_id: string; source: "synthetic_fixture"; observed_at: null; freshness: "synthetic";
+  coverage: "complete" | "partial" | "unavailable";
+  issues: {kind: string; asset_id: string; location_id: string; library_root_id: string; relative_path: string}[];
+  eligible_location_count: number; hashed_location_count: number;
+  total_count: number; next_cursor: string | null;
+}
+export interface DuplicateListPage extends DuplicatePage {groups: DuplicateGroup[]}
+export interface DuplicateGroupPage extends DuplicatePage {group: DuplicateGroup; members: DuplicateMember[]}
+export type DuplicateResult<P> = {status: "ready"; page: P} | {status: "analysis_not_available" | "temporarily_unavailable" | "internal_error" | "invalid_request" | "stale_snapshot" | "not_found" | "response_too_large"};
+export interface DuplicateListParams {pageSize?: number; after?: string | null}
+export interface DuplicateGroupParams extends DuplicateListParams {snapshotId: string; groupKey: string}

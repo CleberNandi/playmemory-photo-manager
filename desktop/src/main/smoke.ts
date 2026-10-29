@@ -63,7 +63,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'getAssetDetails,getThumbnail,listGallery,retryGallery') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'getAssetDetails,getDuplicateGroup,getThumbnail,listDuplicates,listGallery,onBackendReset,retryGallery') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -94,6 +94,54 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     await waitFor('!!document.querySelector(".asset-details dl")');
     await evaluate('document.querySelector(".asset-details button").click()');
     console.log("SMOKE details recovery PASS: stopped backend restarted, gallery preserved");
+  }
+  // D03-01: real Electron/preload/IPC/Python, no substitute renderer bridge.
+  window.setSize(1180, 760);
+  await evaluate(`document.querySelector('[aria-label="Duplicatas exatas"]').click()`);
+  if (demo) {
+    await waitFor('document.querySelectorAll(".group-select").length === 2');
+    await evaluate('document.querySelector(".more-groups").click()');
+    await waitFor('document.querySelectorAll(".group-select").length === 4');
+    await evaluate('document.querySelectorAll(".group-select")[1].click()');
+    await waitFor('document.querySelectorAll(".duplicate-members > li").length === 3');
+    if (!await evaluate('document.querySelector(".duplicate-group").textContent.includes("Hardlink simulado")')) throw new Error("missing hardlink state");
+    await evaluate('document.querySelectorAll(".group-select")[2].click()');
+    await waitFor('document.querySelectorAll(".duplicate-members > li").length === 2');
+    if (!await evaluate('document.querySelector(".duplicate-group").textContent.includes("histórica desatualizada")')) throw new Error("missing stale review");
+    await evaluate('document.querySelectorAll(".group-select")[3].click()');
+    await waitFor('document.querySelectorAll(".duplicate-members > li").length === 24');
+    await writeFile("/tmp/playmemories-d03-01-duplicates.png", (await window.webContents.capturePage()).toPNG());
+    for (const count of [48, 72, 96, 105]) {
+      await evaluate('document.querySelector(".more-members").click()');
+      await waitFor(`document.querySelectorAll(".duplicate-members > li").length === ${count}`);
+    }
+    const locations = await evaluate<string[]>('Array.from(document.querySelectorAll(".duplicate-members > li"), li => li.querySelectorAll("p")[4].textContent)');
+    if (new Set(locations).size !== 105) throw new Error("lost or duplicated members");
+    await evaluate('document.querySelector(".member-details").click()');
+    await waitFor('!!document.querySelector(".asset-details dl")');
+    await writeFile("/tmp/playmemories-d03-01-member-details.png", (await window.webContents.capturePage()).toPNG());
+    window.webContents.sendInputEvent({type: "keyDown", keyCode: "Escape"});
+    window.webContents.sendInputEvent({type: "keyUp", keyCode: "Escape"});
+    await waitFor('!document.querySelector(".asset-details")');
+    if (!await evaluate('document.activeElement.classList.contains("member-details")')) throw new Error("member focus not restored");
+    for (const [width, height] of [[1180, 760], [860, 560], [760, 560], [760, 520]]) {
+      window.setSize(width, height);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (await evaluate('document.documentElement.scrollWidth > innerWidth')) throw new Error(`duplicate overflow at ${width}x${height}`);
+      await writeFile(`/tmp/playmemories-d03-01-${width}x${height}.png`, (await window.webContents.capturePage()).toPNG());
+    }
+    // Restart invalidates the projection and selection while preserving gallery cards.
+    await evaluate('window.photoManager.retryGallery()');
+    await waitFor('!document.querySelector(".duplicate-group") && document.querySelectorAll(".group-select").length === 2');
+    await evaluate(`document.querySelector('[aria-label="Biblioteca"]').click()`);
+    if (!await evaluate('document.querySelectorAll(".media-card").length === 73')) throw new Error("gallery lost through duplicate navigation");
+    console.log("SMOKE D03-01 PASS: four groups, hardlinks, stale review, 105 unique members, D02C details/focus, resize, restart, 73 Assets preserved");
+  } else {
+    await waitFor('document.querySelector(".duplicates-view")?.textContent.includes("Nenhuma mídia foi analisada")');
+    if (await evaluate('!!document.querySelector(".duplicates-view button")')) throw new Error("misleading capability retry");
+    await writeFile("/tmp/playmemories-d03-01-normal.png", (await window.webContents.capturePage()).toPNG());
+    await evaluate(`document.querySelector('[aria-label="Biblioteca"]').click()`);
+    console.log("SMOKE D03-01 normal PASS: analysis_not_available, no retry or scan");
   }
   await backend.stop();
   window.webContents.reload();
