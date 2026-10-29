@@ -42,16 +42,39 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
       console.log(`SMOKE thumbnails PASS: ${count} decoded PNGs`);
       console.log(`SMOKE pagination PASS: ${count} cards, exact backend order`);
     }
+    window.focus();
+    window.webContents.focus();
+    await evaluate('document.querySelector(".card-select").focus()');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    window.webContents.sendInputEvent({type: "keyDown", keyCode: "Enter"});
+    window.webContents.sendInputEvent({type: "char", keyCode: "\r"});
+    window.webContents.sendInputEvent({type: "keyUp", keyCode: "Enter"});
+    await waitFor('!!document.querySelector(".asset-details")');
+    await waitFor('!!document.querySelector(".asset-details dl")');
+    if (!await evaluate('document.querySelector(".asset-details").textContent.includes("Metadata não extraída")')) throw new Error("missing metadata state");
+    await writeFile("/tmp/playmemories-d02c-details.png", (await window.webContents.capturePage()).toPNG());
+    window.webContents.sendInputEvent({type: "keyDown", keyCode: "Escape"});
+    window.webContents.sendInputEvent({type: "keyUp", keyCode: "Escape"});
+    await waitFor('!document.querySelector(".asset-details")');
+    if (!await evaluate('document.activeElement.classList.contains("card-select")')) throw new Error("details focus not restored");
+    console.log("SMOKE details PASS: real DTO, absence state, close and focus restoration");
     if (expected.length !== 73) throw new Error("lost assets");
     await waitFor('document.querySelector(".pagination")?.textContent.includes("Fim da biblioteca")');
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'getThumbnail,listGallery,retryGallery') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'getAssetDetails,getThumbnail,listGallery,retryGallery') throw new Error("unexpected bridge exposure");
+  const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
+  const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
+  if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
   if (await evaluate<boolean>('typeof process !== "undefined" || typeof require !== "undefined"')) throw new Error("Node exposed to renderer");
   for (const [width, height] of [[1180, 760], [860, 560], [760, 560], [760, 520]]) {
     window.setSize(width, height);
     await new Promise((resolve) => setTimeout(resolve, 150));
+    if (demo) {
+      await evaluate('document.querySelector(".card-select").click()');
+      await waitFor('!!document.querySelector(".asset-details dl")');
+    }
     if (await evaluate<boolean>(demo ? 'document.documentElement.scrollWidth > innerWidth' : 'document.documentElement.scrollWidth > innerWidth || document.documentElement.scrollHeight > innerHeight')) throw new Error(`overflow at ${width}x${height}`);
     const privacy = await evaluate<boolean>('getComputedStyle(document.querySelector(".privacy-note span")).display !== "none"');
     if (!privacy) throw new Error("privacy text hidden from accessibility tree");
@@ -60,7 +83,17 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
       const tree = await window.webContents.debugger.sendCommand("Accessibility.getFullAXTree");
       if (!tree.nodes.some((node: { ignored: boolean; name?: { value: string } }) => !node.ignored && node.name?.value.includes("Seus originais não são alterados."))) throw new Error("privacy text absent from accessibility tree");
     } finally { window.webContents.debugger.detach(); }
+    if (demo) await evaluate('document.querySelector(".asset-details button").click()');
     console.log(`SMOKE resize PASS: ${width}x${height}, no horizontal overflow; privacy in accessibility tree`);
+  }
+  if (demo) {
+    await backend.stop();
+    await evaluate('document.querySelector(".card-select").click()');
+    await waitFor('!!document.querySelector(".asset-details [role=alert]")');
+    await evaluate('document.querySelector(".asset-details [role=alert] button").click()');
+    await waitFor('!!document.querySelector(".asset-details dl")');
+    await evaluate('document.querySelector(".asset-details button").click()');
+    console.log("SMOKE details recovery PASS: stopped backend restarted, gallery preserved");
   }
   await backend.stop();
   window.webContents.reload();
