@@ -88,7 +88,7 @@ export class PythonBackend extends EventEmitter {
     await this.start(this.repositoryRoot || undefined);
   }
 
-  async request(method: "gallery.list" | "thumbnail.get", params: { page_size?: number; after?: string | null; asset_id?: string } = {}): Promise<unknown> {
+  async request(method: "gallery.list" | "thumbnail.get" | "asset.details", params: { page_size?: number; after?: string | null; asset_id?: string } = {}): Promise<unknown> {
     if (!this.child || !this.readyPromise || this.state === "stopped") throw new Error("backend is not running");
     await this.readyPromise;
     return this.send(method, params, this.requestTimeoutMs);
@@ -199,7 +199,7 @@ export class PythonBackend extends EventEmitter {
     clearTimeout(pending.timer);
     this.pending.delete(message.id);
     if (message.ok) pending.resolve(message.result);
-    else pending.reject(new Error(message.error?.message ?? message.error?.code ?? "backend request failed"));
+    else pending.reject(Object.assign(new Error(message.error?.message ?? "backend request failed"), {code: message.error?.code}));
   }
 
   private fail(error: Error, generation: number, expected = false): void {

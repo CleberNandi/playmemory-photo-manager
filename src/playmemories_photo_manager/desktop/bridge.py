@@ -16,6 +16,7 @@ from uuid import UUID
 
 from playmemories_photo_manager.catalog import initialize_database
 from playmemories_photo_manager.gallery import GalleryQueries, GalleryQuery
+from playmemories_photo_manager.gallery.errors import AssetNotFoundError
 
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_PAGE_SIZE = 50
@@ -52,7 +53,7 @@ def _open_catalog(path: Path | None) -> sqlite3.Connection:
 def _dispatch(
     connection: sqlite3.Connection, method: str, params: object, *, demo: bool = False
 ) -> object:
-    if method == "thumbnail.get":
+    if method in {"thumbnail.get", "asset.details"}:
         if not isinstance(params, dict) or set(params) != {"asset_id"}:
             raise BridgeRequestError("expected asset_id only")
         asset_id = params["asset_id"]
@@ -61,6 +62,14 @@ def _dispatch(
                 raise ValueError
         except (ValueError, AttributeError):
             raise BridgeRequestError("asset_id must be a canonical UUID") from None
+        if method == "asset.details":
+            details = asdict(GalleryQueries(connection).get_asset_details(asset_id))
+            # Nanoseconds exceed JavaScript's safe integer range. Preserve the
+            # observation exactly at the JSON boundary, including explicit null.
+            for location in details["locations"]:
+                if location["observed_mtime_ns"] is not None:
+                    location["observed_mtime_ns"] = str(location["observed_mtime_ns"])
+            return details
         if not demo:
             return None
         row = connection.execute("SELECT kind FROM asset WHERE id = ?", (asset_id,)).fetchone()
@@ -136,6 +145,16 @@ def serve(
                     "error": {"code": "invalid_request", "message": str(error)},
                 },
             )
+        except AssetNotFoundError:
+            _write(sink, {"id": request_id, "ok": False, "error": {"code": "not_found"}})
+        except sqlite3.OperationalError as error:
+            code = (
+                "temporarily_unavailable"
+                if getattr(error, "sqlite_errorcode", None)
+                in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+                else "backend_failure"
+            )
+            _write(sink, {"id": request_id, "ok": False, "error": {"code": code}})
         except Exception:
             _write(
                 sink,

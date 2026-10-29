@@ -38,6 +38,14 @@ app.whenReady().then(async () => {
   ipcMain.handle("gallery:list", (_event, params: { pageSize?: number; after?: string | null }) =>
     backend.request("gallery.list", { page_size: params.pageSize, after: params.after }),
   );
+  ipcMain.handle("asset:details", async (_event, assetId: unknown) => {
+    if (typeof assetId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(assetId)) return {status: "invalid_request"};
+    try { return {status: "ready", details: await backend.request("asset.details", {asset_id: assetId})}; }
+    catch (error) {
+      const code = (error as {code?: string}).code;
+      return {status: code === "not_found" ? "not_found" : code === "backend_failure" ? "internal_error" : "temporarily_unavailable"};
+    }
+  });
   ipcMain.handle("thumbnail:get", async (_event, assetId: unknown) => {
     if (typeof assetId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(assetId)) throw new Error("invalid asset identifier");
     if (thumbnailRequests >= 4) throw new Error("thumbnail busy");
