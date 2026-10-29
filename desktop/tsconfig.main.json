@@ -9,5 +9,5 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["src/main/**/*.ts"]
+  "include": ["src/main/**/*.ts", "src/main/**/*.cts"]
 }

@@ -16,7 +16,7 @@ function createWindow(): BrowserWindow {
     minHeight: 520,
     backgroundColor: "#f5f1e8",
     webPreferences: {
-      preload: join(import.meta.dirname, "preload.js"),
+      preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
