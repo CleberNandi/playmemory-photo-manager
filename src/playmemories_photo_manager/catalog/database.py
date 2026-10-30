@@ -70,6 +70,10 @@ def validate_database(connection: sqlite3.Connection) -> None:
         raise IncompatibleSchemaError("SQLite 3.37 or newer is required")
     if connection.in_transaction:
         raise MigrationError("validation requires no active transaction")
+    # This validates the supplied connection; only the lifecycle's descriptor
+    # preflight can reject persisted WAL before SQLite has touched auxiliaries.
+    if connection.execute("PRAGMA journal_mode").fetchone()[0] not in ("delete", "memory"):
+        raise IncompatibleSchemaError("journal mode is not supported by the library lifecycle")
     reference = initialize_database(":memory:")
     try:
         connection.execute("BEGIN")

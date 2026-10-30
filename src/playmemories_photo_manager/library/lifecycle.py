@@ -134,6 +134,11 @@ class _Selection:
 
     def connection(self, mode: str) -> sqlite3.Connection:
         self.check()
+        # mode=ro can still create WAL/SHM on the first SQLite read. Inspect the
+        # retained inode before every connection, not through the mutable path.
+        header = os.pread(self.fd, 100, 0)
+        if header.startswith(b"SQLite format 3\x00") and header[18:20] != b"\x01\x01":
+            raise LibraryError("incompatible")
         if mode == "rw" and (
             not os.access(
                 self.path.name,

@@ -103,3 +103,45 @@ credencial ou artefato gerado versionado. Build e smoke Electron/KDE NOT RUN: se
 desktop neste incremento. Gemini NOT RUN: este documento é handoff, não parecer independente.
 Pontos prioritários para auditoria: testemunho do fd SQLite e corridas, limites dos auxiliares,
 validação sem upgrade/escrita, lifecycle e preservação da sessão anterior em falha.
+
+## Retorno da auditoria Gemini — correção de 2026-10-30
+
+Parecer fornecido pelo solicitante sobre `f212e28`: PASS WITH CHANGES, com MAJOR-01,
+MINOR-01 e OBSERVATION-01. Não representa homologação desta correção. Instruções consultadas:
+AGENTS.md, GEMINI.md, implement-increment, quality-gates e D04-00 §4.2, além deste handoff,
+do código e dos testes afetados. Não há alteração de ADR, migration ou dependências.
+
+- **MAJOR-01 aceito e corrigido:** mode=ro não impede criação de auxiliares WAL durante a
+  primeira leitura SQLite. Antes de cada conexão, o lifecycle lê até 100 bytes com os.pread no
+  descritor já retido. Cabeçalho SQLite com versões de leitura/escrita diferentes de 1/1 é
+  recusado com incompatible antes da fábrica SQLite; banco novo vazio continua no bootstrap.
+  validate_database também recusa journal_mode fora de delete/memory, sem mudar o modo.
+  O validador de conexão não substitui a proteção anterior à abertura: uma conexão arbitrária
+  já aberta pelo chamador pode ter tocado em auxiliares antes de chegar a essa API.
+- **MINOR-01 contestado, aguardando reavaliação:** D04-00 proíbe os destinos de catálogo dentro
+  da raiz de mídia e a admissão de uma raiz que contenha esses destinos. Não atribui escopo
+  recursivo ao diretório pai do arquivo SQLite. `/dados/catalog.sqlite3` e `/dados/photos/`
+  não se contêm; seus auxiliares também ficam fora de photos. A condição sugerida
+  `root.is_relative_to(path.parent)` acrescentaria uma restrição não estabelecida pelo contrato.
+  Mantida a política existente, com testes de seleção conhecida e raiz registrada para esse
+  cenário; os testes de recusa quando a raiz contém o catálogo permanecem. Não se considera
+  o achado encerrado unilateralmente: Gemini deve reavaliar a interpretação na próxima auditoria.
+- **OBSERVATION-01 esclarecida:** a API recebe Path; segmentos `.` já foram colapsados antes
+  da chamada. Converter novamente com str(path) não recupera essa representação. Não há promessa
+  de rejeitar a grafia original nem ampliação de escopo por isso; `..` continua recusado e os
+  componentes efetivos continuam sujeitos a O_NOFOLLOW. Não foi introduzida API de string bruta.
+
+Reprodução sintética antes/depois: a baseline deixou catalog-wal/catalog-shm e retornou busy;
+a correção retornou incompatible mantendo nomes e bytes do diretório exatamente iguais.
+Essa reprodução inicial usou Python 3.12.14 como evidência auxiliar durante a restauração do
+ambiente; não é um quality gate nem homologação do runtime suportado (Python >=3.13).
+
+Gates finais desta correção, após restauração do ambiente: uv sync --locked PASS;
+uv run pytest PASS (350 testes, 33 do lifecycle); uv run ruff check . PASS;
+uv run ruff format --check . PASS (101 arquivos); git diff --check PASS. Runtime:
+CPython 3.13.16. Sem arquivos novos/não rastreados; inspeção do diff restrita a quatro arquivos
+de código/testes/documentação, sem mídia, bancos, credenciais ou artefatos gerados.
+Tentativas intermediárias de sync/run falharam durante a restauração por downloads de runtime
+e pacotes indisponíveis/timeout; também houve tentativa offline sem cache completo. Nenhuma
+dessas tentativas foi tratada como PASS. Os gates acima foram executados depois com o lockfile
+inalterado. Build/smoke desktop e nova auditoria Gemini NOT RUN; não houve mudança de UI.

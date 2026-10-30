@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from playmemories_photo_manager.catalog.database import (
+    IncompatibleSchemaError,
     initialize_database,
     validate_database,
 )
@@ -227,6 +228,57 @@ def test_lifecycle_preserves_previous_on_failure_and_closes_on_swap(tmp_path):
         _ = old.query_connection
     owner.close()
     assert owner.active is None
+
+
+def test_clean_wal_rejected_before_sqlite_and_without_auxiliaries(tmp_path, monkeypatch):
+    path = tmp_path / "catalog"
+    db = initialize_database(path)
+    assert db.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+    db.close()
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    assert set(before) == {path.name}
+
+    def forbidden_connect(*_args, **_kwargs):
+        pytest.fail("WAL must be rejected before SQLite opens the file")
+
+    monkeypatch.setattr(lifecycle, "connect", forbidden_connect)
+    with pytest.raises(LibraryError, match="incompatible"):
+        LibrarySession.open(path)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
+def test_validator_rejects_wal_without_changing_journal_mode(tmp_path):
+    db = initialize_database(tmp_path / "catalog")
+    try:
+        db.execute("PRAGMA journal_mode = WAL")
+        with pytest.raises(IncompatibleSchemaError):
+            validate_database(db)
+        assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert not db.in_transaction
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_media_subdirectory_does_not_contain_catalog(tmp_path, registered):
+    # The catalog file and its auxiliaries are outside photos, even though their
+    # common parent contains photos. No recursive catalog-directory scope exists.
+    path = tmp_path / "catalog"
+    root = tmp_path / "photos"
+    root.mkdir()
+    if registered:
+        db = initialize_database(path)
+        db.execute(
+            "INSERT INTO library_root(id,display_name,normalized_path) VALUES (?,?,?)",
+            ("1c7ca260-2e26-4c60-9de1-acd869856608", "synthetic", str(root)),
+        )
+        db.close()
+        with LibrarySession.open(path):
+            pass
+    else:
+        with LibrarySession.create(path, known_media_roots=(root,)):
+            pass
+    assert not list(root.iterdir())
 
 
 def test_wrong_thread_does_not_touch_connection(tmp_path):
