@@ -394,6 +394,18 @@ def _only_supported_inconclusiveness(plan: CatalogChangePlan) -> bool:
 
 
 def _proposal_error(proposal: IngestionProposal) -> str | None:
+    error = _proposal_evidence_error(proposal)
+    if error is not None:
+        return error
+    try:
+        _require_applicable_plan(proposal.plan)
+    except IngestionAuthorizationError as error:
+        return str(error)
+    return None
+
+
+def _proposal_evidence_error(proposal: IngestionProposal) -> str | None:
+    """Shared evidence checks, separate from the unchanged legacy applicability gate."""
     if not isinstance(proposal, IngestionProposal):
         return "proposal must be IngestionProposal"
     if proposal.assessment != evaluate(proposal.scan_result):
@@ -441,10 +453,6 @@ def _proposal_error(proposal: IngestionProposal) -> str | None:
         return "plan does not reference the original scan run"
     if proposal.scan_result.scope != proposal.plan.scope:
         return "plan scope does not match the original scan run"
-    try:
-        _require_applicable_plan(proposal.plan)
-    except IngestionAuthorizationError as error:
-        return str(error)
     return None
 
 

@@ -1,5 +1,11 @@
 """Controlled vertical catalog-ingestion API."""
 
+from .media import (
+    MediaEligibility,
+    MediaPreparationError,
+    MediaVerificationCancelled,
+    classify_media,
+)
 from .models import (
     CandidateReference,
     CandidateSelection,
@@ -11,6 +17,7 @@ from .models import (
     IngestionProposal,
     IngestionReport,
 )
+from .scoping import ProposalResourceLimitError, ScopedIngestionProposal, scope_catalogable_proposal
 from .service import (
     apply_ingestion,
     authorize_ingestion,
@@ -31,6 +38,13 @@ __all__ = [
     "IngestionItemResult",
     "IngestionProposal",
     "IngestionReport",
+    "MediaEligibility",
+    "MediaPreparationError",
+    "MediaVerificationCancelled",
+    "ProposalResourceLimitError",
+    "ScopedIngestionProposal",
+    "classify_media",
+    "scope_catalogable_proposal",
     "SnapshotLimits",
     "SnapshotResourceLimitError",
     "apply_ingestion",
