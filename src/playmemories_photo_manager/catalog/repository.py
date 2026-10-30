@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 
 from .models import (
     Album,
@@ -55,6 +56,16 @@ class CatalogRepository:
             (limit, offset),
         )
         return [_asset(row) for row in rows]
+
+    def iter_assets(self, identifiers: tuple[str, ...]) -> Iterator[Asset]:
+        placeholders = ",".join("?" for _ in identifiers)
+        rows = self.connection.execute(
+            "SELECT id, kind, sha256, hash_state, byte_size, media_type, status, created_at "
+            f"FROM asset WHERE id IN ({placeholders}) ORDER BY id",
+            identifiers,
+        )
+        for row in rows:
+            yield _asset(row)
 
     def insert_root(
         self,
@@ -131,12 +142,16 @@ class CatalogRepository:
         return [_location(row) for row in rows]
 
     def list_root_locations(self, root_id: str, limit: int, offset: int) -> list[FileLocation]:
+        return list(self.iter_root_locations(root_id, limit, offset))
+
+    def iter_root_locations(self, root_id: str, limit: int, offset: int) -> Iterator[FileLocation]:
         rows = self.connection.execute(
             """SELECT * FROM file_location WHERE library_root_id = ?
             ORDER BY id LIMIT ? OFFSET ?""",
             (root_id, limit, offset),
         )
-        return [_location(row) for row in rows]
+        for row in rows:
+            yield _location(row)
 
     def insert_album(self, identifier: str, name: str, description: str | None) -> None:
         self.connection.execute(

@@ -56,6 +56,29 @@ class ConfinementKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ScanLimits:
+    """Enumeration budgets; exhaustion raises instead of publishing partial coverage."""
+
+    max_entries: int = 2000
+    max_depth: int = 32
+
+    def __post_init__(self) -> None:
+        for value in (self.max_entries, self.max_depth):
+            if type(value) is not int or value < 0:
+                raise ValueError("scan limits must be non-negative integers")
+
+
+class ScanResourceLimitError(RuntimeError):
+    """No ScanResult is published on exhaustion; diagnostics never contain paths."""
+
+    def __init__(self, reason: str, observed_count: int, depth: int):
+        self.reason = reason
+        self.observed_count = observed_count
+        self.depth = depth
+        super().__init__("resource_limit")
+
+
+@dataclass(frozen=True, slots=True)
 class ScanOptions:
     """Options deliberately limited to safe observation behavior."""
 
@@ -63,12 +86,15 @@ class ScanOptions:
     cancellation_requested: Callable[[], bool] | None = field(
         default=None, repr=False, compare=False
     )
+    limits: ScanLimits | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.recursive, bool):
             raise TypeError("recursive must be boolean")
         if self.cancellation_requested is not None and not callable(self.cancellation_requested):
             raise TypeError("cancellation_requested must be callable or None")
+        if self.limits is not None and not isinstance(self.limits, ScanLimits):
+            raise TypeError("limits must be ScanLimits or None")
 
 
 @dataclass(frozen=True, slots=True)

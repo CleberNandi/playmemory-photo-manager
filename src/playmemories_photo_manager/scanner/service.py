@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import stat
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -21,6 +23,7 @@ from .models import (
     RootObservation,
     ScanEnvironment,
     ScanOptions,
+    ScanResourceLimitError,
     ScanResult,
     ScanScope,
     ScanStatus,
@@ -43,6 +46,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
     entries: list[EntryObservation] = []
     failures: list[ObservationFailure] = []
     covered_directories: list[str] = []
+    budget = _EnumerationBudget()
 
     try:
         root_stat = os.lstat(absolute_root)
@@ -172,6 +176,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
                 covered_directories,
                 entries,
                 failures,
+                budget,
             )
             try:
                 final_root_stat = os.lstat(absolute_root)
@@ -190,6 +195,7 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
             covered_directories,
             entries,
             failures,
+            budget,
         )
     if cancelled:
         status = ScanStatus.CANCELLED
@@ -253,12 +259,15 @@ def _walk_fd(
     covered_directories: list[str],
     observations: list[EntryObservation],
     failures: list[ObservationFailure],
+    budget: _EnumerationBudget,
 ) -> tuple[bool, bool]:
     if _cancelled(options):
         return True, False
     try:
         with os.scandir(directory_fd) as iterator:
-            children = sorted(iterator, key=lambda item: item.name)
+            children = _collect_children(iterator, relative_directory, options, budget)
+    except _CollectionCancelled:
+        return True, False
     except OSError as error:
         failures.append(
             _failure(_display_path(relative_directory), FailureOperation.ENUMERATE_DIRECTORY, error)
@@ -306,6 +315,7 @@ def _walk_fd(
                     covered_directories,
                     observations,
                     failures,
+                    budget,
                 )
             finally:
                 os.close(child_fd)
@@ -323,12 +333,15 @@ def _walk(
     covered_directories: list[str],
     observations: list[EntryObservation],
     failures: list[ObservationFailure],
+    budget: _EnumerationBudget,
 ) -> tuple[bool, bool]:
     if _cancelled(options):
         return True, False
     try:
         with os.scandir(directory) as iterator:
-            children = sorted(iterator, key=lambda item: item.name)
+            children = _collect_children(iterator, relative_directory, options, budget)
+    except _CollectionCancelled:
+        return True, False
     except OSError as error:
         failures.append(
             _failure(_display_path(relative_directory), FailureOperation.ENUMERATE_DIRECTORY, error)
@@ -357,12 +370,50 @@ def _walk(
                 covered_directories,
                 observations,
                 failures,
+                budget,
             )
             if cancelled:
                 return True, False
     if _cancelled(options):
         return True, False
     return False, False
+
+
+@dataclass
+class _EnumerationBudget:
+    seen: int = 0
+
+
+class _CollectionCancelled(Exception):
+    pass
+
+
+def _collect_children(
+    iterator: Iterator[os.DirEntry[str]],
+    relative_directory: PurePosixPath,
+    options: ScanOptions,
+    budget: _EnumerationBudget,
+) -> list[os.DirEntry[str]]:
+    if options.limits is None:
+        return sorted(iterator, key=lambda item: item.name)
+    children = []
+    while True:
+        if _cancelled(options):
+            raise _CollectionCancelled
+        try:
+            child = next(iterator)
+        except StopIteration:
+            break
+        budget.seen += 1
+        depth = len((relative_directory / child.name).parts)
+        if options.limits is not None:
+            if budget.seen > options.limits.max_entries:
+                raise ScanResourceLimitError("max_entries", budget.seen, depth)
+            if depth > options.limits.max_depth:
+                raise ScanResourceLimitError("max_depth", budget.seen, depth)
+        children.append(child)
+    children.sort(key=lambda item: item.name)
+    return children
 
 
 def _stat_entry(entry: os.DirEntry[str]) -> os.stat_result:

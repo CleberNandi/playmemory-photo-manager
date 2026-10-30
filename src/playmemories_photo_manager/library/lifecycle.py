@@ -70,6 +70,46 @@ def _translate(error: Exception) -> LibraryError:
     return LibraryError("internal_error")
 
 
+@contextmanager
+def read_library_connection(
+    path: Path, *, max_value_bytes: int = 8 * 1024 * 1024
+) -> Iterator[sqlite3.Connection]:
+    """Validated worker read, with no writable probe or session activation.
+
+    Call on the owning worker thread and leave this context before reading media.
+    Exceptions from the caller are preserved; setup failures use fixed public codes.
+    """
+    if type(max_value_bytes) is not int or not 0 < max_value_bytes <= 8 * 1024 * 1024:
+        raise ValueError("invalid SQLite value budget")
+    selection = None
+    connection = None
+    try:
+        try:
+            selection = _Selection(path, create=False)
+            connection = selection.connection("ro")
+            connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, max_value_bytes)
+            validate_database(connection)
+            for row in connection.execute("SELECT normalized_path FROM library_root"):
+                root = Path(row[0])
+                if not root.is_absolute() or ".." in root.parts or path.is_relative_to(root):
+                    raise LibraryError("unsafe_location")
+            selection.check()
+        except Exception as error:
+            if getattr(error, "sqlite_errorcode", 0) & 255 == sqlite3.SQLITE_TOOBIG:
+                raise LibraryError("resource_limit") from None
+            raise _translate(error) from None
+        yield connection
+        try:
+            selection.check()
+        except Exception as error:
+            raise _translate(error) from None
+    finally:
+        if connection is not None:
+            connection.close()
+        if selection is not None:
+            selection.close()
+
+
 class _Selection:
     def __init__(self, path: Path, *, create: bool):
         self.path = path

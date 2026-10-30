@@ -31,7 +31,13 @@ from playmemories_photo_manager.evidence import (
     StructuralValidation,
     evaluate,
 )
-from playmemories_photo_manager.scanner import PhysicalIdentity, ScanOptions, ScanScope, scan
+from playmemories_photo_manager.scanner import (
+    PhysicalIdentity,
+    ScanOptions,
+    ScanResult,
+    ScanScope,
+    scan,
+)
 
 from .models import (
     CandidateReference,
@@ -65,6 +71,14 @@ def prepare_ingestion(
         scope=assessment.scope,
         catalog_root_identity=None,
     )
+    return prepare_from_snapshot(snapshot, scan_result, context)
+
+
+def prepare_from_snapshot(
+    snapshot: CatalogSnapshot, scan_result: ScanResult, context: PlanningContext
+) -> IngestionProposal:
+    """Pure assembly after the worker has closed its SQLite snapshot connection."""
+    assessment = evaluate(scan_result)
     return IngestionProposal(
         scan_result=scan_result,
         assessment=assessment,
@@ -319,6 +333,12 @@ def _catalog_snapshot(catalog: Catalog, root_id: str, scope: ScanScope) -> Catal
     assets = tuple(
         catalog.get_asset(asset_id) for asset_id in sorted({item.asset_id for item in locations})
     )
+    return CatalogSnapshot(
+        root, assets, locations, (), scope, _snapshot_read_version(root, assets, locations)
+    )
+
+
+def _snapshot_read_version(root, assets, locations) -> str:
     version_payload = {
         "root": [root.id, root.normalized_path, str(root.availability)],
         "assets": [
@@ -347,10 +367,7 @@ def _catalog_snapshot(catalog: Catalog, root_id: str, scope: ScanScope) -> Catal
             for item in sorted(locations, key=lambda value: value.id)
         ],
     }
-    read_version = hashlib.sha256(
-        json.dumps(version_payload, separators=(",", ":")).encode()
-    ).hexdigest()
-    return CatalogSnapshot(root, assets, locations, (), scope, read_version)
+    return hashlib.sha256(json.dumps(version_payload, separators=(",", ":")).encode()).hexdigest()
 
 
 def _require_applicable_plan(plan: CatalogChangePlan) -> None:
