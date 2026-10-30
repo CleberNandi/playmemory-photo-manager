@@ -19,6 +19,12 @@ export interface GalleryPage {
 declare global {
   interface Window {
     photoManager?: {
+      getLibraryState?(): Promise<LibraryState>;
+      chooseCreateLibrary?(): Promise<LibraryState>;
+      chooseOpenLibrary?(): Promise<LibraryState>;
+      closeLibrary?(sessionId: string): Promise<LibraryState>;
+      setReopenLibrary?(value: boolean): Promise<LibraryState>;
+      forgetLibrary?(): Promise<LibraryState>;
       listGallery(params?: { pageSize?: number; after?: string | null }): Promise<GalleryPage>;
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
       getThumbnail?(assetId: string): Promise<unknown>;
@@ -28,6 +34,14 @@ declare global {
       retryGallery(): Promise<GalleryPage>;
     };
   }
+}
+
+export interface LibraryState {
+  state: "active" | "no_library" | "unavailable" | "demo";
+  session: {session_id: string; library_handle: string; generation: number; display_name: string} | null;
+  reopen: boolean;
+  error?: string;
+  warning?: string;
 }
 
 // Transport projection of the existing Python AssetDetails; no persistence model.

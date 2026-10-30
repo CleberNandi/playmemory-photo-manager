@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { DuplicatesView } from "./DuplicatesView";
 import { MediaCard } from "./MediaCard";
+import { LibraryWorkspace } from "./LibraryWorkspace";
 import type { GalleryPage } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
@@ -14,6 +15,10 @@ async function requestGallery(retry = false): Promise<GalleryPage> {
 type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
 
 export function App() {
+  return window.photoManager?.getLibraryState ? <LibraryWorkspace><GalleryApp /></LibraryWorkspace> : <GalleryApp />;
+}
+
+function GalleryApp() {
   const [view, setView] = useState<"gallery" | "duplicates">("gallery");
   const [generation, setGeneration] = useState(0);
   const [state, setState] = useState<State>({ kind: "loading" });

@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from playmemories_photo_manager.catalog import initialize_database
-from playmemories_photo_manager.desktop.bridge import _open_catalog, serve
+from playmemories_photo_manager.desktop.bridge import serve
+from playmemories_photo_manager.library import LibrarySession
 
 TOKEN = "a" * 32
 
@@ -70,12 +71,13 @@ def test_catalog_uri_escapes_reserved_and_unicode_characters(tmp_path: Path, fil
     writable.close()
     before = {path.name for path in tmp_path.iterdir()}
 
-    connection = _open_catalog(catalog)
+    session = LibrarySession.open(catalog)
+    connection = session.query_connection
     try:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             connection.execute("CREATE TABLE forbidden (id INTEGER)")
     finally:
-        connection.close()
+        session.close()
 
     assert {path.name for path in tmp_path.iterdir()} == before

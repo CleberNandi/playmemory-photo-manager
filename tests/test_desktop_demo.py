@@ -61,7 +61,7 @@ def test_demo_bootstrap_never_opens_a_catalog_path(monkeypatch):
         assert len(_dispatch(connection, "gallery.list", {})["items"]) == 24
         return 0
 
-    monkeypatch.setattr(bridge, "_open_catalog", forbidden)
+    monkeypatch.setattr(bridge.LibrarySession, "open", forbidden)
     monkeypatch.setattr(bridge, "serve", inspect)
     assert bridge.main() == 0
 

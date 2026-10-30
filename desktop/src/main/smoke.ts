@@ -14,6 +14,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     throw new Error(`smoke timeout: ${expression}`);
   };
   const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
+  if (!demo) { await smokeLibraries(window, backend); return; }
   const ready = demo ? 'document.querySelectorAll(".media-card").length === 24' : 'document.querySelector(".status-panel h2")?.textContent === "Sua biblioteca está vazia"';
   await waitFor(ready);
   const result = await evaluate<{ items: {asset_id: string}[] }>('window.photoManager.listGallery({pageSize: 24})');
@@ -63,7 +64,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'getAssetDetails,getDuplicateGroup,getThumbnail,listDuplicates,listGallery,onBackendReset,retryGallery') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'chooseCreateLibrary,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getDuplicateGroup,getLibraryState,getThumbnail,listDuplicates,listGallery,onBackendReset,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -162,4 +163,38 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     if (!await withoutPreload.webContents.executeJavaScript('!!document.querySelector("[role=alert] button")')) throw new Error("missing preload retry lost recovery UI");
   } finally { withoutPreload.destroy(); }
   console.log("SMOKE PASS: production preload → IPC → Python; pagination/empty; resize; IPC failure; retry; missing preload");
+}
+
+// Production preload/IPC/supervisor/Python; only the native selection source is
+// supplied by the temporary harness in main. This does not validate native dialogs.
+async function smokeLibraries(window: BrowserWindow, backend: PythonBackend): Promise<void> {
+  const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (await evaluate<boolean>('!!document.querySelector(".library-welcome")')) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  type State = {state: string; session: {session_id: string; library_handle: string; display_name: string} | null; error?: string};
+  const state = () => evaluate<State>('window.photoManager.getLibraryState()');
+  if ((await state()).state !== "no_library") throw new Error("smoke must start with no library");
+  if ((await evaluate<State>('window.photoManager.chooseCreateLibrary()')).state !== "no_library") throw new Error("cancel created library");
+  const first = await evaluate<State>('window.photoManager.chooseCreateLibrary()');
+  if (first.session?.display_name !== "A.sqlite3") throw new Error("creation failed");
+  await evaluate('window.photoManager.setReopenLibrary(true)');
+  const second = await evaluate<State>('window.photoManager.chooseCreateLibrary()');
+  if (second.session?.session_id === first.session?.session_id || second.session?.display_name !== "B.sqlite3") throw new Error("switch failed");
+  await evaluate(`window.photoManager.closeLibrary(${JSON.stringify(second.session!.session_id)})`);
+  if ((await state()).state !== "no_library") throw new Error("close failed");
+  const reopened = await evaluate<State>('window.photoManager.chooseOpenLibrary()');
+  if (reopened.session?.display_name !== "A.sqlite3") throw new Error("open failed");
+  await backend.stop();
+  await evaluate('window.photoManager.retryGallery()');
+  const restarted = await state();
+  if (restarted.session?.session_id === reopened.session?.session_id || restarted.session?.library_handle !== reopened.session?.library_handle) throw new Error("restart session failed");
+  await evaluate('window.photoManager.setReopenLibrary(false)');
+  await evaluate(`window.photoManager.closeLibrary(${JSON.stringify(restarted.session!.session_id)})`);
+  const missing = await evaluate<State>('window.photoManager.chooseOpenLibrary()');
+  if (missing.error !== "not_found" || missing.state !== "no_library") throw new Error("missing catalog recreated");
+  await evaluate('window.photoManager.forgetLibrary()');
+  if (await evaluate<boolean>('typeof process !== "undefined" || typeof require !== "undefined" || "invoke" in window.photoManager')) throw new Error("renderer authority widened");
+  console.log("SMOKE D04-01B PASS: synthetic selections, cancel/create/open/switch/close/restart, missing rejected; native dialogs NOT TESTED");
 }

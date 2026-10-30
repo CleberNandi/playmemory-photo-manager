@@ -160,3 +160,10 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp
 .duplicate-blocks { padding-left: 20px; color: var(--color-warning); font-size: 13px; line-height: 1.6; }
 .workspace:has(+ .asset-details) .duplicate-layout { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1050px) { .duplicate-layout:has(.duplicate-group) { grid-template-columns: minmax(0, 1fr); } }
+.library-toolbar { padding: 12px 20px; background: #fffdf8; border-bottom: 1px solid #8d887d; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.library-identity { display: flex; flex-direction: column; max-width: 100%; overflow-wrap: anywhere; }
+.library-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.library-toolbar p { flex-basis: 100%; margin: 0; }
+.library-toolbar label { display: flex; gap: 8px; align-items: center; }
+.library-welcome { padding: 32px; }
+.library-workspace > div > .app-shell { min-height: calc(100vh - 140px); height: auto; }

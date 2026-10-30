@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import TextIO
 from uuid import UUID
 
-from playmemories_photo_manager.catalog import initialize_database
 from playmemories_photo_manager.gallery import GalleryQueries, GalleryQuery
 from playmemories_photo_manager.gallery.errors import AssetNotFoundError
+from playmemories_photo_manager.library import LibraryError, LibrarySession
 
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_PAGE_SIZE = 50
@@ -30,24 +30,6 @@ def _json_default(value: object) -> object:
     if isinstance(value, Enum):
         return value.value
     raise TypeError(f"unsupported response value: {type(value).__name__}")
-
-
-def _open_catalog(path: Path | None) -> sqlite3.Connection:
-    if path is None:
-        return initialize_database(":memory:")
-    resolved = path.expanduser().resolve(strict=True)
-    # Path.as_uri() percent-encodes URI delimiters in filenames (notably # and ?).
-    # SQLite receives an unambiguous file URI while mode=ro prevents journals or
-    # accidental side databases from being created beside the catalog.
-    uri = f"{resolved.as_uri()}?mode=ro"
-    connection = sqlite3.connect(uri, uri=True, isolation_level=None)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only = ON")
-    version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version != 2:
-        connection.close()
-        raise RuntimeError("catalog schema is not supported by this desktop preview")
-    return connection
 
 
 def _dispatch(
@@ -123,49 +105,66 @@ def _dispatch(
 
 
 def serve(
-    connection: sqlite3.Connection,
+    connection: sqlite3.Connection | None,
     token: str,
     source: TextIO = sys.stdin,
     sink: TextIO = sys.stdout,
     *,
     demo: bool = False,
+    libraries: object = None,
 ) -> int:
     from .duplicates import DuplicatePresentation, synthetic_groups
 
     duplicates = DuplicatePresentation(*synthetic_groups(connection)) if demo else None
     _write(sink, {"event": "ready", "protocol": 1})
-    for raw_line in source:
+    while raw_line := source.readline(MAX_MESSAGE_BYTES + 1):
         if len(raw_line.encode("utf-8")) > MAX_MESSAGE_BYTES:
+            while not raw_line.endswith("\n"):
+                raw_line = source.readline(MAX_MESSAGE_BYTES + 1)
+                if not raw_line:
+                    break
             _write(sink, {"id": None, "ok": False, "error": {"code": "message_too_large"}})
             continue
         request_id: object = None
         try:
-            request = json.loads(raw_line)
+            request = json.loads(raw_line, object_pairs_hook=_unique_object)
             if not isinstance(request, dict):
                 raise BridgeRequestError("request must be an object")
+            if set(request) - {"id", "token", "method", "params"}:
+                raise BridgeRequestError("unsupported envelope keys")
+            _check_depth(request)
             request_id = request.get("id")
-            if not isinstance(request_id, str) or not request_id:
+            if not isinstance(request_id, str) or not 1 <= len(request_id) <= 128:
                 raise BridgeRequestError("id must be non-empty text")
             if request.get("token") != token:
                 raise BridgeRequestError("authentication failed")
             method = request.get("method")
             if not isinstance(method, str):
                 raise BridgeRequestError("method must be text")
-            result = _dispatch(
-                connection, method, request.get("params", {}), demo=demo, duplicates=duplicates
-            )
+            if method == "shutdown":
+                if request.get("params", {}) != {}:
+                    raise BridgeRequestError("shutdown has no parameters")
+                result = {"accepted": True}
+            elif libraries is not None:
+                result = libraries.request(method, request.get("params", {}))
+            else:
+                result = _dispatch(
+                    connection, method, request.get("params", {}), demo=demo, duplicates=duplicates
+                )
             _write(sink, {"id": request_id, "ok": True, "result": result})
             if method == "shutdown":
                 return 0
-        except (BridgeRequestError, json.JSONDecodeError) as error:
+        except (BridgeRequestError, json.JSONDecodeError, RecursionError):
             _write(
                 sink,
                 {
                     "id": request_id,
                     "ok": False,
-                    "error": {"code": "invalid_request", "message": str(error)},
+                    "error": {"code": "invalid_request"},
                 },
             )
+        except LibraryError as error:
+            _write(sink, {"id": request_id, "ok": False, "error": {"code": error.code}})
         except AssetNotFoundError:
             _write(sink, {"id": request_id, "ok": False, "error": {"code": "not_found"}})
         except sqlite3.OperationalError as error:
@@ -186,6 +185,26 @@ def serve(
                 },
             )
     return 0
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise BridgeRequestError("duplicate keys")
+        result[key] = value
+    return result
+
+
+def _check_depth(value: object, depth: int = 0) -> None:
+    if depth > 12:
+        raise BridgeRequestError("excessive depth")
+    if isinstance(value, dict):
+        for child in value.values():
+            _check_depth(child, depth + 1)
+    elif isinstance(value, list):
+        for child in value:
+            _check_depth(child, depth + 1)
 
 
 def _write(sink: TextIO, payload: object) -> None:
@@ -212,20 +231,33 @@ def main() -> int:
     if len(token) < 32:
         print("invalid bridge credentials", file=sys.stderr)
         return 2
+    if not args.demo and args.catalog is None:
+        from .libraries import LibraryDispatcher
+
+        libraries = LibraryDispatcher()
+        try:
+            return serve(None, token, libraries=libraries)
+        finally:
+            libraries.close()
+    external = None
     try:
         if args.demo:
             from .demo import open_demo_catalog
 
             connection = open_demo_catalog()
         else:
-            connection = _open_catalog(args.catalog)
+            external = LibrarySession.open(args.catalog)
+            connection = external.query_connection
     except Exception:
         print("catalog could not be opened", file=sys.stderr)
         return 3
     try:
         return serve(connection, token, demo=args.demo)
     finally:
-        connection.close()
+        if external is not None:
+            external.close()
+        else:
+            connection.close()
 
 
 if __name__ == "__main__":
