@@ -87,6 +87,7 @@ class ScanOptions:
         default=None, repr=False, compare=False
     )
     limits: ScanLimits | None = None
+    mount_id: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.recursive, bool):
@@ -95,6 +96,13 @@ class ScanOptions:
             raise TypeError("cancellation_requested must be callable or None")
         if self.limits is not None and not isinstance(self.limits, ScanLimits):
             raise TypeError("limits must be ScanLimits or None")
+        if self.mount_id is not None and (type(self.mount_id) is not int or self.mount_id < 0):
+            raise ValueError("mount_id must be a non-negative integer or None")
+
+
+class ScanScopeChangedError(RuntimeError):
+    def __init__(self):
+        super().__init__("root_changed")
 
 
 @dataclass(frozen=True, slots=True)

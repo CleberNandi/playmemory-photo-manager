@@ -50,7 +50,11 @@ class _ByteBudget:
 
 
 def capture_catalog_snapshot(
-    path: Path, root_id: str, *, limits: SnapshotLimits | None = None
+    path: Path,
+    root_id: str,
+    *,
+    limits: SnapshotLimits | None = None,
+    expected_catalog_identity: tuple[int, int] | None = None,
 ) -> CatalogSnapshot:
     """Read the whole registered root consistently, then close before any media I/O.
 
@@ -62,7 +66,9 @@ def capture_catalog_snapshot(
         raise TypeError("limits must be SnapshotLimits")
     budget = _ByteBudget(limits.max_bytes)
     try:
-        with read_library_connection(path, max_value_bytes=limits.max_bytes) as connection:
+        with read_library_connection(
+            path, max_value_bytes=limits.max_bytes, expected_identity=expected_catalog_identity
+        ) as connection:
             connection.execute("BEGIN")
             try:
                 catalog = Catalog(connection)

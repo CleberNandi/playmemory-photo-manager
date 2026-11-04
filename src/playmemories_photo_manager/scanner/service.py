@@ -26,15 +26,26 @@ from .models import (
     ScanResourceLimitError,
     ScanResult,
     ScanScope,
+    ScanScopeChangedError,
     ScanStatus,
 )
 
 
-def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) -> ScanResult:
+def scan(
+    root_path: str | os.PathLike[str],
+    options: ScanOptions | None = None,
+    *,
+    root_fd: int | None = None,
+) -> ScanResult:
     """Observe one explicit root without following links or changing persistent state."""
     options = options or ScanOptions()
     if not isinstance(options, ScanOptions):
         raise TypeError("options must be ScanOptions or None")
+    if root_fd is not None and (type(root_fd) is not int or root_fd < 0):
+        raise ValueError("root_fd must be a valid directory descriptor")
+    if (root_fd is not None or options.mount_id is not None) and not _descriptor_walk_supported():
+        raise ScanScopeChangedError
+    borrowed_root_fd = root_fd
     if not os.fspath(root_path):
         raise ValueError("root_path must not be empty")
     root = Path(root_path)
@@ -49,7 +60,9 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
     budget = _EnumerationBudget()
 
     try:
-        root_stat = os.lstat(absolute_root)
+        root_stat = (
+            os.fstat(borrowed_root_fd) if borrowed_root_fd is not None else os.lstat(absolute_root)
+        )
     except OSError as error:
         failures.append(_failure(None, FailureOperation.OBSERVE_ROOT, error))
         return _result(
@@ -135,7 +148,11 @@ def scan(root_path: str | os.PathLike[str], options: ScanOptions | None = None) 
 
     if _descriptor_walk_supported():
         try:
-            root_fd = _open_directory(absolute_root)
+            root_fd = (
+                os.dup(borrowed_root_fd)
+                if borrowed_root_fd is not None
+                else _open_directory(absolute_root)
+            )
         except OSError as error:
             failures.append(_failure(None, FailureOperation.OBSERVE_ROOT, error))
             return _result(
@@ -263,6 +280,8 @@ def _walk_fd(
 ) -> tuple[bool, bool]:
     if _cancelled(options):
         return True, False
+    if options.mount_id is not None and _mount_identity(directory_fd) != options.mount_id:
+        raise ScanScopeChangedError
     try:
         with os.scandir(directory_fd) as iterator:
             children = _collect_children(iterator, relative_directory, options, budget)
@@ -418,6 +437,17 @@ def _collect_children(
 
 def _stat_entry(entry: os.DirEntry[str]) -> os.stat_result:
     return entry.stat(follow_symlinks=False)
+
+
+def _mount_identity(fd: int) -> int:
+    try:
+        with open(f"/proc/self/fdinfo/{fd}", encoding="ascii") as source:
+            for line in source:
+                if line.startswith("mnt_id:"):
+                    return int(line.split(":", 1)[1])
+    except (OSError, ValueError):
+        raise ScanScopeChangedError from None
+    raise ScanScopeChangedError
 
 
 def _entry_type(entry: os.DirEntry[str], observed_stat: os.stat_result) -> EntryType:

@@ -18,6 +18,7 @@ from .models import (
     ScanResourceLimitError,
     ScanResult,
     ScanScope,
+    ScanScopeChangedError,
     ScanStatus,
 )
 from .service import scan
@@ -40,6 +41,7 @@ __all__ = [
     "ScanResult",
     "ScanResourceLimitError",
     "ScanScope",
+    "ScanScopeChangedError",
     "ScanStatus",
     "scan",
 ]

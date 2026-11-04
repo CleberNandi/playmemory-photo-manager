@@ -72,7 +72,10 @@ def _translate(error: Exception) -> LibraryError:
 
 @contextmanager
 def read_library_connection(
-    path: Path, *, max_value_bytes: int = 8 * 1024 * 1024
+    path: Path,
+    *,
+    max_value_bytes: int = 8 * 1024 * 1024,
+    expected_identity: tuple[int, int] | None = None,
 ) -> Iterator[sqlite3.Connection]:
     """Validated worker read, with no writable probe or session activation.
 
@@ -86,6 +89,8 @@ def read_library_connection(
     try:
         try:
             selection = _Selection(path, create=False)
+            if expected_identity is not None and selection.identity != expected_identity:
+                raise LibraryError("unsafe_location")
             connection = selection.connection("ro")
             connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, max_value_bytes)
             validate_database(connection)
