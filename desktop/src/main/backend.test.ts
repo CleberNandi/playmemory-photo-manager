@@ -68,9 +68,11 @@ describe("PythonBackend lifecycle", () => {
     vi.useFakeTimers();
     try {
       const child = new FakeChild(false);
-      const backend = new PythonBackend({ spawnBackend: spawnSequence(child), platform: "win32", shutdownTimeoutMs: 5, killTimeoutMs: 5 });
+      const backend = new PythonBackend({ spawnBackend: spawnSequence(child), platform: "win32", shutdownTimeoutMs: 5, killTimeoutMs: 5, watchdogTimeoutMs: 10 });
       const started = backend.start(); child.ready(); await started;
-      const stopping = backend.stop(); await vi.advanceTimersByTimeAsync(20); child.exit(null, "SIGKILL"); await stopping;
+      const stopping = backend.stop();
+      setTimeout(() => child.exit(null, "SIGKILL"), 12);
+      await vi.advanceTimersByTimeAsync(20); await stopping;
       expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
     } finally { vi.useRealTimers(); }
   });
@@ -81,4 +83,41 @@ describe("backend diagnostics", () => {
     expect(sanitizeDiagnostic("token=top-secret failed at /home/user/private/catalog.sqlite")).toBe("backend stderr: token=[redacted] failed at [path]");
     expect(sanitizeDiagnostic("x".repeat(700))?.length).toBeLessThanOrEqual(528);
   });
+});
+
+it("retains an unreaped backend and refuses a new generation", async () => {
+  vi.useFakeTimers();
+  try {
+    const child = new FakeChild(false);
+    const backend = new PythonBackend({spawnBackend: spawnSequence(child), platform:"win32", shutdownTimeoutMs:5, watchdogTimeoutMs:10, killTimeoutMs:5});
+    const started = backend.start(); child.ready(); await started;
+    const stopped = expect(backend.stop()).rejects.toThrow("cleanup pending");
+    await vi.advanceTimersByTimeAsync(20); await stopped;
+    await expect(backend.start()).rejects.toThrow("already running");
+    child.exit(null, "SIGKILL");
+    await backend.stop();
+  } finally { vi.useRealTimers(); }
+});
+
+it("keeps an exited leader unavailable while its POSIX group survives", async () => {
+  let groupAlive = true;
+  const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (pid !== -1234) throw new Error("unexpected test process group");
+    if (!groupAlive) throw Object.assign(new Error("gone"), {code:"ESRCH"});
+    if (signal === "SIGKILL") groupAlive = false;
+    return true;
+  });
+  const child = new FakeChild();
+  const backend = new PythonBackend({spawnBackend:spawnSequence(child), platform:"linux", shutdownTimeoutMs:5, watchdogTimeoutMs:10, killTimeoutMs:5});
+  try {
+    const started = backend.start(); child.ready(); await started;
+    child.exit(7);
+    await expect(backend.start()).rejects.toThrow("already running");
+    await expect(backend.stop()).rejects.toThrow("cleanup pending");
+    await expect(backend.start()).rejects.toThrow("already running");
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+    groupAlive = false; // Simulate kernel/init completing cleanup of the original group.
+    await backend.stop();
+    await new Promise((done) => setTimeout(done, 20));
+  } finally { kill.mockRestore(); }
 });

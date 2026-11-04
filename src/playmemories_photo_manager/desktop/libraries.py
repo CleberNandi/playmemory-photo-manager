@@ -21,7 +21,10 @@ def _uuid(value: object) -> str:
 class LibraryDispatcher:
     """Only the authenticated main process can supply a native selection path."""
 
-    def __init__(self):
+    def __init__(self, *, ingestion_enabled=False, protected_paths=()):
+        self.ingestion_enabled = ingestion_enabled
+        self.protected_paths = protected_paths
+        self.ingestion = None
         self.owner = LibraryLifecycle()
         self.handle: str | None = None
 
@@ -47,6 +50,8 @@ class LibraryDispatcher:
             raise LibraryError("invalid_request")
         if method == "library.state" and not params:
             return self.state()
+        if method.startswith("ingestion."):
+            return self._ingestion_request(method, params)
         if method in ("library.open", "library.create"):
             if set(params) != {"path", "library_handle"}:
                 raise LibraryError("invalid_request")
@@ -54,8 +59,12 @@ class LibraryDispatcher:
             raw_path = params["path"]
             if not isinstance(raw_path, str) or not 1 <= len(raw_path) <= 4096 or "\0" in raw_path:
                 raise LibraryError("invalid_request")
+            if self.ingestion is not None and self.ingestion.preparation.busy:
+                self.ingestion.close(timeout=0)
+                raise LibraryError("busy")
             action = self.owner.create if method == "library.create" else self.owner.open
             action(Path(raw_path))
+            self.ingestion = None
             self.handle = handle
             return self.state()
         if method == "library.close":
@@ -63,6 +72,7 @@ class LibraryDispatcher:
                 raise LibraryError("invalid_request")
             self.require_session(params["session_id"])
             self.owner.close()
+            self.ingestion = None
             self.handle = None
             return self.state()
         if method not in (
@@ -76,6 +86,8 @@ class LibraryDispatcher:
         if "session_id" not in params:
             raise LibraryError("stale_session")
         active = self.require_session(params["session_id"])
+        if self.ingestion is not None and self.ingestion.preparation.busy:
+            raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
         try:
             return _dispatch(
                 active.query_connection,
@@ -87,6 +99,80 @@ class LibraryDispatcher:
             # here so exception identity does not depend on that module alias.
             raise LibraryError("invalid_request") from None
 
+    def _ingestion_request(self, method, params):
+        from ..catalog_ingestion.preparation import PreparationError
+        from ..catalog_ingestion.root_grants import RootGrantService
+
+        if not self.ingestion_enabled:
+            raise LibraryError("unavailable")
+        active = self.require_session(params.get("session_id"))
+        window = _uuid(params.get("window_id"))
+        allowed = {
+            "ingestion.select_root": {
+                "session_id",
+                "window_id",
+                "path",
+                "recursive",
+                "identity_reviewed",
+            },
+            "ingestion.prepare": {
+                "session_id",
+                "window_id",
+                "root_grant_id",
+                "recursive",
+                "client_request_id",
+            },
+            "ingestion.status": {"session_id", "window_id", "operation_id"},
+            "ingestion.cancel": {"session_id", "window_id", "operation_id"},
+            "ingestion.page": {"session_id", "window_id", "proposal_id", "cursor", "page_size"},
+        }
+        if method not in allowed or set(params) != allowed[method]:
+            raise LibraryError("invalid_request")
+        try:
+            if self.ingestion is None:
+                if method != "ingestion.select_root":
+                    raise LibraryError("stale_session")
+                self.ingestion = RootGrantService(
+                    active, window, protected_paths=self.protected_paths
+                )
+            service = self.ingestion
+            if window != service.window_id:
+                raise LibraryError("stale_session")
+            if method == "ingestion.select_root":
+                return service.select(params)
+            if method == "ingestion.prepare":
+                return service.prepare(params)
+            controller = service.preparation
+            if method == "ingestion.status":
+                return controller.status(
+                    params["session_id"], window, _uuid(params["operation_id"])
+                )
+            if method == "ingestion.cancel":
+                return controller.cancel(
+                    params["session_id"], window, _uuid(params["operation_id"])
+                )
+            return controller.page(
+                params["session_id"],
+                window,
+                _uuid(params["proposal_id"]),
+                params["cursor"],
+                params["page_size"],
+            )
+        except PreparationError as error:
+            raise LibraryError(error.code) from None
+
+    def tick(self):
+        if self.ingestion is not None:
+            self.ingestion.tick()
+
+    def shutdown(self, timeout=2.5):
+        if self.ingestion is not None and not self.ingestion.close(timeout=timeout):
+            return False
+        self.owner.close()
+        self.ingestion = None
+        self.handle = None
+        return True
+
     def require_session(self, value: object):
         identifier = _uuid(value)
         active = self.owner.active
@@ -95,4 +181,5 @@ class LibraryDispatcher:
         return active
 
     def close(self) -> None:
-        self.owner.close()
+        if not self.shutdown():
+            raise LibraryError("busy")

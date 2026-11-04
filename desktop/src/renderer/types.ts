@@ -19,6 +19,11 @@ export interface GalleryPage {
 declare global {
   interface Window {
     photoManager?: {
+      chooseMediaRoot?(sessionId: string): Promise<unknown>;
+      prepareCataloging?(sessionId: string, rootGrantId: string, recursive: boolean): Promise<unknown>;
+      getPreparationStatus?(sessionId: string, operationId: string): Promise<unknown>;
+      cancelPreparation?(sessionId: string, operationId: string): Promise<unknown>;
+      listCatalogingCandidates?(sessionId: string, proposalId: string, cursor: string | null, pageSize: number): Promise<unknown>;
       getLibraryState?(): Promise<LibraryState>;
       chooseCreateLibrary?(): Promise<LibraryState>;
       chooseOpenLibrary?(): Promise<LibraryState>;

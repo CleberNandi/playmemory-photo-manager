@@ -64,7 +64,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'chooseCreateLibrary,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getDuplicateGroup,getLibraryState,getThumbnail,listDuplicates,listGallery,onBackendReset,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getDuplicateGroup,getLibraryState,getPreparationStatus,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -190,6 +190,7 @@ async function smokeLibraries(window: BrowserWindow, backend: PythonBackend): Pr
   await evaluate('window.photoManager.retryGallery()');
   const restarted = await state();
   if (restarted.session?.session_id === reopened.session?.session_id || restarted.session?.library_handle !== reopened.session?.library_handle) throw new Error("restart session failed");
+  if (process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1") await smokePreparation(window, restarted.session!.session_id);
   await evaluate('window.photoManager.setReopenLibrary(false)');
   await evaluate(`window.photoManager.closeLibrary(${JSON.stringify(restarted.session!.session_id)})`);
   const missing = await evaluate<State>('window.photoManager.chooseOpenLibrary()');
@@ -197,4 +198,30 @@ async function smokeLibraries(window: BrowserWindow, backend: PythonBackend): Pr
   await evaluate('window.photoManager.forgetLibrary()');
   if (await evaluate<boolean>('typeof process !== "undefined" || typeof require !== "undefined" || "invoke" in window.photoManager')) throw new Error("renderer authority widened");
   console.log("SMOKE D04-01B PASS: synthetic selections, cancel/create/open/switch/close/restart, missing rejected; native dialogs NOT TESTED");
+}
+
+
+async function smokePreparation(window: BrowserWindow, session: string): Promise<void> {
+  const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
+  const id = JSON.stringify(session);
+  if (!await evaluate<boolean>(`window.photoManager.chooseMediaRoot(${id}).then(r => r.cancelled === true)`)) throw new Error("selection cancel registered root");
+  const wait = async (operation: string, expected: string) => {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const status = await evaluate<{state: string; proposal_id: string | null}>(`window.photoManager.getPreparationStatus(${id}, ${JSON.stringify(operation)})`);
+      if (status.state === expected) return status;
+      if (["failed", "cancelled", "completed"].includes(status.state)) throw new Error("unexpected preparation terminal state");
+      await new Promise((done) => setTimeout(done, 250));
+    }
+    throw new Error("preparation smoke timeout");
+  };
+  const grant = await evaluate<{root_grant_id: string}>(`window.photoManager.chooseMediaRoot(${id})`);
+  const job = await evaluate<{operation_id: string}>(`window.photoManager.prepareCataloging(${id}, ${JSON.stringify(grant.root_grant_id)}, true)`);
+  const complete = await wait(job.operation_id, "completed");
+  const page = await evaluate<{items: unknown[]}>(`window.photoManager.listCatalogingCandidates(${id}, ${JSON.stringify(complete.proposal_id)}, null, 50)`);
+  if (page.items.length !== 0) throw new Error("synthetic empty root is not empty");
+  const another = await evaluate<{root_grant_id: string}>(`window.photoManager.chooseMediaRoot(${id})`);
+  const cancelled = await evaluate<{operation_id: string}>(`window.photoManager.prepareCataloging(${id}, ${JSON.stringify(another.root_grant_id)}, true)`);
+  await evaluate(`window.photoManager.cancelPreparation(${id}, ${JSON.stringify(cancelled.operation_id)})`);
+  await wait(cancelled.operation_id, "cancelled");
+  console.log("SMOKE D04-02A IPC PASS: synthetic cancel/select/prepare/status/page/cancel/reap; native dialogs NOT TESTED");
 }

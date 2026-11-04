@@ -112,15 +112,19 @@ def serve(
     *,
     demo: bool = False,
     libraries: object = None,
+    lines=None,
 ) -> int:
     from .duplicates import DuplicatePresentation, synthetic_groups
 
     duplicates = DuplicatePresentation(*synthetic_groups(connection)) if demo else None
     _write(sink, {"event": "ready", "protocol": 1})
-    while raw_line := source.readline(MAX_MESSAGE_BYTES + 1):
+    incoming = (
+        iter(lambda: source.readline(MAX_MESSAGE_BYTES + 1), "") if lines is None else iter(lines)
+    )
+    for raw_line in incoming:
         if len(raw_line.encode("utf-8")) > MAX_MESSAGE_BYTES:
             while not raw_line.endswith("\n"):
-                raw_line = source.readline(MAX_MESSAGE_BYTES + 1)
+                raw_line = next(incoming, "")
                 if not raw_line:
                     break
             _write(sink, {"id": None, "ok": False, "error": {"code": "message_too_large"}})
@@ -144,6 +148,8 @@ def serve(
             if method == "shutdown":
                 if request.get("params", {}) != {}:
                     raise BridgeRequestError("shutdown has no parameters")
+                if libraries is not None and not libraries.shutdown():
+                    raise LibraryError("busy")
                 result = {"accepted": True}
             elif libraries is not None:
                 result = libraries.request(method, request.get("params", {}))
@@ -234,9 +240,43 @@ def main() -> int:
     if not args.demo and args.catalog is None:
         from .libraries import LibraryDispatcher
 
-        libraries = LibraryDispatcher()
         try:
-            return serve(None, token, libraries=libraries)
+            protected = json.loads(os.environ.get("PLAYMEMORIES_DESKTOP_PROTECTED_PATHS", "[]"))
+            if (
+                not isinstance(protected, list)
+                or len(protected) > 16
+                or any(not isinstance(p, str) or len(p) > 4096 for p in protected)
+            ):
+                raise ValueError
+        except (ValueError, TypeError):
+            return 3
+        libraries = LibraryDispatcher(
+            ingestion_enabled=os.environ.get("PLAYMEMORIES_DESKTOP_INGESTION_LAB") == "1",
+            protected_paths=tuple(Path(p) for p in protected),
+        )
+        try:
+            if sys.platform != "linux":
+                return serve(None, token, libraries=libraries)
+            from .transport import PipePump, TransportFailure
+
+            pump = PipePump(sys.stdin, sys.stdout)
+            try:
+                result = serve(
+                    None, token, sink=pump, libraries=libraries, lines=pump.lines(libraries.tick)
+                )
+                libraries.shutdown()
+                pump.drain()
+                return result
+            except TransportFailure:
+                return 4
+            finally:
+                # Never release the process while a preparation child still needs reap.
+                import time
+
+                while not libraries.shutdown(timeout=0):
+                    libraries.tick()
+                    time.sleep(0.01)
+                pump.close()
         finally:
             libraries.close()
     external = None

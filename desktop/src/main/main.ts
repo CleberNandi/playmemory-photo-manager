@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { CatalogingController } from "./cataloging.js";
 import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,10 +18,13 @@ let thumbnailRequests = 0;
 let mainWindow: BrowserWindow | null = null;
 let libraries: LibraryController;
 let recovering = false;
+const ingestionLab = process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1";
 const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
-const smokeDirectory = process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" || process.env.PLAYMEMORIES_DESKTOP_LIBRARY_LAB === "1" ? mkdtempSync(join(tmpdir(), "pm-desktop-smoke-")) : null;
-if (smokeDirectory) app.setPath("userData", smokeDirectory);
+const smokeDirectory = process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" || process.env.PLAYMEMORIES_DESKTOP_LIBRARY_LAB === "1" || ingestionLab ? mkdtempSync(join(tmpdir(), "pm-desktop-smoke-")) : null;
+if (smokeDirectory) { app.setPath("userData", smokeDirectory); app.setPath("sessionData", smokeDirectory); }
 const smokeSelections = smokeDirectory && process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" && !demo ? [null, join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "B.sqlite3"), join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "missing.sqlite3")] : null;
+const ingestionSmokeRoot = ingestionLab && smokeSelections && smokeDirectory ? mkdtempSync(join(tmpdir(), "pm-ingestion-smoke-")) : null;
+const ingestionSelections = ingestionSmokeRoot ? [null, ingestionSmokeRoot, ingestionSmokeRoot] : null;
 const rendererFile = resolve(import.meta.dirname, "../renderer/index.html");
 const expectedUrl = process.env.VITE_DEV_SERVER_URL ? new URL(process.env.VITE_DEV_SERVER_URL).href : pathToFileURL(rendererFile).href;
 
@@ -126,6 +131,19 @@ app.whenReady().then(async () => {
       return duplicatesRequest(scoped, method, params);
     });
   }
+  const cataloging = new CatalogingController(backend, libraries, randomUUID(), ingestionLab && !demo, async () => {
+    if (ingestionSelections) return ingestionSelections.shift() ?? null;
+    if (!mainWindow) return null;
+    const selected = await dialog.showOpenDialog(mainWindow, {title: "Selecionar pasta de fotografias", properties: ["openDirectory"]});
+    if (selected.canceled || selected.filePaths.length !== 1) return null;
+    const answer = await dialog.showMessageBox(mainWindow, {type: "question", title: "Preparar catalogação", message: "Autorizar leitura recursiva desta pasta?", detail: "A configuração da raiz será registrada no catálogo. Arquivos e metadados serão examinados, sem modificar originais ou catalogar fotos nesta etapa. Ao reutilizar uma raiz, sua identidade histórica pode não estar disponível: confirme o destino atual.", buttons: ["Cancelar", "Preparar"], defaultId: 0, cancelId: 0});
+    return answer.response === 1 ? selected.filePaths[0] : null;
+  });
+  register("ingestion:select", 1, (id) => cataloging.choose(id));
+  register("ingestion:prepare", 3, (id, grant, recursive) => cataloging.prepare(id, grant, recursive));
+  register("ingestion:status", 2, (id, operation) => cataloging.operation("ingestion.status", id, operation));
+  register("ingestion:cancel", 2, (id, operation) => cataloging.operation("ingestion.cancel", id, operation));
+  register("ingestion:page", 4, (id, proposal, cursor, size) => cataloging.page(id, proposal, cursor, size));
   register("backend:retry", 0, async () => {
     if (recovering || libraries.isBusy) throw new Error("busy");
     if (!demo && libraries.current().state === "active") {
@@ -142,6 +160,7 @@ app.whenReady().then(async () => {
       return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24});
     } finally { recovering = false; }
   });
+  process.env.PLAYMEMORIES_DESKTOP_PROTECTED_PATHS = JSON.stringify([app.getPath("userData"), join(app.getPath("sessionData"), "Cache")]);
   try { await backend.start(); if (!demo) await libraries.initialize(); }
   catch { libraries.invalidate(); }
   const window = createWindow();
@@ -172,5 +191,5 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
-  void backend.stop().finally(() => { if (smokeDirectory) rmSync(smokeDirectory, {recursive: true, force: true}); app.quit(); });
+  void backend.stop().then(() => { if (smokeDirectory) rmSync(smokeDirectory, {recursive: true, force: true}); if (ingestionSmokeRoot) rmSync(ingestionSmokeRoot, {recursive: true, force: true}); app.exit(Number(process.exitCode ?? 0)); }).catch(() => { quitting = false; console.error("backend cleanup pending"); });
 });

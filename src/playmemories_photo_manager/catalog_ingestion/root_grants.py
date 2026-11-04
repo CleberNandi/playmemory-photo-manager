@@ -142,9 +142,13 @@ class RootGrantService:
         if self._closed:
             raise PreparationError("stale_session")
         with _sanitize():
+            self.session._require_active()
+        self._expire()
+
+    def _catalog_check(self):
+        with _sanitize():
             if self.session.catalog_binding != (self._catalog, self._catalog_identity):
                 raise PreparationError("root_changed")
-        self._expire()
 
     def _params(self, params, fields):
         self._require()
@@ -317,6 +321,7 @@ class RootGrantService:
         path = _path(params["path"])
         if self.preparation.busy:
             raise PreparationError("busy")
+        self._catalog_check()
         if len(self._grants) >= MAX_GRANTS:
             raise PreparationError("resource_limit")
         held = None
@@ -380,6 +385,7 @@ class RootGrantService:
             return self.preparation.start(value, request_id)
         if self.preparation.busy:
             raise PreparationError("busy")
+        self._catalog_check()
         grant = self._grants.get(params["root_grant_id"])
         if grant is None:
             raise PreparationError("stale_grant")

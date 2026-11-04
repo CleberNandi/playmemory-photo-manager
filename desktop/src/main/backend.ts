@@ -14,6 +14,7 @@ export type BackendOptions = {
   requestTimeoutMs?: number;
   shutdownTimeoutMs?: number;
   killTimeoutMs?: number;
+  watchdogTimeoutMs?: number;
   platform?: NodeJS.Platform;
 };
 
@@ -36,6 +37,8 @@ export class PythonBackend extends EventEmitter {
   private readonly requestTimeoutMs: number;
   private readonly shutdownTimeoutMs: number;
   private readonly killTimeoutMs: number;
+  private stopping: Promise<void> | null = null;
+  private readonly watchdogTimeoutMs: number;
   private readonly platform: NodeJS.Platform;
 
   constructor(options: BackendOptions = {}) {
@@ -43,13 +46,14 @@ export class PythonBackend extends EventEmitter {
     this.spawnBackend = options.spawnBackend ?? spawn;
     this.startupTimeoutMs = options.startupTimeoutMs ?? 10_000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 5_000;
-    this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 1_500;
+    this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 3_500;
     this.killTimeoutMs = options.killTimeoutMs ?? 2_000;
+    this.watchdogTimeoutMs = options.watchdogTimeoutMs ?? 5_000;
     this.platform = options.platform ?? process.platform;
   }
 
   start(repositoryRoot = resolve(import.meta.dirname, "../../..")): Promise<void> {
-    if (this.state !== "stopped") return Promise.reject(new Error("backend is already running"));
+    if (this.state !== "stopped" || this.stopping) return Promise.reject(new Error("backend is already running"));
     this.repositoryRoot = repositoryRoot;
     this.resetSession();
     this.state = "starting";
@@ -88,29 +92,64 @@ export class PythonBackend extends EventEmitter {
     await this.start(this.repositoryRoot || undefined);
   }
 
-  async request(method: "library.state" | "library.create" | "library.open" | "library.close" | "gallery.list" | "thumbnail.get" | "asset.details" | "duplicates.list" | "duplicates.group", params: Record<string, unknown> = {}): Promise<unknown> {
-    if (!this.child || !this.readyPromise || this.state === "stopped") throw new Error("backend is not running");
+  async request(method: "ingestion.select_root" | "ingestion.prepare" | "ingestion.status" | "ingestion.cancel" | "ingestion.page" | "library.state" | "library.create" | "library.open" | "library.close" | "gallery.list" | "thumbnail.get" | "asset.details" | "duplicates.list" | "duplicates.group", params: Record<string, unknown> = {}): Promise<unknown> {
+    if (!this.child || !this.readyPromise || (this.state === "stopped" || this.state === "stopping")) throw new Error("backend is not running");
     await this.readyPromise;
     return this.send(method, params, this.requestTimeoutMs);
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.stopping = this.stopOwned().finally(() => { this.stopping = null; });
+    return this.stopping;
+  }
+
+  private released(child: ChildProcessWithoutNullStreams): boolean {
+    if (!child.pid) return true;
+    if (child.exitCode === null && child.signalCode === null) return false;
+    if (this.platform === "win32") return true;
+    try { process.kill(-child.pid, 0); return false; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+  }
+
+  private async waitReleased(child: ChildProcessWithoutNullStreams, timeout: number): Promise<boolean> {
+    const deadline = performance.now() + Math.max(0, timeout);
+    while (!this.released(child) && performance.now() < deadline) {
+      await new Promise<void>((done) => setTimeout(done, Math.min(10, Math.max(1, deadline - performance.now()))));
+    }
+    return this.released(child);
+  }
+
+  private async stopOwned(): Promise<void> {
     const child = this.child;
     if (!child) { this.clearSession(); return; }
     this.state = "stopping";
-    const exited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+    const started = performance.now();
+    let killed = false;
+    const kill = () => { if (!killed && !this.released(child)) { killed = true; this.signal(child, "SIGKILL"); } };
+    const watchdog = setTimeout(kill, this.watchdogTimeoutMs);
     try {
-      if (this.readyPromise) await this.readyPromise;
-      await this.send("shutdown", {}, this.shutdownTimeoutMs);
-    } catch { /* Continue with signal escalation. */ }
-    if (!(await this.waitFor(exited, this.shutdownTimeoutMs))) {
-      this.signal(child, "SIGTERM");
-    }
-    if (child.exitCode === null && child.signalCode === null && !(await this.waitFor(exited, this.killTimeoutMs))) {
-      this.signal(child, "SIGKILL");
-      await this.waitFor(exited, this.killTimeoutMs);
-    }
-    if (this.child === child) this.clearSession();
+      try {
+        if (this.readyPromise) {
+          let readyTimer: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([this.readyPromise, new Promise<void>((_resolve, reject) => {
+              readyTimer = setTimeout(() => reject(new Error("backend cleanup pending")), this.shutdownTimeoutMs);
+            })]);
+          } finally { if (readyTimer) clearTimeout(readyTimer); }
+        }
+        await this.send("shutdown", {}, Math.max(1, this.shutdownTimeoutMs - (performance.now() - started)));
+      } catch { /* Unknown outcome still requires confirmed process/group cleanup. */ }
+      if (!(await this.waitReleased(child, this.shutdownTimeoutMs - (performance.now() - started)))) {
+        this.signal(child, "SIGTERM");
+        if (!(await this.waitReleased(child, this.watchdogTimeoutMs - (performance.now() - started)))) {
+          kill();
+          await this.waitReleased(child, this.killTimeoutMs);
+        }
+      }
+      if (!this.released(child)) throw new Error("backend cleanup pending");
+      if (this.child === child) this.clearSession();
+    } finally { clearTimeout(watchdog); }
   }
 
   private resetSession(): void {
@@ -129,14 +168,9 @@ export class PythonBackend extends EventEmitter {
     this.token = "";
   }
 
-  private waitFor(exited: Promise<void>, timeoutMs: number): Promise<boolean> {
-    return new Promise((resolveWait) => {
-      const timer = setTimeout(() => resolveWait(false), timeoutMs);
-      exited.then(() => { clearTimeout(timer); resolveWait(true); });
-    });
-  }
-
   private signal(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+    // Never signal a numeric group after its leader was reaped: that ID can be reused.
+    if (child.exitCode !== null || child.signalCode !== null) return;
     if (this.platform !== "win32" && child.pid) {
       try { process.kill(-child.pid, signal); return; } catch { /* Process group may already be gone. */ }
     }
@@ -146,11 +180,14 @@ export class PythonBackend extends EventEmitter {
   private send(method: string, params: object, timeout: number): Promise<unknown> {
     const child = this.child;
     if (!child || !child.stdin.writable) return Promise.reject(new Error("backend is unavailable"));
+    if (this.pending.size >= 16) return Promise.reject(Object.assign(new Error("busy"), {code:"busy"}));
     const id = randomUUID();
+    const payload = JSON.stringify({id, token:this.token, method, params}) + "\n";
+    if (Buffer.byteLength(payload, "utf8") > 64 * 1024) return Promise.reject(Object.assign(new Error("invalid_request"), {code:"invalid_request"}));
     return new Promise((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => { this.pending.delete(id); rejectRequest(new Error("backend request timed out")); }, timeout);
       this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
-      child.stdin.write(JSON.stringify({ id, token: this.token, method, params }) + "\n", (error) => {
+      child.stdin.write(payload, (error) => {
         if (!error) return;
         clearTimeout(timer);
         this.pending.delete(id);
@@ -187,6 +224,7 @@ export class PythonBackend extends EventEmitter {
 
   private handle(message: ResponseMessage): void {
     if (message.event === "ready") {
+      if (this.state !== "starting") return;
       this.state = "ready";
       this.markReady?.();
       this.markReady = null;
@@ -208,14 +246,19 @@ export class PythonBackend extends EventEmitter {
     this.failReady?.(error);
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();
-    this.clearSession();
-    if (child && !expected && child.exitCode === null && child.signalCode === null) {
-      this.signal(child, "SIGTERM");
-      const killTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) this.signal(child, "SIGKILL");
-      }, this.killTimeoutMs);
+    if (!child || this.released(child)) this.clearSession();
+    else {
+      this.state = "stopping";
+      if (!expected) this.signal(child, "SIGTERM");
+      const killTimer = setTimeout(() => this.signal(child, "SIGKILL"), this.killTimeoutMs);
       killTimer.unref();
-      child.once("exit", () => clearTimeout(killTimer));
+      const cleanup = setInterval(() => {
+        if (!this.released(child)) return;
+        clearTimeout(killTimer);
+        clearInterval(cleanup);
+        if (this.child === child) this.clearSession();
+      }, 10);
+      cleanup.unref();
     }
     if (!expected) this.emit("failure", error);
   }
