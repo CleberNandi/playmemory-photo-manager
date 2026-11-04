@@ -130,6 +130,34 @@ class Catalog:
                 raise UniquenessConflictError("library root path already exists") from error
         return self.get_root(identifier)
 
+    def register_reviewed_root(
+        self, display_name: str, normalized_path: str, *, expected_roots: tuple[LibraryRoot, ...]
+    ) -> LibraryRoot:
+        """Short compare-and-register command; caller validates filesystem before entry.
+
+        Reuse only an exact existing path. No filesystem work inside this transaction.
+        """
+        display_name = _nonblank(display_name, "display_name")
+        normalized_path = _nonblank(normalized_path, "normalized_path")
+        if (
+            not isinstance(expected_roots, tuple)
+            or len(expected_roots) > 2000
+            or any(not isinstance(root, LibraryRoot) for root in expected_roots)
+        ):
+            raise InvalidInputError("invalid root registry snapshot")
+        with self._write():
+            current = tuple(self._repository.list_roots(len(expected_roots) + 1, 0))
+            if current != expected_roots:
+                raise CatalogStateConflictError("root registry changed", relative_paths=())
+            existing = next((r for r in current if r.normalized_path == normalized_path), None)
+            if existing is not None:
+                return existing
+            identifier = str(uuid.uuid4())
+            self._repository.insert_root(
+                identifier, display_name, normalized_path, RootAvailability.AVAILABLE
+            )
+            return self._repository.get_root(identifier)
+
     def get_root(self, root_id: str) -> LibraryRoot:
         _uuid(root_id, "root_id")
         root = self._read(self._repository.get_root, root_id)

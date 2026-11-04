@@ -14,7 +14,7 @@ import stat
 import sys
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -244,6 +244,7 @@ class LibrarySession:
         self._owner = threading.get_ident()
         self._closed = False
         self._command_active = False
+        self._close_guard: Callable[[], None] | None = None
         self.descriptor = SessionDescriptor(str(uuid.uuid4()), selection.path.name)
 
     @classmethod
@@ -307,6 +308,22 @@ class LibrarySession:
             raise LibraryError("stale_session")
 
     @property
+    def catalog_binding(self) -> tuple[Path, tuple[int, int]]:
+        """Privileged Python binding, never a public desktop DTO."""
+        self._require_active()
+        try:
+            self._selection.check()
+        except Exception as error:
+            raise _translate(error) from None
+        return self._selection.path, self._selection.identity
+
+    def _bind_close_guard(self, callback: Callable[[], None]) -> None:
+        self._require_active()
+        if self._close_guard is not None:
+            raise LibraryError("busy")
+        self._close_guard = callback
+
+    @property
     def query_connection(self) -> sqlite3.Connection:
         self._require_active()
         try:
@@ -343,6 +360,8 @@ class LibrarySession:
         if self._command_active:
             raise LibraryError("busy")
         if not self._closed:
+            if self._close_guard is not None:
+                self._close_guard()
             self._query.close()
             self._selection.close()
             self._closed = True
