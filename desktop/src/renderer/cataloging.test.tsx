@@ -67,3 +67,9 @@ it.each([
   expect(polling).toHaveBeenCalledTimes(2); expect(host.textContent).toContain("Ver proposta");
   await act(async () => vi.advanceTimersByTimeAsync(1000)); expect(polling).toHaveBeenCalledTimes(2);
 });
+it("explains invalid native path errors across the IPC serialization boundary", async () => {
+  window.photoManager!.chooseMediaRoot = vi.fn().mockRejectedValue({message: "Error invoking remote method 'ingestion:select': Error: invalid_request"});
+  await act(async () => root.render(<CatalogingPanel sessionId="session" />)); await click("Selecionar pasta");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("caminho inválido");
+  expect(window.photoManager!.prepareCataloging).not.toHaveBeenCalled();
+});

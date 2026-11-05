@@ -1,3 +1,4 @@
+import { nativePath } from "./native-path.js";
 import { randomUUID } from "node:crypto";
 import { CatalogingController } from "./cataloging.js";
 import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
@@ -69,11 +70,13 @@ app.whenReady().then(async () => {
     if (create) {
       const selection = await dialog.showSaveDialog(mainWindow, {title: "Criar biblioteca fora das pastas de fotografias", defaultPath: join(app.getPath("userData"), "catalog.sqlite3"), filters: [{name: "Catálogo SQLite", extensions: ["sqlite3"]}], properties: ["showOverwriteConfirmation"]});
       if (selection.canceled || !selection.filePath) return null;
-      const confirmation = await dialog.showMessageBox(mainWindow, {type: "question", title: "Criar biblioteca", message: "Criar um catálogo novo neste destino?", detail: "Escolha um local fora do acervo. Nenhuma fotografia será lida ou modificada. Arquivos existentes nunca são sobrescritos.", buttons: ["Cancelar", "Criar"], defaultId: 0, cancelId: 0});
-      return confirmation.response === 1 ? selection.filePath : null;
+      const physical = await nativePath(selection.filePath, true);
+      const confirmation = await dialog.showMessageBox(mainWindow, {type: "question", title: "Criar biblioteca", message: "Criar um catálogo novo neste destino?", detail: `Seleção: ${selection.filePath}\nDestino físico: ${physical}\nEscolha um local fora do acervo. Nenhuma fotografia será lida ou modificada. Arquivos existentes nunca são sobrescritos.`, buttons: ["Cancelar", "Criar"], defaultId: 0, cancelId: 0});
+      return confirmation.response === 1 ? physical : null;
     }
     const selection = await dialog.showOpenDialog(mainWindow, {title: "Abrir biblioteca existente", properties: ["openFile"], filters: [{name: "Catálogo SQLite", extensions: ["sqlite3", "sqlite", "db"]}]});
-    return selection.canceled ? null : selection.filePaths[0] ?? null;
+    if (selection.canceled || selection.filePaths.length !== 1) return null;
+    return nativePath(selection.filePaths[0]);
   }});
   const register = (channel: string, count: number, handler: (...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
@@ -137,8 +140,9 @@ app.whenReady().then(async () => {
     if (!mainWindow) return null;
     const selected = await dialog.showOpenDialog(mainWindow, {title: "Selecionar pasta de fotografias", properties: ["openDirectory"]});
     if (selected.canceled || selected.filePaths.length !== 1) return null;
-    const answer = await dialog.showMessageBox(mainWindow, {type: "question", title: "Preparar catalogação", message: "Autorizar leitura recursiva desta pasta?", detail: "A configuração da raiz será registrada no catálogo. Arquivos e metadados serão examinados, sem modificar originais ou catalogar fotos nesta etapa. Ao reutilizar uma raiz, sua identidade histórica pode não estar disponível: confirme o destino atual.", buttons: ["Cancelar", "Preparar"], defaultId: 0, cancelId: 0});
-    return answer.response === 1 ? selected.filePaths[0] : null;
+    const physical = await nativePath(selected.filePaths[0]);
+    const answer = await dialog.showMessageBox(mainWindow, {type: "question", title: "Preparar catalogação", message: "Autorizar leitura recursiva desta pasta?", detail: `Seleção: ${selected.filePaths[0]}\nDestino físico: ${physical}\nA configuração da raiz será registrada no catálogo. Arquivos e metadados serão examinados, sem modificar originais ou catalogar fotos nesta etapa. Ao reutilizar uma raiz, sua identidade histórica pode não estar disponível: confirme o destino atual.`, buttons: ["Cancelar", "Preparar"], defaultId: 0, cancelId: 0});
+    return answer.response === 1 ? physical : null;
   });
   register("ingestion:select", 1, (id) => cataloging.choose(id));
   register("ingestion:prepare", 3, (id, grant, recursive) => cataloging.prepare(id, grant, recursive));

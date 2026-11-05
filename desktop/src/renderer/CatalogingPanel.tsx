@@ -18,6 +18,8 @@ const labels: Record<string, string> = {
   planning: "Preparando proposta", cleanup: "Aguardando encerramento",
 };
 const errors: Record<string, string> = {
+  invalid_request: "A seleção retornou um caminho inválido. Selecione novamente a pasta (invalid_request).",
+  not_found: "A pasta selecionada não foi encontrada (not_found).",
   stale_grant: "A seleção expirou ou já foi usada. Selecione a pasta novamente.",
   stale_session: "A sessão mudou. Reabra a biblioteca.", busy: "Há uma operação em andamento. Aguarde o encerramento.",
   unsafe_location: "A pasta se sobrepõe ao catálogo, a uma raiz ou a um destino protegido.",
@@ -25,7 +27,7 @@ const errors: Record<string, string> = {
   resource_limit: "O limite desta preparação foi atingido.", unavailable: "O backend está indisponível. Reabra a biblioteca antes de continuar.",
 };
 function errorText(error: unknown) {
-  const message = error instanceof Error ? error.message : "";
+  const message = typeof error === "object" && error !== null && "message" in error ? String(error.message) : String(error);
   const code = Object.keys(errors).find((key) => new RegExp(`\\b${key}\\b`).test(message));
   return code ? errors[code] : "Não foi possível concluir a operação. Selecione novamente a pasta; nenhum pedido será repetido automaticamente.";
 }
