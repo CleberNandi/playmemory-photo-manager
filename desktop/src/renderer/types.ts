@@ -42,6 +42,7 @@ declare global {
 }
 
 export interface LibraryState {
+  cataloging_enabled?: boolean;
   state: "active" | "no_library" | "unavailable" | "demo";
   session: {session_id: string; library_handle: string; generation: number; display_name: string} | null;
   reopen: boolean;

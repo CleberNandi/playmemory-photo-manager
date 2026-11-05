@@ -167,3 +167,9 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp
 .library-toolbar label { display: flex; gap: 8px; align-items: center; }
 .library-welcome { padding: 32px; }
 .library-workspace > div > .app-shell { min-height: calc(100vh - 140px); height: auto; }
+
+.cataloging-panel { margin: 1rem; padding: 1.25rem; border: 1px solid currentColor; border-radius: 12px; }
+.cataloging-panel p { max-width: 85ch; }
+.cataloging-table { overflow: auto; }
+.cataloging-table table { width: 100%; border-collapse: collapse; text-align: left; }
+.cataloging-table th, .cataloging-table td { padding: .6rem; border-bottom: 1px solid currentColor; overflow-wrap: anywhere; }

@@ -41,3 +41,10 @@ it("reports preference failure while keeping the active catalog and clears it on
   expect(host.textContent).toContain("preferência não foi salva"); expect(host.textContent).toContain("Catalog content");
   await click("Fechar biblioteca"); expect(host.textContent).not.toContain("Catalog content");
 });
+
+it("shows preparation only with the main process capability and removes it on session close", async () => {
+  window.photoManager = {listGallery: vi.fn(), retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue({...first, cataloging_enabled: true}), closeLibrary: vi.fn().mockResolvedValue({state: "no_library", session: null, reopen: false})};
+  await act(async () => root.render(<LibraryWorkspace><div>Catalog content</div></LibraryWorkspace>));
+  expect(host.querySelector('[aria-label="Preparar catalogação"]')).not.toBeNull();
+  await click("Fechar biblioteca"); expect(host.querySelector('[aria-label="Preparar catalogação"]')).toBeNull();
+});

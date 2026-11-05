@@ -79,7 +79,8 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      return handler(...args);
+      const result = handler(...args);
+      return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: ingestionLab && !demo})) : result;
     });
   };
   const envelope = (raw: unknown) => {

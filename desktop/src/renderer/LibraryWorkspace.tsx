@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { CatalogingPanel } from "./CatalogingPanel";
 import type { LibraryState } from "./types";
 
 const messages: Record<string, string> = {
@@ -64,7 +65,7 @@ export function LibraryWorkspace({children}: {children: ReactNode}) {
       {library?.error && <p role="alert">{messages[library.error] ?? messages.internal_error}</p>}
     </section>
     {library?.state === "active" && library.session
-      ? <div key={library.session.session_id}>{children}</div>
+      ? <div key={library.session.session_id}>{library.cataloging_enabled && <CatalogingPanel sessionId={library.session.session_id} />}{children}</div>
       : <section className="library-welcome" role="status"><h1>{library ? "Escolha uma biblioteca" : "Conectando ao backend local…"}</h1><p>Crie ou abra um catálogo fora das pastas de fotografias. Nenhuma mídia será examinada nesta etapa.</p>
         {library?.state === "unavailable" && <button className="primary-button" disabled={!!operation} onClick={() => void act("Reconectando…", async () => { try { await api.retryGallery(); } catch { /* A restart without an active library has no gallery. */ } return api.getLibraryState!(); })}>Reconectar backend</button>}
       </section>}
