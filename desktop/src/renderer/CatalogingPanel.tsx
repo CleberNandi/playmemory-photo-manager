@@ -56,7 +56,7 @@ export function CatalogingPanel({sessionId}: {sessionId: string}) {
     const poll = async () => {
       try {
         const value = await window.photoManager!.getPreparationStatus!(sessionId, job.operation_id) as Job;
-        if (!disposed) { accept(value); if (!terminal(value)) timer = setTimeout(() => void poll(), 250); }
+        if (!disposed) { accept(value); if (!latest.current || !terminal(latest.current)) timer = setTimeout(() => void poll(), 250); }
       } catch (failure) { if (!disposed) setError(errorText(failure)); }
     };
     timer = setTimeout(() => void poll(), 250);

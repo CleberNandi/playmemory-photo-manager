@@ -53,3 +53,17 @@ it("never overlaps status requests while a response is pending", async () => {
   await act(async () => {resolve(status("completed", 2));}); await act(async () => vi.advanceTimersByTimeAsync(1000));
   expect(polling).toHaveBeenCalledTimes(1);
 });
+it.each([
+  {operation_id: "other-operation", state: "completed", revision: 10},
+  {session_id: "other-session", state: "cancelled", revision: 10},
+  {state: "completed", revision: 0},
+])("continues polling after rejecting a terminal response: %j", async (override) => {
+  const polling = vi.fn().mockResolvedValueOnce({...status(), ...override}).mockResolvedValueOnce(status("completed", 2));
+  window.photoManager!.getPreparationStatus = polling;
+  await start();
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  expect(host.textContent).toContain("Preparando"); expect(host.textContent).not.toContain("Ver proposta");
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  expect(polling).toHaveBeenCalledTimes(2); expect(host.textContent).toContain("Ver proposta");
+  await act(async () => vi.advanceTimersByTimeAsync(1000)); expect(polling).toHaveBeenCalledTimes(2);
+});

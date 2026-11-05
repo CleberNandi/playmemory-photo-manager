@@ -60,3 +60,17 @@ D04-02A continua aguardando auditoria e validação nativa antes de conclusão.
   não comprova diálogos KDE. Os fluxos de UI são cobertos pelos testes jsdom.
 - Nenhuma modificação em Python, banco, originais, dependências ou lockfile.
 - Auditoria independente desta UI e smoke manual KDE: pendentes.
+
+## Correções da auditoria de 5e3b087
+
+- MINOR-01: o próximo polling considera `latest.current` após `accept`, nunca o
+  payload descartado. Três regressões simulam resposta terminal de outra operação,
+  outra sessão e revisão antiga, seguidas de conclusão legítima.
+- MINOR-02: botões primários desabilitados usam fundo/borda e texto dos tokens,
+  cursor `not-allowed` e ausência de sombra, sem reduzir a opacidade do texto.
+  Painel e tabela usam tokens de superfície/borda em lugar de `currentColor`.
+- Reauditoria e validação manual KDE permanecem pendentes; nenhuma integração
+  em main faz parte desta correção.
+- Revalidação desktop: typecheck, 94 testes, lint e build PASS. A primeira
+  tentativa teve timeout no teste de inicialização real do backend durante a
+  reconstrução do ambiente Python; repetição com ambiente instalado passou.
