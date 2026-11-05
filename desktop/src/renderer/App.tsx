@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { DuplicatesView } from "./DuplicatesView";
 import { MediaCard } from "./MediaCard";
 import { LibraryWorkspace } from "./LibraryWorkspace";
+import { CatalogingPanel } from "./CatalogingPanel";
+import { useLibrarySession } from "./LibrarySession";
+import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import type { GalleryPage } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
@@ -19,13 +22,27 @@ export function App() {
 }
 
 function GalleryApp() {
+  const session = useLibrarySession();
+  const [preparing, setPreparing] = useState(false);
+  const [display, setDisplay] = useState<"thumbnails" | "details">("thumbnails");
+  const [query, setQuery] = useState("");
+  const [favorites, setFavorites] = useState(false);
+  const [folder, setFolder] = useState<string | null>(null);
+  const [thumbnailSize, setThumbnailSize] = useState(150);
+  const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [leftWidth, setLeftWidth] = useState(210);
+  const [rightWidth, setRightWidth] = useState(300);
   const [view, setView] = useState<"gallery" | "duplicates">("gallery");
   const [generation, setGeneration] = useState(0);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => window.photoManager?.onBackendReset?.(() => { setGeneration((n) => n + 1); if (view === "duplicates") setSelected(null); }), [view]);
   const origin = useRef<HTMLButtonElement | null>(null);
-  const closeDetails = () => { setSelected(null); origin.current?.focus(); };
+  const closeDetails = () => {
+    const target = origin.current?.isConnected ? origin.current : [...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find((button) => button.dataset.assetId === selected);
+    setSelected(null); target?.focus();
+  };
+  const changeDisplay = (next: "thumbnails" | "details") => { if (view !== "gallery") setSelected(null); setView("gallery"); setDisplay(next); };
   const [paging, setPaging] = useState(false);
   const [pageError, setPageError] = useState(false);
   const inFlight = useRef(false);
@@ -54,20 +71,49 @@ function GalleryApp() {
     return () => { active = false; };
   }, []);
 
-  return <div className="app-shell">
-    <Sidebar view={view} onNavigate={(next) => { setSelected(null); setView(next); }} />
+  const items = state.kind === "ready" ? state.page.items : [];
+  // Scope and filters apply only to the loaded page; cursors remain backend-owned.
+  const folders = [...new Set(items.map((item) => item.representative_location?.root_display_name).filter((name): name is string => !!name))];
+  const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
+  const resetSelection = () => setSelected(null);
+  return <div className={`app-shell${propertiesOpen ? " with-properties" : ""}`} style={{"--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--thumbnail-size": `${thumbnailSize}px`} as CSSProperties}>
+      <nav className="workspace-menu" aria-label="Menus da área de trabalho">
+        {session?.fileMenu ?? <details><summary>Arquivo</summary><div><p>Gerenciamento de bibliotecas indisponível nesta sessão.</p></div></details>}
+        <details><summary>Editar</summary><div><button disabled>Alterar anotações — em breve</button></div></details>
+        <details><summary>Exibir</summary><div><button onClick={() => changeDisplay("thumbnails")}>Miniaturas</button><button onClick={() => changeDisplay("details")}>Detalhes</button><button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button></div></details>
+        <details><summary>Ferramentas</summary><div><button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></div></details>
+        <details><summary>Ajuda</summary><div><p>Operação local. Seus originais não são alterados. As pastas e os filtros abrangem somente os itens carregados do catálogo.</p></div></details>
+      </nav>
+    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled} preparing={preparing} onPrepare={() => setPreparing(true)} onSource={(name, favorite) => {setFolder(name); setFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
+    <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />
     <main className="workspace">
-      <header className="page-header">
-        <div><p className="eyebrow">Sua coleção</p><h1>{view === "gallery" ? "Biblioteca" : "Duplicatas exatas"}</h1></div>
-        <div className="local-status"><Icon name="shield" /><span>Operação local</span></div>
+      <header className="view-toolbar">
+        <h1>{view === "gallery" ? "Biblioteca" : "Duplicatas exatas"}</h1>
+        <button aria-pressed={display === "thumbnails"} onClick={() => changeDisplay("thumbnails")}>Miniaturas</button>
+        <button aria-pressed={display === "details"} onClick={() => changeDisplay("details")}>Detalhes</button>
+        <span title="A galeria ainda não fornece a projeção de captura para navegação temporal"><button disabled>Calendário</button><button disabled>Ano</button><button disabled>Mês</button><button disabled>Dia</button></span>
+        <label>Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>
+        <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
       </header>
+      {session?.catalogingEnabled && <section className="preparation-workflow" hidden={!preparing} aria-label="Adicionar pastas">
+        <button className="workflow-close" onClick={() => setPreparing(false)}>Recolher preparação</button>
+        <CatalogingPanel sessionId={session.sessionId} />
+      </section>}
+      {view === "gallery" && <div className="gallery-filters">
+        <label>Pesquisar nos itens carregados <input type="search" value={query} onChange={(event) => {setQuery(event.target.value); resetSelection();}} /></label>
+        <label><input type="checkbox" checked={favorites} onChange={(event) => {setFavorites(event.target.checked); resetSelection();}} /> Favoritos</label>
+        <span>{folder ?? "Todos os itens carregados"}</span>
+      </div>}
       <div hidden={view !== "gallery"} className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
-        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. Adicionar pastas e catalogar fotos estará disponível em uma próxima etapa." note="Nada foi importado ou alterado nos seus arquivos." />}
+        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. A preparação de pastas está disponível no laboratório; adicionar fotos ao catálogo pertence à próxima etapa." note="Nada foi importado ou alterado nos seus arquivos." />}
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
-          <div className="section-heading"><div><p className="section-kicker">Todos os itens</p><h2 id="gallery-heading">Fotos e vídeos</h2></div><p className="result-count">{formatItemCount(state.page.items.length)}</p></div>
-          <div className="media-grid" role="list">{state.page.items.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onSelect={(button) => { origin.current = button; setSelected(item.asset_id); }} />)}</div>
+          <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
+          {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
+          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onSelect={(button) => selectAsset(item.asset_id, button)} />)}</div>
+            : <div className="gallery-table"><table><thead><tr><th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th></tr></thead><tbody>{visible.map((item) => <tr key={item.asset_id}><td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget)}>{item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td></tr>)}</tbody></table></div>}
           <div className="pagination">
             {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
             {state.page.has_more ? <button className="primary-button" disabled={paging} onClick={() => void more()}>{paging ? "Carregando…" : pageError ? "Tentar carregar novamente" : "Carregar mais"}</button> : <p role="status">Fim da biblioteca</p>}
@@ -75,21 +121,41 @@ function GalleryApp() {
           </div>
         </section>}
       </div>
-      {view === "duplicates" && <DuplicatesView key={generation} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={(id, button) => {origin.current = button; setSelected(id);}} />}
+      {view === "duplicates" && <DuplicatesView key={generation} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={selectAsset} />}
     </main>
-    {selected && <AssetDetailsPanel assetId={selected} onClose={closeDetails} />}
+    {propertiesOpen && <>
+      <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />
+      {selected ? <AssetDetailsPanel assetId={selected} onClose={closeDetails} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
+    </>}
+    <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : "Duplicatas exatas · Consulta somente leitura"} · {selected ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Originais preservados</span></footer>
   </div>;
 }
 
-export function Sidebar({view = "gallery", onNavigate}: {view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void}) {
+export function Sidebar({view = "gallery", onNavigate, folders = [], folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource}: {view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void; folders?: string[]; folder?: string | null; favorites?: boolean; canPrepare?: boolean; preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void}) {
   return <aside className="sidebar">
     <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span className="brand-name">PlayMemories<span className="sr-only"> Photo Manager</span></span></div>
+    <section className="source-section"><h2>Notificações</h2><p>{preparing ? "Consulte a preparação no painel central" : "Consulte tarefas em Adicionar pastas"}</p></section>
+    <section className="source-section"><h2>Câmeras e mídias</h2><p>Detecção de dispositivos ainda indisponível.</p></section>
     <nav className="primary-nav" aria-label="Principal">
-      <p className="nav-label">Coleção</p><NavItem icon="library" label="Biblioteca" active={view === "gallery"} onClick={() => onNavigate?.("gallery")} /><NavItem icon="album" label="Álbuns" disabled />
-      <p className="nav-label nav-label-tools">Ferramentas</p><NavItem icon="album" label="Duplicatas exatas" active={view === "duplicates"} onClick={() => onNavigate?.("duplicates")} /><NavItem icon="tools" label="Ferramentas" disabled />
+      <NavItem icon="library" label="Biblioteca" active={view === "gallery" && !folder && !favorites} onClick={() => {onNavigate?.("gallery"); onSource?.(null, false);}} />
+      <button className="nav-item" aria-pressed={favorites} onClick={() => onSource?.(null, true)}>☆ Favoritos</button>
+      <section className="source-section"><h2>Pastas do catálogo</h2><p>Raízes dos itens carregados</p>{folders.map((name) => <button key={name} className={`nav-item${folder === name ? " is-active" : ""}`} aria-pressed={folder === name} onClick={() => onSource?.(name, false)}>{name}</button>)}{!folders.length && <p>Nenhuma raiz carregada.</p>}</section>
+      <p className="nav-label">Ferramentas</p><NavItem icon="album" label="Duplicatas exatas" active={view === "duplicates"} onClick={() => onNavigate?.("duplicates")} /><NavItem icon="album" label="Álbuns" disabled />
     </nav>
-    <div className="sidebar-footer"><NavItem icon="settings" label="Configurações" disabled /><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Seus originais não são alterados.</span></p></div>
+    <div className="sidebar-footer"><button className="nav-item" disabled={!canPrepare} onClick={onPrepare} title={canPrepare ? "Abrir preparação de catalogação" : "Disponível no laboratório de ingestão"}>+ Adicionar pastas</button><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Seus originais não são alterados.</span></p></div>
   </aside>;
+}
+
+function PanelResize({label, value, min, max, reverse = false, onChange}: {label: string; value: number; min: number; max: number; reverse?: boolean; onChange: (value: number) => void}) {
+  return <input className="panel-resize" aria-label={label} type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} onPointerDown={(event) => {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.dataset.startX = String(event.clientX); event.currentTarget.dataset.startWidth = String(value);
+  }} onPointerMove={(event) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const delta = (event.clientX - Number(event.currentTarget.dataset.startX)) * (reverse ? -1 : 1);
+    onChange(Math.min(max, Math.max(min, Number(event.currentTarget.dataset.startWidth) + delta)));
+  }} onPointerUp={(event) => {if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);}} />;
 }
 
 function NavItem({ icon, label, active = false, disabled = false, onClick }: { onClick?: () => void; icon: IconName; label: string; active?: boolean; disabled?: boolean }) {

@@ -21,6 +21,6 @@ it("availability text meets AA on the actual canvas", () => {
 });
 it("focus rings contrast with adjacent surfaces", () => {
   for (const surface of [token("color-canvas"), token("color-surface")]) expect(contrast(token("focus-ring"), surface)).toBeGreaterThanOrEqual(3);
-  for (const surface of [token("color-sidebar"), token("color-sidebar-active")]) expect(contrast("#e0aa56", surface)).toBeGreaterThanOrEqual(3);
-  expect(css).toContain(".sidebar :focus-visible { outline-color: #e0aa56; }");
+  for (const surface of [token("color-sidebar"), token("color-sidebar-active")]) expect(contrast("#175a89", surface)).toBeGreaterThanOrEqual(3);
+  expect(css).toContain(".sidebar :focus-visible { outline-color: #175a89; }");
 });
