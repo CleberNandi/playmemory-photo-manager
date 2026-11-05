@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { DesktopMenu } from "./DesktopMenu";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { DuplicatesView } from "./DuplicatesView";
 import { MediaCard } from "./MediaCard";
@@ -79,11 +80,16 @@ function GalleryApp() {
   const resetSelection = () => setSelected(null);
   return <div className={`app-shell${propertiesOpen ? " with-properties" : ""}`} style={{"--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--thumbnail-size": `${thumbnailSize}px`} as CSSProperties}>
       <nav className="workspace-menu" aria-label="Menus da área de trabalho">
-        {session?.fileMenu ?? <details><summary>Arquivo</summary><div><p>Gerenciamento de bibliotecas indisponível nesta sessão.</p></div></details>}
-        <details><summary>Editar</summary><div><button disabled>Alterar anotações — em breve</button></div></details>
-        <details><summary>Exibir</summary><div><button onClick={() => changeDisplay("thumbnails")}>Miniaturas</button><button onClick={() => changeDisplay("details")}>Detalhes</button><button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button></div></details>
-        <details><summary>Ferramentas</summary><div><button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></div></details>
-        <details><summary>Ajuda</summary><div><p>Operação local. Seus originais não são alterados. As pastas e os filtros abrangem somente os itens carregados do catálogo.</p></div></details>
+        {session?.fileMenu ?? <DesktopMenu label="Arquivo"><button disabled>Bibliotecas indisponíveis no demo</button></DesktopMenu>}
+        <DesktopMenu label="Editar"><button disabled>Alterar anotações — em breve</button></DesktopMenu>
+        <DesktopMenu label="Exibir">
+          <button onClick={() => changeDisplay("thumbnails")}>Miniaturas</button>
+          <button onClick={() => changeDisplay("details")}>Detalhes</button>
+          <hr />
+          <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
+        </DesktopMenu>
+        <DesktopMenu label="Ferramentas"><button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
+        <DesktopMenu label="Ajuda"><p>Operação local. Seus originais não são alterados. As pastas e os filtros abrangem somente os itens carregados do catálogo.</p></DesktopMenu>
       </nav>
     <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled} preparing={preparing} onPrepare={() => setPreparing(true)} onSource={(name, favorite) => {setFolder(name); setFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
     <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />

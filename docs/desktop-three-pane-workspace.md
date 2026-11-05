@@ -66,3 +66,17 @@ bibliotecas, migrações ou alterações de dependências.
 4. No demo, conferir seleção, propriedades, Escape, modos, filtros, paginação,
    redimensionamento por arrasto e teclado em 1180×760 e 800×600.
 5. Confirmar ausência de aplicação, escrita em originais e calendário fictício.
+
+## Correção de menus após teste nativo do usuário
+
+- Menus de aplicação fecham ao escolher uma ação, clicar fora, sair com Tab ou
+  perder foco da janela; só um menu fica aberto. Escape fecha e restaura o foco
+  no título, sem fechar as propriedades simultaneamente.
+- Setas cima/baixo navegam pelas ações habilitadas; esquerda/direita alternam os
+  menus. As expansões de metadata permanecem independentes.
+- Retirados triângulos de expansão e estilo de botão primário dos itens. Popups
+  usam linhas planas, separadores e destaque de hover/foco. No demo, Arquivo
+  informa sua indisponibilidade em uma opção desabilitada.
+- Revalidação: 554 testes Python, Ruff, formatação, typecheck, 104 testes desktop
+  (17 arquivos), ESLint e build. Chromium headless verificou exclusividade,
+  clique externo, ação, Escape/foco e layout nos tamanhos anteriores.

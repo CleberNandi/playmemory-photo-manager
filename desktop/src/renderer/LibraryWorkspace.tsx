@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { DesktopMenu } from "./DesktopMenu";
 import { LibrarySessionContext } from "./LibrarySession";
 import type { LibraryState } from "./types";
 
@@ -49,12 +50,12 @@ export function LibraryWorkspace({children}: {children: ReactNode}) {
   };
   if (library?.state === "demo") return children;
   const api = window.photoManager!;
-  const fileMenu = <details className="library-file-menu"><summary>Arquivo</summary><div className="library-actions">
-        <button className="primary-button" disabled={!!operation || !library} onClick={() => void act("Criando biblioteca…", () => api.chooseCreateLibrary!())}>Criar biblioteca</button>
-        <button className="primary-button" disabled={!!operation || !library} onClick={() => void act("Abrindo biblioteca…", () => api.chooseOpenLibrary!())}>Abrir biblioteca</button>
-        <button className="primary-button" disabled={!!operation || !library?.session} onClick={() => void act("Fechando biblioteca…", () => api.closeLibrary!(library!.session!.session_id))}>Fechar biblioteca</button>
-        <button className="primary-button" disabled={!!operation || !library} onClick={() => void act("Esquecendo seleção…", () => api.forgetLibrary!())}>Esquecer última biblioteca</button>
-      </div></details>;
+  const fileMenu = <DesktopMenu label="Arquivo">
+        <button disabled={!!operation || !library} onClick={() => void act("Criando biblioteca…", () => api.chooseCreateLibrary!())}>Criar biblioteca</button>
+        <button disabled={!!operation || !library} onClick={() => void act("Abrindo biblioteca…", () => api.chooseOpenLibrary!())}>Abrir biblioteca</button>
+        <button disabled={!!operation || !library?.session} onClick={() => void act("Fechando biblioteca…", () => api.closeLibrary!(library!.session!.session_id))}>Fechar biblioteca</button>
+        <button disabled={!!operation || !library} onClick={() => void act("Esquecendo seleção…", () => api.forgetLibrary!())}>Esquecer última biblioteca</button>
+      </DesktopMenu>;
   return <div className="library-workspace">
     <section className="library-toolbar" aria-label="Gerenciar biblioteca" aria-busy={operation !== null}>
       <div className="library-identity"><strong>{library?.session?.display_name ?? "Nenhuma biblioteca ativa"}</strong>

@@ -28,11 +28,6 @@ button, summary { touch-action: manipulation; }
 .library-identity small { font-size: 11px; color: var(--color-text-muted); }
 .library-toolbar p { flex-basis: 100%; margin: 0; }
 .library-toolbar label { display: flex; align-items: center; gap: 5px; }
-.library-file-menu { position: relative; order: -1; }
-.library-file-menu summary, .workspace-menu summary { padding: 5px 9px; cursor: pointer; }
-.library-actions, .workspace-menu details > div { position: absolute; z-index: 20; min-width: 230px; padding: 6px; background: var(--color-surface); border: 1px solid var(--color-border); box-shadow: 0 5px 16px #0002; }
-.library-actions { left: 0; }
-.library-actions button, .workspace-menu details > div button { display: block; width: 100%; text-align: left; }
 .library-welcome { padding: 28px; }
 .app-shell { display: grid; grid-template-columns: var(--left-width, 210px) 6px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; min-height: 400px; overflow: hidden; flex: 1; }
 .library-workspace > .app-shell { height: auto; min-height: 0; }
@@ -59,10 +54,21 @@ button, summary { touch-action: manipulation; }
 .panel-resize::-moz-range-thumb { width: 4px; height: 36px; border: 0; border-radius: 0; background: #7b8790; }
 .workspace { padding: 0; background: var(--color-canvas); }
 .workspace-menu { grid-column: 1 / -1; display: flex; gap: 3px; background: var(--color-sidebar); border-bottom: 1px solid var(--color-border); }
-.workspace-menu details { position: relative; }
-.workspace-menu details > div { max-width: 290px; }
-.workspace-menu button, .view-toolbar button, .workflow-close, .gallery-table button { border: 1px solid transparent; background: transparent; padding: 6px 8px; }
-.workspace-menu button:hover, .view-toolbar button:hover:not(:disabled) { background: var(--color-surface); }
+/* Desktop popups: quiet chrome, flat action rows, no disclosure triangles. */
+.desktop-menu { position: relative; flex: 0 0 auto; }
+.desktop-menu > summary { list-style: none; padding: 6px 12px; border-radius: 3px; cursor: pointer; user-select: none; }
+.desktop-menu > summary::-webkit-details-marker { display: none; }
+.desktop-menu > summary:hover, .desktop-menu[open] > summary { background: #d3e1ec; color: #153e5d; }
+.desktop-menu-popup { position: absolute; top: calc(100% + 3px); left: 0; z-index: 30; min-width: 230px; max-width: 300px; padding: 5px; border: 1px solid #c5cbd1; border-radius: 5px; background: var(--color-surface); box-shadow: 0 5px 18px #172b3a26; }
+.desktop-menu-popup button { display: block; width: 100%; min-height: 32px; padding: 7px 12px; border: 0; border-radius: 3px; color: var(--color-text); background: transparent; text-align: left; font-weight: 400; }
+.desktop-menu-popup button:hover:not(:disabled), .desktop-menu-popup button:focus-visible { background: #dcecf8; color: #153e5d; }
+.desktop-menu-popup button:disabled { color: #737b82; background: transparent; }
+.desktop-menu-popup p { margin: 7px 10px; line-height: 1.5; }
+.desktop-menu-popup hr { border: 0; border-top: 1px solid #e1e5e9; margin: 4px 6px; }
+.workspace-menu { padding: 3px 6px; }
+.library-toolbar > .desktop-menu { order: -1; }
+.view-toolbar button, .workflow-close, .gallery-table button { border: 1px solid transparent; background: transparent; padding: 6px 8px; }
+.view-toolbar button:hover:not(:disabled) { background: var(--color-surface); }
 .view-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--color-border); padding: 6px 8px; }
 .view-toolbar h1 { margin-right: 6px; }
 .view-toolbar button[aria-pressed="true"], .gallery-table button[aria-pressed="true"] { background: var(--color-sidebar-active); border-color: #7298b3; }
