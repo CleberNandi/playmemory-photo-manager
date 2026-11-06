@@ -42,7 +42,7 @@ function createWindow(): BrowserWindow {
     height: 760,
     minWidth: 760,
     minHeight: 520,
-    backgroundColor: "#f5f1e8",
+    backgroundColor: "#f5f5f5",
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -50,6 +50,7 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  if (process.platform !== "darwin") window.removeMenu();
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   const devUrl = process.env.VITE_DEV_SERVER_URL;

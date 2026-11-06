@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CatalogingPanel } from "./CatalogingPanel";
+import { DesktopMenu } from "./DesktopMenu";
+import { LibrarySessionContext } from "./LibrarySession";
 import type { LibraryState } from "./types";
 
 const messages: Record<string, string> = {
@@ -49,23 +50,24 @@ export function LibraryWorkspace({children}: {children: ReactNode}) {
   };
   if (library?.state === "demo") return children;
   const api = window.photoManager!;
+  const fileMenu = <DesktopMenu label="Arquivo">
+        <button disabled={!!operation || !library} onClick={() => void act("Criando biblioteca…", () => api.chooseCreateLibrary!())}>Criar biblioteca</button>
+        <button disabled={!!operation || !library} onClick={() => void act("Abrindo biblioteca…", () => api.chooseOpenLibrary!())}>Abrir biblioteca</button>
+        <button disabled={!!operation || !library?.session} onClick={() => void act("Fechando biblioteca…", () => api.closeLibrary!(library!.session!.session_id))}>Fechar biblioteca</button>
+        <button disabled={!!operation || !library} onClick={() => void act("Esquecendo seleção…", () => api.forgetLibrary!())}>Esquecer última biblioteca</button>
+      </DesktopMenu>;
   return <div className="library-workspace">
     <section className="library-toolbar" aria-label="Gerenciar biblioteca" aria-busy={operation !== null}>
       <div className="library-identity"><strong>{library?.session?.display_name ?? "Nenhuma biblioteca ativa"}</strong>
-        {library?.session && <small>Sessão {library.session.session_id.slice(0, 8)}</small>}</div>
-      <div className="library-actions">
-        <button className="primary-button" disabled={!!operation || !library} onClick={() => void act("Criando biblioteca…", () => api.chooseCreateLibrary!())}>Criar biblioteca</button>
-        <button className="primary-button" disabled={!!operation || !library} onClick={() => void act("Abrindo biblioteca…", () => api.chooseOpenLibrary!())}>Abrir biblioteca</button>
-        <button className="primary-button" disabled={!!operation || !library?.session} onClick={() => void act("Fechando biblioteca…", () => api.closeLibrary!(library!.session!.session_id))}>Fechar biblioteca</button>
-        <button className="primary-button" disabled={!!operation || !library} onClick={() => void act("Esquecendo seleção…", () => api.forgetLibrary!())}>Esquecer última biblioteca</button>
-      </div>
+        {library?.session && <small>Biblioteca local</small>}</div>
+      {library?.state !== "active" && fileMenu}
       <label><input type="checkbox" checked={library?.reopen ?? false} disabled={!!operation || !library} onChange={(event) => { const checked = event.target.checked; void act("Salvando preferência…", () => api.setReopenLibrary!(checked)); }} /> Reabrir ao iniciar</label>
       {operation && <p role="status">{operation}</p>}
       {library?.warning && <p role="alert">{library.warning === "preference_invalid" ? "A preferência anterior não pôde ser lida. Escolha uma biblioteca." : "A biblioteca continua aberta, mas a preferência não foi salva."}</p>}
       {library?.error && <p role="alert">{messages[library.error] ?? messages.internal_error}</p>}
     </section>
     {library?.state === "active" && library.session
-      ? <div key={library.session.session_id}>{library.cataloging_enabled && <CatalogingPanel sessionId={library.session.session_id} />}{children}</div>
+      ? <LibrarySessionContext.Provider key={library.session.session_id} value={{sessionId: library.session.session_id, catalogingEnabled: !!library.cataloging_enabled, fileMenu}}>{children}</LibrarySessionContext.Provider>
       : <section className="library-welcome" role="status"><h1>{library ? "Escolha uma biblioteca" : "Conectando ao backend local…"}</h1><p>Crie ou abra um catálogo fora das pastas de fotografias. Nenhuma mídia será examinada nesta etapa.</p>
         {library?.state === "unavailable" && <button className="primary-button" disabled={!!operation} onClick={() => void act("Reconectando…", async () => { try { await api.retryGallery(); } catch { /* A restart without an active library has no gallery. */ } return api.getLibraryState!(); })}>Reconectar backend</button>}
       </section>}

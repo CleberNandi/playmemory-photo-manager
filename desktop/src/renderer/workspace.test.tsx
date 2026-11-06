@@ -1,0 +1,74 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { App } from "./App";
+import type { GalleryItem } from "./types";
+let host: HTMLDivElement; let root: Root;
+const item = (id: string, folder: string, favorite: boolean): GalleryItem => ({asset_id: id, kind: "photo", media_type: "image/jpeg", created_at: "2026-01-01", availability: "available", annotation: {title: id, favorite, rating: null}, representative_location: {relative_path: `${id}.jpg`, root_display_name: folder}});
+beforeEach(() => {
+  Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true});
+  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  window.photoManager = {listGallery: vi.fn().mockResolvedValue({items: [item("first", "Natureza", true), item("second", "Viagens", false)], next_cursor: "opaque", has_more: true}), retryGallery: vi.fn()};
+});
+afterEach(async () => {await act(async () => root.unmount()); host.remove(); delete window.photoManager; vi.useRealTimers();});
+async function click(text: string) {await act(async () => {[...host.querySelectorAll("button")].find((b) => b.textContent === text)!.click();});}
+it("filters loaded roots and favorites without new IPC and preserves pagination", async () => {
+  await act(async () => root.render(<App />));
+  await click("Viagens"); expect(host.querySelectorAll(".media-card")).toHaveLength(1);
+  expect(host.querySelector(".media-card")?.textContent).toContain("second");
+  await click("☆ Favoritos"); expect(host.querySelector(".media-card")?.textContent).toContain("first");
+  await act(async () => host.querySelector<HTMLButtonElement>('.view-toolbar button:nth-of-type(2)')!.click());
+  expect(host.querySelectorAll(".gallery-table tbody tr")).toHaveLength(1);
+  expect(window.photoManager!.listGallery).toHaveBeenCalledOnce();
+  expect(host.querySelector(".pagination button")?.textContent).toBe("Carregar mais");
+});
+it("clears selection when filtering and supports keyboard-compatible pane ranges", async () => {
+  await act(async () => root.render(<App />));
+  await act(async () => host.querySelector<HTMLButtonElement>(".card-select")!.click());
+  expect(host.querySelector(".asset-details")).not.toBeNull();
+  await act(async () => {
+    const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "no match");
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+  });
+  expect(host.querySelector(".asset-details")).toBeNull();
+  expect(host.querySelectorAll(".media-card")).toHaveLength(0);
+  expect(host.textContent).toContain("Nenhum item carregado corresponde");
+  await act(async () => {
+    const input = host.querySelector<HTMLInputElement>('[aria-label="Largura da navegação"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "270");
+    input.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+  expect(host.querySelector<HTMLElement>(".app-shell")!.style.getPropertyValue("--left-width")).toBe("270px");
+  await click("Propriedades"); expect(host.querySelector(".properties-empty")).toBeNull();
+});
+it("does not substitute catalog creation dates for capture dates", async () => {
+  await act(async () => root.render(<App />));
+  for (const name of ["Calendário", "Ano", "Mês", "Dia"]) expect([...host.querySelectorAll("button")].find((b) => b.textContent === name)!.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>(".sidebar-footer button")!.disabled).toBe(true);
+});
+it("keeps polling when preparation is collapsed and stops after session close", async () => {
+  vi.useFakeTimers();
+  const job = {session_id: "A", operation_id: "op", revision: 1, state: "running", phase: "scanning", observed_count: 0, verified_count: 0, excluded_count: 0, total: null, proposal_id: null};
+  Object.assign(window.photoManager!, {
+    getLibraryState: vi.fn().mockResolvedValue({state: "active", session: {session_id: "A", display_name: "lab"}, cataloging_enabled: true, reopen: false}),
+    chooseMediaRoot: vi.fn().mockResolvedValue({root_grant_id: "grant"}), prepareCataloging: vi.fn().mockResolvedValue(job), getPreparationStatus: vi.fn().mockResolvedValue(job),
+    closeLibrary: vi.fn().mockResolvedValue({state: "no_library", session: null, reopen: false}),
+  });
+  await act(async () => root.render(<App />));
+  await click("+ Adicionar pastas"); await click("Selecionar pasta"); await click("Preparar proposta");
+  await click("Recolher preparação"); await act(async () => vi.advanceTimersByTimeAsync(250));
+  expect(window.photoManager!.getPreparationStatus).toHaveBeenCalledOnce();
+  await click("+ Adicionar pastas"); expect(window.photoManager!.prepareCataloging).toHaveBeenCalledOnce();
+  await click("Fechar biblioteca"); await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(window.photoManager!.getPreparationStatus).toHaveBeenCalledOnce();
+});
+
+it("restores focus to the selection after switching from thumbnails to table", async () => {
+  await act(async () => root.render(<App />));
+  await act(async () => host.querySelector<HTMLButtonElement>(".card-select")!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>(".view-toolbar button:nth-of-type(2)")!.click());
+  await click("Fechar detalhes");
+  expect(document.activeElement).toBe(host.querySelector(".gallery-table [data-asset-id=first]"));
+});

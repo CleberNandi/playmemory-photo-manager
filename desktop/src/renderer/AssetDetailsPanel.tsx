@@ -28,7 +28,7 @@ export function AssetDetailsPanel({assetId, onClose}: {assetId: string; onClose:
   }, [assetId, attempt]);
   const value = result?.id === assetId ? result.value : null;
   return <aside className="asset-details" aria-labelledby="details-heading">
-    <header><h2 id="details-heading">Detalhes do Asset</h2><button ref={close} className="primary-button" onClick={onClose}>Fechar detalhes</button></header>
+    <header><h2 id="details-heading">Propriedades</h2><button ref={close} className="primary-button" onClick={onClose}>Fechar detalhes</button></header>
     <p className="section-kicker">Somente leitura</p>
     {!value && <p role="status">Carregando detalhes…</p>}
     {value?.status === "not_found" && <p role="status">Asset não encontrado no catálogo.</p>}

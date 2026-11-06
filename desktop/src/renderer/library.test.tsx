@@ -2,8 +2,12 @@
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, it, expect, vi } from "vitest";
+import { App } from "./App";
+import { useLibrarySession } from "./LibrarySession";
 import { LibraryWorkspace } from "./LibraryWorkspace";
 import type { LibraryState } from "./types";
+
+function CatalogContent() { return <>{useLibrarySession()?.fileMenu}<div>Catalog content</div></>; }
 
 let root: Root;
 let host: HTMLDivElement;
@@ -18,7 +22,7 @@ async function click(label: string) { await act(async () => { [...host.querySele
 it("starts without a library and never renders catalog children until a selection is active", async () => {
   const listGallery = vi.fn();
   window.photoManager = {listGallery, retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue({state: "no_library", session: null, reopen: false}), chooseCreateLibrary: vi.fn().mockResolvedValue(first)};
-  await act(async () => root.render(<LibraryWorkspace><div>Catalog content</div></LibraryWorkspace>));
+  await act(async () => root.render(<LibraryWorkspace><CatalogContent /></LibraryWorkspace>));
   expect(host.textContent).toContain("Escolha uma biblioteca"); expect(host.textContent).not.toContain("Catalog content");
   expect(listGallery).not.toHaveBeenCalled();
   await click("Criar biblioteca"); expect(host.textContent).toContain("Catalog content"); expect(host.textContent).toContain("A.sqlite3");
@@ -26,7 +30,7 @@ it("starts without a library and never renders catalog children until a selectio
 
 it("preserves children on cancellation and remounts them for a new session even with the same library name", async () => {
   const mounts = vi.fn(); const unmounts = vi.fn();
-  function Child() { useEffect(() => {mounts(); return () => {unmounts();};}, []); return <div>Catalog content</div>; }
+  function Child() { useEffect(() => {mounts(); return () => {unmounts();};}, []); return <CatalogContent />; }
   const open = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce({...first, session: {...first.session!, session_id: "session-B"}});
   window.photoManager = {listGallery: vi.fn(), retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue(first), chooseOpenLibrary: open};
   await act(async () => root.render(<LibraryWorkspace><Child /></LibraryWorkspace>));
@@ -36,15 +40,18 @@ it("preserves children on cancellation and remounts them for a new session even 
 
 it("reports preference failure while keeping the active catalog and clears it on close", async () => {
   window.photoManager = {listGallery: vi.fn(), retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue(first), setReopenLibrary: vi.fn().mockResolvedValue({...first, warning: "preference_write_failed"}), closeLibrary: vi.fn().mockResolvedValue({state: "no_library", session: null, reopen: false})};
-  await act(async () => root.render(<LibraryWorkspace><div>Catalog content</div></LibraryWorkspace>));
+  await act(async () => root.render(<LibraryWorkspace><CatalogContent /></LibraryWorkspace>));
   await act(async () => host.querySelector<HTMLInputElement>("input")!.click());
   expect(host.textContent).toContain("preferência não foi salva"); expect(host.textContent).toContain("Catalog content");
   await click("Fechar biblioteca"); expect(host.textContent).not.toContain("Catalog content");
 });
 
-it("shows preparation only with the main process capability and removes it on session close", async () => {
-  window.photoManager = {listGallery: vi.fn(), retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue({...first, cataloging_enabled: true}), closeLibrary: vi.fn().mockResolvedValue({state: "no_library", session: null, reopen: false})};
-  await act(async () => root.render(<LibraryWorkspace><div>Catalog content</div></LibraryWorkspace>));
+it("shows preparation on demand and removes it on session close", async () => {
+  window.photoManager = {listGallery: vi.fn().mockResolvedValue({items: [], next_cursor: null, has_more: false}), retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue({...first, cataloging_enabled: true}), closeLibrary: vi.fn().mockResolvedValue({state: "no_library", session: null, reopen: false})};
+  await act(async () => root.render(<App />));
+  expect(host.querySelector<HTMLElement>(".preparation-workflow")!.hidden).toBe(true);
+  await click("+ Adicionar pastas");
+  expect(host.querySelector<HTMLElement>(".preparation-workflow")!.hidden).toBe(false);
   expect(host.querySelector('[aria-label="Preparar catalogação"]')).not.toBeNull();
   await click("Fechar biblioteca"); expect(host.querySelector('[aria-label="Preparar catalogação"]')).toBeNull();
 });
