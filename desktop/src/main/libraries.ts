@@ -93,7 +93,7 @@ export class LibraryController {
   private requireSession(id: unknown): void {
     if (!canonicalId(id) || this.state.state !== "active" || id !== this.state.session?.session_id) throw Object.assign(new Error(), {code: "stale_session"});
   }
-  async query(method: "gallery.list" | "asset.details" | "thumbnail.get" | "duplicates.list" | "duplicates.group", sessionId: unknown, params: Record<string, unknown>): Promise<unknown> {
+  async query(method: "gallery.list" | "calendar.summary" | "preview.get" | "asset.details" | "thumbnail.get" | "duplicates.list" | "duplicates.group", sessionId: unknown, params: Record<string, unknown>): Promise<unknown> {
     if (this.busy) throw Object.assign(new Error(), {code: "busy"});
     this.requireSession(sessionId);
     const epoch = this.epoch;

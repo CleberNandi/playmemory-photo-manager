@@ -62,6 +62,7 @@ class ScopedPreflight:
         self._root_fd = root_fd
         self.authorization = authorization
         self._closed = False
+        self.captures = {}
 
     def check_root(self) -> None:
         if self._closed:
@@ -129,9 +130,19 @@ def preflight_scoped_ingestion(
             checkpoint()
             item = by_id[identifier]
             reason, detected, fingerprint = _verify_file(
-                root_fd, expected_root_mount, item.observation, checkpoint
+                root_fd,
+                expected_root_mount,
+                item.observation,
+                checkpoint,
+                lambda values, path=item.candidate.relative_path: held.captures.__setitem__(
+                    path, values
+                ),
             )
-            if reason != "eligible_jpeg" or detected != "jpeg" or fingerprint != item.fingerprint:
+            if (
+                reason != item.reason
+                or detected != item.detected_format
+                or fingerprint != item.fingerprint
+            ):
                 raise ScopedPreflightError("source_changed")
             checkpoint()
             held.check_root()

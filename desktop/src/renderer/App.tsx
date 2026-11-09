@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { CaptureCalendar } from "./CaptureCalendar";
+import { ImageViewer } from "./ImageViewer";
 import { DesktopMenu } from "./DesktopMenu";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { DuplicatesView } from "./DuplicatesView";
@@ -10,10 +12,11 @@ import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import type { GalleryPage } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
-async function requestGallery(retry = false): Promise<GalleryPage> {
+async function requestGallery(retry = false, capturePeriod: string | null = null): Promise<GalleryPage> {
   const bridge = window.photoManager;
   if (!bridge) throw new Error("Desktop bridge unavailable");
-  return retry ? bridge.retryGallery() : bridge.listGallery({ pageSize: 24 });
+  if (retry) {const page=await bridge.retryGallery();if(!capturePeriod)return page;}
+  return bridge.listGallery({pageSize:24,...(capturePeriod?{capturePeriod}:{})});
 }
 
 type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
@@ -26,6 +29,10 @@ function GalleryApp() {
   const session = useLibrarySession();
   const [preparing, setPreparing] = useState(false);
   const [display, setDisplay] = useState<"thumbnails" | "details">("thumbnails");
+  const [calendar,setCalendar] = useState(false);
+  const [calendarPeriod,setCalendarPeriod] = useState<string|null>(null);
+  const [captureFilter,setCaptureFilter] = useState<string|null>(null);
+  const [viewer,setViewer] = useState<string|null>(null);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);
@@ -45,7 +52,7 @@ function GalleryApp() {
     const target = origin.current?.isConnected ? origin.current : [...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find((button) => button.dataset.assetId === selected);
     setSelected(null); target?.focus();
   };
-  const changeDisplay = (next: "thumbnails" | "details") => { if (view !== "gallery") setSelected(null); setView("gallery"); setDisplay(next); };
+  const changeDisplay = (next: "thumbnails" | "details") => { if (view !== "gallery") setSelected(null); setView("gallery"); setDisplay(next); setCalendar(false); };
   const [paging, setPaging] = useState(false);
   const [pageError, setPageError] = useState(false);
   const inFlight = useRef(false);
@@ -56,7 +63,7 @@ function GalleryApp() {
     setPaging(true);
     setPageError(false);
     try {
-      const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor });
+      const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor, ...(captureFilter?{capturePeriod:captureFilter}:{}) });
       if (epoch === galleryEpoch.current) setState({ kind: "ready", page: { ...page, items: [...state.page.items, ...page.items] } });
     } catch { if (epoch === galleryEpoch.current) setPageError(true); }
     finally { if (epoch === galleryEpoch.current) {inFlight.current = false; setPaging(false);} }
@@ -66,15 +73,15 @@ function GalleryApp() {
     setPageError(false);
     setState({ kind: "loading" });
     const epoch = galleryEpoch.current;
-    void requestGallery(true).then((page) => {if (epoch === galleryEpoch.current) setState({ kind: "ready", page });}).catch(() => {if (epoch === galleryEpoch.current) setState({ kind: "error" });});
+    void requestGallery(true,captureFilter).then((page) => {if (epoch === galleryEpoch.current) setState({ kind: "ready", page });}).catch(() => {if (epoch === galleryEpoch.current) setState({ kind: "error" });});
   };
   useEffect(() => {
     let active = true;
-    void requestGallery()
+    void requestGallery(false,captureFilter)
       .then((page) => { if (active) setState({ kind: "ready", page }); })
       .catch(() => { if (active) setState({ kind: "error" }); });
     return () => { active = false; };
-  }, [galleryRevision]);
+  }, [galleryRevision,captureFilter]);
 
   const items = state.kind === "ready" ? state.page.items : [];
   // Scope and filters apply only to the loaded page; cursors remain backend-owned.
@@ -82,6 +89,11 @@ function GalleryApp() {
   const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
   const resetSelection = () => setSelected(null);
+  const openCalendar=(period:string|null)=>{setView("gallery");setPreparing(false);setPropertiesOpen(false);setCalendarPeriod(period);setCalendar(true);};
+  const browsePeriod=(period:string|null)=>{
+    galleryEpoch.current++; inFlight.current=false; setPaging(false);setPageError(false);setSelected(null);setState({kind:"loading"});
+    setCalendar(false);setCaptureFilter(period);setGalleryRevision(n=>n+1);
+  };
   return <div className={`app-shell${propertiesOpen ? " with-properties" : ""}`} style={{"--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--thumbnail-size": `${thumbnailSize}px`} as CSSProperties}>
       <nav className="workspace-menu" aria-label="Menus da área de trabalho">
         {session?.fileMenu ?? <DesktopMenu label="Arquivo"><button disabled>Bibliotecas indisponíveis no demo</button></DesktopMenu>}
@@ -89,20 +101,21 @@ function GalleryApp() {
         <DesktopMenu label="Exibir">
           <button onClick={() => changeDisplay("thumbnails")}>Miniaturas</button>
           <button onClick={() => changeDisplay("details")}>Detalhes</button>
+          <button disabled={!window.photoManager?.getCalendar} onClick={()=>openCalendar(null)}>Calendário por captura</button>
           <hr />
           <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
         </DesktopMenu>
         <DesktopMenu label="Ferramentas"><button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
         <DesktopMenu label="Ajuda"><p>Operação local. Seus originais não são alterados. As pastas e os filtros abrangem somente os itens carregados do catálogo.</p></DesktopMenu>
       </nav>
-    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled} preparing={preparing} onPrepare={() => setPreparing(true)} onSource={(name, favorite) => {setFolder(name); setFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
+    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled} preparing={preparing} onPrepare={() => {setCalendar(false);setPreparing(true);}} onSource={(name, favorite) => {if(calendar||captureFilter)browsePeriod(null);setFolder(name); setFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
     <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />
     <main className="workspace">
       <header className="view-toolbar">
         <h1>{view === "gallery" ? "Biblioteca" : "Duplicatas exatas"}</h1>
         <button aria-pressed={display === "thumbnails"} onClick={() => changeDisplay("thumbnails")}>Miniaturas</button>
         <button aria-pressed={display === "details"} onClick={() => changeDisplay("details")}>Detalhes</button>
-        <span title="A galeria ainda não fornece a projeção de captura para navegação temporal"><button disabled>Calendário</button><button disabled>Ano</button><button disabled>Mês</button><button disabled>Dia</button></span>
+        <span className="calendar-toolbar"><button disabled={!window.photoManager?.getCalendar} aria-pressed={calendar} onClick={()=>calendar?setCalendar(false):openCalendar(calendarPeriod)}>Calendário</button><button disabled={!window.photoManager?.getCalendar} onClick={()=>openCalendar(null)}>Ano</button><button disabled={!window.photoManager?.getCalendar} onClick={()=>openCalendar(calendarPeriod?.slice(0,4)??String(new Date().getFullYear()))}>Mês</button><button disabled={!window.photoManager?.getCalendar} onClick={()=>openCalendar(calendarPeriod?.length===7?calendarPeriod:`${calendarPeriod??new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`)}>Dia</button></span>
         <label>Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>
         <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
       </header>
@@ -110,23 +123,24 @@ function GalleryApp() {
         <button className="workflow-close" onClick={() => setPreparing(false)}>Recolher preparação</button>
         <CatalogingPanel sessionId={session.sessionId} onShowLibrary={() => setPreparing(false)} onApplied={() => {
           galleryEpoch.current++; inFlight.current = false; setPaging(false); setPageError(false);
-          setSelected(null); setQuery(""); setFolder(null); setFavorites(false); setView("gallery");
+          setSelected(null); setQuery(""); setCaptureFilter(null); setCalendar(false); setFolder(null); setFavorites(false); setView("gallery");
           setState({kind: "loading"}); setGalleryRevision((value) => value + 1);
         }} />
       </section>}
-      {view === "gallery" && <div className="gallery-filters">
+      {view === "gallery" && !calendar && <div className="gallery-filters">
         <label>Pesquisar nos itens carregados <input type="search" value={query} onChange={(event) => {setQuery(event.target.value); resetSelection();}} /></label>
         <label><input type="checkbox" checked={favorites} onChange={(event) => {setFavorites(event.target.checked); resetSelection();}} /> Favoritos</label>
-        <span>{folder ?? "Todos os itens carregados"}</span>
+        <span>{captureFilter ? captureFilter === "undated" ? "Sem data de captura" : `Captura: ${captureFilter}` : folder ?? "Todos os itens carregados"}</span>{captureFilter&&<button onClick={()=>browsePeriod(null)}>Limpar período</button>}
       </div>}
-      <div hidden={view !== "gallery"} className="content" aria-busy={state.kind === "loading" || paging}>
+      {view === "gallery" && calendar && <CaptureCalendar key={galleryRevision} period={calendarPeriod} onPeriod={setCalendarPeriod} onBrowse={browsePeriod} />}
+      <div hidden={view !== "gallery" || calendar} className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
-        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. A preparação de pastas está disponível no laboratório; adicionar fotos ao catálogo pertence à próxima etapa." note="Nada foi importado ou alterado nos seus arquivos." />}
+        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title="Sua biblioteca está vazia" body="O catálogo local está aberto e pronto. Use Adicionar pastas para preparar, revisar e catalogar suas imagens." note="Nada foi importado ou alterado nos seus arquivos." />}
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
           {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
-          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onSelect={(button) => selectAsset(item.asset_id, button)} />)}</div>
+          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onOpen={window.photoManager?.getPreview ? ()=>setViewer(item.asset_id) : undefined} onSelect={(button) => selectAsset(item.asset_id, button)} />)}</div>
             : <div className="gallery-table"><table><thead><tr><th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th></tr></thead><tbody>{visible.map((item) => <tr key={item.asset_id}><td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget)}>{item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td></tr>)}</tbody></table></div>}
           <div className="pagination">
             {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
@@ -141,6 +155,7 @@ function GalleryApp() {
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />
       {selected ? <AssetDetailsPanel assetId={selected} onClose={closeDetails} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
     </>}
+    {viewer && <ImageViewer key={viewer} assetId={viewer} onClose={()=>setViewer(null)} />}
     <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : "Duplicatas exatas · Consulta somente leitura"} · {selected ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Originais preservados</span></footer>
   </div>;
 }

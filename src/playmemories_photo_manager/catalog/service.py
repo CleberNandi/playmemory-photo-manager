@@ -262,6 +262,7 @@ class Catalog:
         registrations: tuple[NewFileRegistration, ...],
         *,
         before_write: Callable[[], None] | None = None,
+        after_write: Callable[[tuple[FileRegistrationResult, ...]], None] | None = None,
     ) -> tuple[FileRegistrationResult, ...]:
         """Create authorized file Assets and locations as one atomic catalog batch."""
         _uuid(root_id, "root_id")
@@ -309,6 +310,8 @@ class Catalog:
 
         if before_write is not None and not callable(before_write):
             raise InvalidInputError("before_write must be callable")
+        if after_write is not None and not callable(after_write):
+            raise InvalidInputError("after_write must be callable")
         results: list[FileRegistrationResult] = []
         with self._write():
             if before_write is not None:
@@ -397,6 +400,8 @@ class Catalog:
                         FileRegistrationDisposition.CREATED, asset, persisted_location
                     )
                 )
+            if after_write is not None:
+                after_write(tuple(results))
         return tuple(results)
 
     def create_album(self, name: str, *, description: str | None = None) -> Album:

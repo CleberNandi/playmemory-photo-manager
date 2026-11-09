@@ -34,7 +34,7 @@ export function AssetDetailsPanel({assetId, onClose}: {assetId: string; onClose:
     {value?.status === "not_found" && <p role="status">Asset não encontrado no catálogo.</p>}
     {value && value.status !== "ready" && value.status !== "not_found" && <div role="alert"><p>{value.status === "internal_error" ? "Não foi possível interpretar os detalhes." : "Detalhes temporariamente indisponíveis."}</p><button className="primary-button" onClick={() => { setResult(null); void (async () => { try { if (value.status === "temporarily_unavailable") await window.photoManager?.retryGallery(); } catch { /* The details request presents the sanitized failure. */ } setAttempt((n) => n + 1); })(); }}>Tentar detalhes novamente</button><p>Tentar novamente reconecta o backend local quando necessário.</p></div>}
     {value?.status === "ready" && <>
-      {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Ilustração sintética de demonstração" onError={() => setThumbnail(null)} /><figcaption>Miniatura sintética</figcaption></figure>}
+      {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Miniatura da imagem" onError={() => setThumbnail(null)} /><figcaption>Miniatura</figcaption></figure>}
       <DetailsContent details={value.details} />
     </>}
   </aside>;

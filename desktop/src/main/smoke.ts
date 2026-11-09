@@ -64,7 +64,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCatalogingApplicationStatus,getDuplicateGroup,getLibraryState,getPreparationStatus,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -230,9 +230,8 @@ async function smokePreparation(window: BrowserWindow, session: string, mediaRoo
 }
 
 function syntheticJpeg(): Buffer {
-  const segment = (marker: number, data: number[]) => Buffer.from([255, marker, (data.length + 2) >> 8, (data.length + 2) & 255, ...data]);
-  const huffman = [1, ...Array<number>(15).fill(0), 0];
-  return Buffer.concat([Buffer.from([255, 216]), segment(0xDB, [0, ...Array<number>(64).fill(1)]), segment(0xC4, [0, ...huffman, 0x10, ...huffman]), segment(0xC0, [8, 0, 8, 0, 8, 1, 1, 0x11, 0]), segment(0xDA, [1, 1, 0, 0, 0x3f, 0]), Buffer.from([0x3f, 255, 217])]);
+  // Generated solely from an 80×40 solid-color fixture with EXIF leap-day capture.
+  return Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/4QBIRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAZADAAIAAAAUAAAALAAAAAAyMDI0OjAyOjI5IDEyOjAwOjAwAP/bAEMACAYGBwYFCAcHBwkJCAoMFA0MCwsMGRITDxQdGh8eHRocHCAkLicgIiwjHBwoNyksMDE0NDQfJzk9ODI8LjM0Mv/bAEMBCQkJDAsMGA0NGDIhHCEyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMv/CABEIACgAUAMBIgACEQEDEQH/xAAVAAEBAAAAAAAAAAAAAAAAAAAABf/EABUBAQEAAAAAAAAAAAAAAAAAAAAF/9oADAMBAAIQAxAAAAGcLUwAAAAAAAAAAAAAD//EABQQAQAAAAAAAAAAAAAAAAAAAFD/2gAIAQEAAQUCS//EABQRAQAAAAAAAAAAAAAAAAAAADD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAADD/2gAIAQIBAT8Bf//EABQQAQAAAAAAAAAAAAAAAAAAAFD/2gAIAQEABj8CS//EABQQAQAAAAAAAAAAAAAAAAAAAFD/2gAIAQEAAT8hS//aAAwDAQACAAMAAAAQ888888888888888//8QAFBEBAAAAAAAAAAAAAAAAAAAAMP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAMP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAUP/aAAgBAQABPxBL/9k=", "base64");
 }
 async function smokeApplication(window: BrowserWindow, root: string): Promise<void> {
   const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
@@ -262,5 +261,21 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await waitFor('!!document.querySelector(".asset-details dl")');
   await writeFile("/tmp/playmemories-d04-02b-catalog.png", (await window.webContents.capturePage()).toPNG());
   if (!Buffer.from(await readFile(join(root, "synthetic-a.jpg"))).equals(jpeg) || !Buffer.from(await readFile(join(root, "synthetic-b.jpg"))).equals(jpeg)) throw new Error("synthetic originals changed");
+  await waitFor('document.querySelectorAll(".synthetic-thumbnail").length === 2 && [...document.querySelectorAll(".synthetic-thumbnail")].every(img => img.complete && img.naturalWidth === 256)');
+  await evaluate('document.querySelector(".open-image").click()');
+  await waitFor('document.querySelector(".image-viewer img")?.naturalWidth > 0');
+  await writeFile("/tmp/playmemories-image-viewer.png", (await window.webContents.capturePage()).toPNG());
+  await click("Fechar imagem");
+  await click("Fechar detalhes");
+  await click("Calendário");
+  await waitFor('document.querySelector(".calendar-years button")?.textContent.includes("2024")');
+  await evaluate('document.querySelector(".calendar-years button").click()');
+  await waitFor('!!Array.from(document.querySelectorAll(".calendar-months button")).find(b=>b.textContent.includes("Fevereiro") && !b.disabled)');
+  await evaluate('Array.from(document.querySelectorAll(".calendar-months button")).find(b=>b.textContent.includes("Fevereiro")).click()');
+  await waitFor('document.querySelectorAll(".calendar-days button").length === 29');
+  await writeFile("/tmp/playmemories-capture-calendar.png", (await window.webContents.capturePage()).toPNG());
+  await evaluate(`document.querySelector('[aria-label="2024-02-29: 2 foto(s)"]').click()`);
+  await waitFor('document.querySelectorAll(".media-card").length === 2 && document.querySelector(".gallery-filters").textContent.includes("2024-02-29")');
+  console.log("SMOKE MEDIA CALENDAR PASS: progressive JPEG/real thumbnails/decoded preview/EXIF/capture year-month-leap-day/filter; originals unchanged");
   console.log("SMOKE D04-02B VISIBLE PASS: review/select/confirm-fixture/application-worker/commit/gallery-refresh/details; originals unchanged; native dialogs NOT TESTED");
 }

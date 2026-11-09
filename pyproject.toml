@@ -3,6 +3,9 @@ name = "playmemories-photo-manager"
 version = "0.1.0"
 description = "Local, privacy-preserving photo catalog"
 requires-python = ">=3.13"
+dependencies = [
+    "pillow>=12.0,<13",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]

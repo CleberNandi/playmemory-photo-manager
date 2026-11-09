@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 
 from ..catalog import AssetKind
+from .images import FORMATS
 from .models import CandidateSelection, IngestionAuthorizationError
 from .scoping import ScopedIngestionProposal, scope_catalogable_proposal
 
@@ -55,7 +56,11 @@ def authorize_scoped_ingestion(
         sorted(candidate_ids, key=lambda identifier: by_id[identifier].candidate.relative_path)
     )
     selections = tuple(
-        CandidateSelection(by_id[identifier].candidate, AssetKind.PHOTO, "image/jpeg")
+        CandidateSelection(
+            by_id[identifier].candidate,
+            AssetKind.PHOTO,
+            FORMATS[by_id[identifier].detected_format][0],
+        )
         for identifier in ordered
     )
     run_id = rebuilt.original.scan_result.run_id

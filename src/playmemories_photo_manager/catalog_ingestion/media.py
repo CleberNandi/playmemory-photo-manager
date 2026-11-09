@@ -25,12 +25,15 @@ from ..scanner import (
     ScanResult,
     ScanStatus,
 )
+from .images import EXTENSIONS, inspect_image
+from .images import PROFILE as IMAGE_PROFILE
 from .jpeg import PROFILE, inspect_jpeg
 from .models import CandidateReference
 
 EXCLUDED_REASONS = frozenset(
     {
         "unsupported_extension",
+        "invalid_image",
         "not_regular_file",
         "empty_file",
         "byte_limit_exceeded",
@@ -135,7 +138,7 @@ class _Directories:
         self.fds.clear()
 
 
-def _verify_file(root_fd, mount, observation, checkpoint):
+def _verify_file(root_fd, mount, observation, checkpoint, capture=None):
     parents = _Directories()
     reason, detected, fingerprint = "read_failed", None, None
     try:
@@ -160,8 +163,20 @@ def _verify_file(root_fd, mount, observation, checkpoint):
             if _mount_id(source.fileno()) != mount:
                 raise _Changed
             try:
-                result = inspect_jpeg(source, info.st_size, checkpoint=checkpoint)
+                if PurePosixPath(observation.relative_path).suffix.lower() in (".jpg", ".jpeg"):
+                    result = inspect_jpeg(source, info.st_size, checkpoint=checkpoint)
+                    if result.reason in ("unsupported_jpeg_frame", "malformed_jpeg_segment"):
+                        extended = inspect_image(source, info.st_size, checkpoint=checkpoint)
+                        if extended.reason == "eligible_image":
+                            result = extended
+                else:
+                    result = inspect_image(source, info.st_size, checkpoint=checkpoint)
                 reason, detected = result.reason, result.detected_format
+                if capture is not None and reason in ("eligible_jpeg", "eligible_image"):
+                    from .capture import extract_capture
+
+                    capture(extract_capture(source))
+                    checkpoint()
             except _VerificationTimeout:
                 reason = "verification_timeout"
             except OSError:
@@ -279,7 +294,7 @@ def classify_media(
             if observation.entry_type is not EntryType.FILE:
                 _check_excluded_entry(root_fd, mount, observation)
                 reason, detected, fingerprint = "not_regular_file", None, None
-            elif PurePosixPath(observation.relative_path).suffix.lower() not in (".jpg", ".jpeg"):
+            elif PurePosixPath(observation.relative_path).suffix.lower() not in EXTENSIONS:
                 _check_excluded_entry(root_fd, mount, observation)
                 reason, detected, fingerprint = "unsupported_extension", None, None
             elif observation.physical_identity is None:
@@ -297,13 +312,17 @@ def classify_media(
                     CandidateReference(scan_result.run_id, root_id, observation.relative_path),
                     observation,
                     "eligible"
-                    if reason == "eligible_jpeg"
+                    if reason in ("eligible_jpeg", "eligible_image")
                     else "failed"
                     if reason in FAILED_REASONS
                     else "excluded",
                     reason,
                     detected,
                     fingerprint,
+                    profile=IMAGE_PROFILE
+                    if reason in ("eligible_image", "invalid_image")
+                    or detected not in (None, "jpeg")
+                    else PROFILE,
                 )
             )
         directories.check()

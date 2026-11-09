@@ -51,7 +51,7 @@ def _dispatch(
             else DuplicatePresentation(*synthetic_groups(connection))
         )
         return presentation.request(method, params)
-    if method in {"thumbnail.get", "asset.details"}:
+    if method in {"thumbnail.get", "preview.get", "asset.details"}:
         if not isinstance(params, dict) or set(params) != {"asset_id"}:
             raise BridgeRequestError("expected asset_id only")
         asset_id = params["asset_id"]
@@ -75,6 +75,8 @@ def _dispatch(
             return None
         from .demo import synthetic_thumbnail
 
+        if method == "preview.get":
+            return None
         data = synthetic_thumbnail(asset_id, row[0])
         return {
             "media_type": "image/png",
@@ -82,10 +84,19 @@ def _dispatch(
             "height": 160,
             "base64": base64.b64encode(data).decode("ascii"),
         }
+    if method == "calendar.summary":
+        from ..gallery.calendar import summary
+
+        if not isinstance(params, dict) or set(params) - {"period"}:
+            raise BridgeRequestError("invalid calendar parameters")
+        try:
+            return summary(connection, params.get("period"))
+        except ValueError:
+            raise BridgeRequestError("invalid calendar period") from None
     if method == "gallery.list":
         if not isinstance(params, dict):
             raise BridgeRequestError("params must be an object")
-        unknown = set(params) - {"page_size", "after"}
+        unknown = set(params) - {"page_size", "after", "capture_period"}
         if unknown:
             raise BridgeRequestError("unsupported gallery parameters")
         page_size = params.get("page_size", 24)
@@ -97,7 +108,11 @@ def _dispatch(
         if after is not None and not isinstance(after, str):
             raise BridgeRequestError("after must be text or null")
         return asdict(
-            GalleryQueries(connection).list_assets(GalleryQuery(page_size=page_size, after=after))
+            GalleryQueries(connection).list_assets(
+                GalleryQuery(
+                    page_size=page_size, after=after, capture_period=params.get("capture_period")
+                )
+            )
         )
     if method == "shutdown":
         return {"accepted": True}

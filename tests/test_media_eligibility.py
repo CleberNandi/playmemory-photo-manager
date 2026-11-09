@@ -75,8 +75,8 @@ def test_empty_tree_produces_empty_projection(library):
 
 def test_nonregular_and_unsupported_extension_do_not_open_contents(library, monkeypatch):
     root, _path, root_id = library
-    (root / "ignored.png").write_bytes(b"not read")
-    (root / "link.jpg").symlink_to("ignored.png")
+    (root / "ignored.txt").write_bytes(b"not read")
+    (root / "link.jpg").symlink_to("ignored.txt")
     os.mkfifo(root / "pipe.jpg")
     original = proposal(library)
     monkeypatch.setattr(media, "_verify_file", lambda *_a: pytest.fail("content opened"))
@@ -286,7 +286,7 @@ def test_unreadable_jpeg_blocks_and_does_not_leak_descriptors(library, monkeypat
     assert set(os.listdir("/proc/self/fd")) == before
 
 
-@pytest.mark.parametrize("name", ["directory", "ignored.png"])
+@pytest.mark.parametrize("name", ["directory", "ignored.txt"])
 def test_mount_crossing_for_excluded_entries_is_not_hidden(library, monkeypatch, name):
     import stat
 

@@ -12,6 +12,8 @@ from uuid import UUID
 from ..change_planning import ChangeClassification, DiagnosticCode, DiagnosticSeverity, PlanStatus
 from ..evidence import CoverageClassification, DecisionImpediment
 from ..scanner import ConfinementKind, EntryObservation, EntryType, HostPlatform, ScanStatus
+from .images import EXTENSIONS, FORMATS
+from .images import PROFILE as IMAGE_PROFILE
 from .jpeg import PROFILE
 from .media import EXCLUDED_REASONS, MediaEligibility, PhysicalFingerprint
 from .models import CandidateReference, IngestionAuthorizationError, IngestionProposal
@@ -76,17 +78,27 @@ def _fingerprint(original, eligibilities, exclusions, eligible):
 def _validate_eligibility(item, original):
     _require(isinstance(item, MediaEligibility))
     _require(_valid_identifier(item.candidate_id))
-    _require(item.profile == PROFILE and item.decoding == "not_checked")
+    _require(item.profile in (PROFILE, IMAGE_PROFILE) and item.decoding == "not_checked")
     _require(isinstance(item.candidate, CandidateReference))
     _require(isinstance(item.observation, EntryObservation))
     _require(item.candidate.run_id == original.scan_result.run_id)
     _require(item.candidate.library_root_id == original.plan.library_root_id)
     _require(item.candidate.relative_path == item.observation.relative_path)
-    _require(item.detected_format in (None, "jpeg"))
+    _require(item.detected_format is None or item.detected_format in FORMATS)
     _require(
         item.state == "eligible"
-        and item.reason == "eligible_jpeg"
-        and item.detected_format == "jpeg"
+        and (
+            (
+                item.reason == "eligible_jpeg"
+                and item.detected_format == "jpeg"
+                and item.profile == PROFILE
+            )
+            or (
+                item.reason == "eligible_image"
+                and item.detected_format in FORMATS
+                and item.profile == IMAGE_PROFILE
+            )
+        )
         or item.state == "excluded"
         and item.reason in EXCLUDED_REASONS
     )
@@ -95,12 +107,10 @@ def _validate_eligibility(item, original):
         _require(item.fingerprint is None and item.detected_format is None)
     elif item.reason == "unsupported_extension":
         _require(item.fingerprint is None and item.detected_format is None)
-        _require(
-            PurePosixPath(item.observation.relative_path).suffix.lower() not in (".jpg", ".jpeg")
-        )
+        _require(PurePosixPath(item.observation.relative_path).suffix.lower() not in EXTENSIONS)
     else:
         _require(item.reason != "not_regular_file")
-        _require(PurePosixPath(item.observation.relative_path).suffix.lower() in (".jpg", ".jpeg"))
+        _require(PurePosixPath(item.observation.relative_path).suffix.lower() in EXTENSIONS)
         _require(isinstance(item.fingerprint, PhysicalFingerprint))
         fp = item.fingerprint
         observed = item.observation

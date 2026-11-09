@@ -340,3 +340,86 @@ def test_apply_route_rejects_paths_and_cross_window_without_admission(client, tm
         client.request("ingestion.apply", request | {"window_id": str(uuid4())})["error"]["code"]
         == "stale_session"
     )
+
+
+def test_multiformat_worker_calendar_and_image_jobs_through_authenticated_pipe(client, tmp_path):
+    from PIL import Image
+
+    root = tmp_path / "images"
+    root.mkdir()
+    Image.new("RGB", (80, 40), (20, 100, 180)).save(root / "synthetic.png")
+    exif = Image.Exif()
+    exif[34665] = {36867: "2024:02:29 23:30:00", 36881: "-03:00"}
+    Image.new("RGB", (80, 40), (180, 100, 20)).save(
+        root / "progressive.jpg", progressive=True, exif=exif
+    )
+    before = {p.name: p.read_bytes() for p in root.iterdir()}
+    created = client.request(
+        "library.create",
+        {"path": str(tmp_path / "catalog.sqlite3"), "library_handle": str(uuid4())},
+    )
+    scope = {"session_id": created["result"]["session"]["session_id"], "window_id": str(uuid4())}
+    grant = client.request(
+        "ingestion.select_root",
+        scope | {"path": str(root), "recursive": True, "identity_reviewed": True},
+    )["result"]["root_grant_id"]
+    operation = client.request(
+        "ingestion.prepare",
+        scope | {"root_grant_id": grant, "recursive": True, "client_request_id": str(uuid4())},
+    )["result"]["operation_id"]
+    proposal = complete_proposal(client, scope, operation)
+    page = client.request(
+        "ingestion.page", scope | {"proposal_id": proposal, "cursor": None, "page_size": 50}
+    )["result"]
+    assert all(item["selectable"] for item in page["items"])
+    command = client.request(
+        "ingestion.apply",
+        scope
+        | {
+            "proposal_id": proposal,
+            "candidate_ids": [item["candidate_id"] for item in page["items"]],
+            "client_request_id": str(uuid4()),
+        },
+    )["result"]["command_id"]
+    deadline = time.monotonic() + 8
+    while True:
+        result = client.request("ingestion.application_status", scope | {"command_id": command})[
+            "result"
+        ]
+        if result["state"] == "completed":
+            break
+        assert result["state"] != "outcome_unknown"
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    assert result["result"]["status"] == "applied"
+    context = {"session_id": scope["session_id"]}
+    calendar = client.request("calendar.summary", context | {"period": "2024-02"})
+    assert calendar["result"]["buckets"] == [["2024-02-29", 1]]
+    assert calendar["result"]["undated"] == 1
+    gallery = client.request("gallery.list", context | {"capture_period": "2024-02-29"})["result"]
+    asset_id = gallery["items"][0]["asset_id"]
+    for method in ("thumbnail.get", "preview.get"):
+        deadline = time.monotonic() + 8
+        while True:
+            response = client.request(method, context | {"asset_id": asset_id})
+            assert response["ok"], response
+            image = response["result"]
+            if image and image.get("status") != "pending":
+                break
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        assert image["synthetic"] is False
+        assert str(root) not in json.dumps(response)
+        assert (
+            client.request(method, context | {"asset_id": asset_id, "path": str(root)})["error"][
+                "code"
+            ]
+            == "invalid_request"
+        )
+    assert {p.name: p.read_bytes() for p in root.iterdir()} == before
+    assert (
+        client.request("calendar.summary", {"session_id": str(uuid4()), "period": None})["error"][
+            "code"
+        ]
+        == "stale_session"
+    )
