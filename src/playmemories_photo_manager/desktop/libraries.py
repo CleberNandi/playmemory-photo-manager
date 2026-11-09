@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from uuid import UUID
 
+from ..imaging.service import ImageService
 from ..library import LibraryError, LibraryLifecycle
 
 
@@ -25,6 +26,7 @@ class LibraryDispatcher:
         self.ingestion_enabled = ingestion_enabled
         self.protected_paths = protected_paths
         self.ingestion = None
+        self.images = ImageService()
         self.owner = LibraryLifecycle()
         self.handle: str | None = None
 
@@ -64,23 +66,31 @@ class LibraryDispatcher:
             ):
                 self.ingestion.close(timeout=0)
                 raise LibraryError("busy")
+            if not self.images.shutdown():
+                raise LibraryError("busy")
+            self.images = ImageService()
             action = self.owner.create if method == "library.create" else self.owner.open
             action(Path(raw_path))
             self.ingestion = None
+            self.images = ImageService()
             self.handle = handle
             return self.state()
         if method == "library.close":
             if set(params) != {"session_id"}:
                 raise LibraryError("invalid_request")
             self.require_session(params["session_id"])
+            if not self.images.shutdown():
+                raise LibraryError("busy")
             self.owner.close()
             self.ingestion = None
             self.handle = None
             return self.state()
         if method not in (
             "gallery.list",
+            "calendar.summary",
             "asset.details",
             "thumbnail.get",
+            "preview.get",
             "duplicates.list",
             "duplicates.group",
         ):
@@ -92,6 +102,17 @@ class LibraryDispatcher:
             self.ingestion.preparation.busy or self.ingestion.commands.busy
         ):
             raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
+        if method in ("thumbnail.get", "preview.get"):
+            if set(params) != {"session_id", "asset_id"}:
+                raise LibraryError("invalid_request")
+            if self.images.closed and not self.images.jobs:
+                self.images = ImageService()
+            asset_id = _uuid(params["asset_id"])
+            return self.images.request(
+                active.query_connection,
+                asset_id,
+                "grid" if method == "thumbnail.get" else "preview",
+            )
         try:
             return _dispatch(
                 active.query_connection,
@@ -180,11 +201,14 @@ class LibraryDispatcher:
             raise LibraryError(error.code) from None
 
     def tick(self):
+        self.images.tick()
         if self.ingestion is not None:
             self.ingestion.tick()
 
     def shutdown(self, timeout=2.5):
         if self.ingestion is not None and not self.ingestion.close(timeout=timeout):
+            return False
+        if not self.images.shutdown():
             return False
         self.owner.close()
         self.ingestion = None

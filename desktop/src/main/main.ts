@@ -91,7 +91,7 @@ app.whenReady().then(async () => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).sort().join() !== "params,sessionId") throw new Error("invalid_request");
     return raw as {sessionId: unknown; params: unknown};
   };
-  const query = async (method: "gallery.list" | "asset.details" | "thumbnail.get", id: unknown, params: Record<string, unknown>) => {
+  const query = async (method: "gallery.list" | "calendar.summary" | "preview.get" | "asset.details" | "thumbnail.get", id: unknown, params: Record<string, unknown>) => {
     if (recovering || libraries.isBusy) throw new Error("busy");
     return demo ? backend.request(method, params) : libraries.query(method, id, params);
   };
@@ -105,9 +105,23 @@ app.whenReady().then(async () => {
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
-    return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null});
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
+    return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {})});
+  });
+  register("calendar:summary", 1, (raw) => {
+    const {sessionId, params: period} = envelope(raw);
+    if (period !== null && (typeof period !== "string" || !/^[0-9]{4}(-[0-9]{2})?$/.test(period))) throw new Error("invalid_request");
+    return query("calendar.summary", sessionId, {period});
+  });
+  register("preview:get", 1, async (raw) => {
+    const {sessionId, params: assetId} = envelope(raw);
+    if (!canonicalId(assetId)) throw new Error("invalid_request");
+    if (thumbnailRequests >= 4) return {status:"pending"};
+    thumbnailRequests++;
+    try { return await query("preview.get", sessionId, {asset_id:assetId}); }
+    finally { thumbnailRequests--; }
   });
   register("asset:details", 1, async (raw) => {
     const {sessionId, params: assetId} = envelope(raw);
@@ -121,7 +135,7 @@ app.whenReady().then(async () => {
   register("thumbnail:get", 1, async (raw) => {
     const {sessionId, params: assetId} = envelope(raw);
     if (!canonicalId(assetId)) throw new Error("invalid_request");
-    if (thumbnailRequests >= 4) throw new Error("busy");
+    if (thumbnailRequests >= 4) return {status:"pending"};
     thumbnailRequests++;
     try { return await query("thumbnail.get", sessionId, {asset_id: assetId}); }
     finally { thumbnailRequests--; }

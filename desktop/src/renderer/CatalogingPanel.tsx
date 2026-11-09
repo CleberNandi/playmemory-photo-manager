@@ -109,7 +109,7 @@ export function CatalogingPanel({sessionId, onApplied, onShowLibrary}: {sessionI
     {job && <div role="status" aria-live="polite"><p>{labels[job.state]}{job.phase ? ` · ${labels[job.phase] ?? job.phase}` : ""}</p>
       <p>{job.observed_count} entradas observadas · {job.verified_count} verificadas · {job.excluded_count} excluídas. Total desconhecido.</p>
       {job.terminal_reason && <p>{errors[job.terminal_reason] ?? "A preparação não foi concluída."}</p>}
-      {job.state === "completed" && <p>Verificação estrutural limitada de JPEG; a decodificação não foi verificada. A proposta pode estar vazia.</p>}
+      {job.state === "completed" && <p>Verificação estrutural de imagens; a decodificação completa não foi verificada. A proposta pode estar vazia.</p>}
     </div>}
     {active && <button className="primary-button" disabled={pending || job.state === "cancelling"} onClick={() => void cancel()}>Cancelar preparação</button>}
     {error && <p role="alert">{error}</p>}

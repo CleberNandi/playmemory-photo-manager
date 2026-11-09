@@ -8,6 +8,7 @@ from ..catalog import Catalog, CatalogError
 from ..catalog.errors import CatalogStateConflictError, NotFoundError
 from ..catalog.models import NewFileRegistration
 from ..library import LibraryError
+from .capture import persist_capture
 from .models import (
     IngestionAuthorizationError,
     IngestionBatchStatus,
@@ -145,6 +146,9 @@ def apply_scoped_ingestion(
                 scoped.original.scan_result.root.absolute_path,
                 registrations,
                 before_write=validate_current,
+                after_write=lambda rows: persist_capture(
+                    catalog._connection, rows, physical.captures
+                ),
             )
         # Publish IDs only after commit has returned, never from a partially written batch.
         results = {item.location.normalized_relative_path: item for item in persisted}

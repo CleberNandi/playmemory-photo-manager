@@ -13,9 +13,11 @@ const scoped = (channel: string, params: unknown) => ipcRenderer.invoke(channel,
 ipcRenderer.on("backend:reset", () => { sessionId = null; applied = ++sequence; });
 
 contextBridge.exposeInMainWorld("photoManager", {
-  listGallery: (params: { pageSize?: number; after?: string | null } = {}) =>
+  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null } = {}) =>
     scoped("gallery:list", params),
   getAssetDetails: (assetId: string) => scoped("asset:details", assetId),
+  getCalendar: (period: string | null) => scoped("calendar:summary", period),
+  getPreview: (assetId: string) => scoped("preview:get", assetId),
   getThumbnail: (assetId: string) => scoped("thumbnail:get", assetId),
   listDuplicates: (params: {pageSize?: number; after?: string | null} = {}) => scoped("duplicates:list", params),
   getDuplicateGroup: (params: {snapshotId: string; groupKey: string; pageSize?: number; after?: string | null}) => scoped("duplicates:group", params),

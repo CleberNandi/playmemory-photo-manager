@@ -22,6 +22,7 @@ from playmemories_photo_manager.catalog import (
     Tag,
 )
 
+from .calendar import capture_key, validate_period
 from .errors import (
     AssetNotFoundError,
     CatalogReadError,
@@ -61,6 +62,7 @@ class GalleryQueries:
         thumbnail_store: SyntheticThumbnailStore | None = None,
     ) -> None:
         self._connection = connection
+        connection.create_function("capture_bucket", 2, capture_key, deterministic=True)
         self._thumbnail_store = thumbnail_store
 
     def list_assets(self, query: GalleryQuery | None = None) -> GalleryPage:
@@ -92,6 +94,10 @@ class GalleryQueries:
                     END AS projected_availability
                 FROM asset a
                 WHERE (? IS NULL OR a.kind = ?)
+                  AND (? IS NULL OR (? = 'undated' AND
+                    capture_bucket(captured_local_value,captured_precision) IS NULL)
+                    OR (? <> 'undated' AND
+                    substr(capture_bucket(captured_local_value,captured_precision),1,length(?))=?))
                   AND (? IS NULL OR EXISTS (
                       SELECT 1 FROM file_location fl
                       WHERE fl.asset_id = a.id AND fl.library_root_id = ?
@@ -107,6 +113,7 @@ class GalleryQueries:
         parameters = (
             filters["kind"],
             filters["kind"],
+            *([filters["capture_period"]] * 5),
             filters["root_id"],
             filters["root_id"],
             filters["availability"],
@@ -276,12 +283,17 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
     root_id = _canonical_uuid(query.root_id, "root_id") if query.root_id is not None else None
     if query.after is not None and not isinstance(query.after, str):
         raise InvalidCursorError("cursor must be text")
-    return GalleryQuery(query.page_size, query.after, kind, root_id, availability)
+    try:
+        period = validate_period(query.capture_period)
+    except ValueError as error:
+        raise InvalidGalleryQueryError("invalid capture period") from error
+    return GalleryQuery(query.page_size, query.after, kind, root_id, availability, period)
 
 
 def _filter_values(query: GalleryQuery) -> dict[str, str | None]:
     return {
         "kind": query.kind.value if query.kind else None,
+        "capture_period": query.capture_period,
         "root_id": query.root_id,
         "availability": query.availability.value if query.availability else None,
     }

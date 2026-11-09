@@ -46,6 +46,7 @@ class GalleryQuery:
     kind: AssetKind | None = None
     root_id: str | None = None
     availability: AssetAvailability | None = None
+    capture_period: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

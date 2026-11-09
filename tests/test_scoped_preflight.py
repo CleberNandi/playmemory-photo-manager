@@ -117,9 +117,9 @@ def test_unselected_files_are_not_reopened(batch, monkeypatch):
     verify = scoped_preflight._verify_file
     seen = []
 
-    def record(fd, binding, observation, checkpoint):
+    def record(fd, binding, observation, checkpoint, capture=None):
         seen.append(observation.relative_path)
-        return verify(fd, binding, observation, checkpoint)
+        return verify(fd, binding, observation, checkpoint, capture)
 
     monkeypatch.setattr(scoped_preflight, "_verify_file", record)
     with preflight_scoped_ingestion(scoped, auth, expected_root_mount=mount):
