@@ -508,6 +508,19 @@ class PreparationController:
         if any(sum(sizes[start : start + 50]) + 1024 > 256 * 1024 for start in range(len(sizes))):
             raise PreparationError("resource_limit")
 
+    def application_source(self, session_id, window_id, proposal_id):
+        """Private owner-thread handoff, never a renderer DTO or a mutable path request."""
+        self._scope(session_id, window_id)
+        _uuid(proposal_id)
+        if (
+            self.busy
+            or self._published is None
+            or self._current is None
+            or (self._current.state != "completed" or self._current.proposal_id != proposal_id)
+        ):
+            raise PreparationError("stale_session")
+        return self._published, self._value
+
     def page(self, session_id, window_id, proposal_id, cursor=None, page_size=50):
         self._scope(session_id, window_id)
         if self._published is None or proposal_id != self._current.proposal_id:

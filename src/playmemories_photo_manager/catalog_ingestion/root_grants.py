@@ -18,6 +18,8 @@ from ..catalog import Catalog, LibraryRoot
 from ..catalog.errors import CatalogError, CatalogStateConflictError
 from ..catalog.repository import CatalogRepository
 from ..library import LibraryError, LibrarySession, read_library_connection
+from ..scanner import PhysicalIdentity
+from .application_commands import ApplicationCommands
 from .media import _Changed, _Directories, _identity, _mount_id
 from .preparation import PreparationController, PreparationError, PreparationInput, _uuid
 
@@ -130,6 +132,13 @@ class RootGrantService:
         self._bindings = {}
         self._admissions = {}
         self.preparation = PreparationController(self.session_id, window_id)
+        self.commands = ApplicationCommands(
+            self.session_id,
+            window_id,
+            active_guard=self._require,
+            resolve_proposal=self._application_source,
+            validate_source=self._application_binding,
+        )
         try:
             session._bind_close_guard(self._before_session_close)
         except BaseException:
@@ -160,6 +169,43 @@ class RootGrantService:
             raise PreparationError("stale_session")
         if params["recursive"] is not True:
             raise PreparationError("invalid_request")
+
+    def _application_source(self, proposal_id):
+        return self.preparation.application_source(self.session_id, self.window_id, proposal_id)
+
+    def _application_binding(self, value):
+        self._require()
+        self._catalog_check()
+        if (value.catalog_path, value.catalog_identity) != (
+            str(self._catalog),
+            self._catalog_identity,
+        ):
+            raise PreparationError("stale_session")
+        expected = (value.root_path, PhysicalIdentity(*value.root_identity), value.mount_id)
+        if self._bindings.get(value.root_id) != expected:
+            raise PreparationError("stale_session")
+        with _sanitize():
+            held = _HeldRoot(_path(value.root_path))
+            try:
+                if (held.identity, held.mount) != expected[1:]:
+                    raise PreparationError("root_changed")
+                current = self._validate_overlap(held, self._roots())
+                if (
+                    current is None
+                    or current.id != value.root_id
+                    or str(current.availability) != "available"
+                ):
+                    raise PreparationError("root_changed")
+            finally:
+                held.close()
+
+    def _application_idle(self):
+        if self.commands.closing:
+            raise PreparationError("stale_session")
+        if self.commands.suspended:
+            raise PreparationError("outcome_unknown")
+        if self.commands.busy:
+            raise PreparationError("busy")
 
     def _expire(self):
         for identifier, grant in tuple(self._grants.items()):
@@ -319,6 +365,7 @@ class RootGrantService:
         if params["identity_reviewed"] is not True:
             raise PreparationError("invalid_request")
         path = _path(params["path"])
+        self._application_idle()
         if self.preparation.busy:
             raise PreparationError("busy")
         self._catalog_check()
@@ -383,6 +430,7 @@ class RootGrantService:
             if previous != signature:
                 raise PreparationError("invalid_request")
             return self.preparation.start(value, request_id)
+        self._application_idle()
         if self.preparation.busy:
             raise PreparationError("busy")
         self._catalog_check()
@@ -427,6 +475,17 @@ class RootGrantService:
         if threading.get_ident() != self._owner:
             raise PreparationError("invalid_request")
         if not self._closed:
+            try:
+                self.commands.close()
+            except PreparationError as error:
+                if error.code == "busy":
+                    for grant in self._grants.values():
+                        grant.held.close()
+                    self._grants.clear()
+                    self._bindings.clear()
+                    self._admissions.clear()
+                    return False
+                raise
             self._closed = True
             for grant in self._grants.values():
                 grant.held.close()
