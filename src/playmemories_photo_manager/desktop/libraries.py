@@ -59,7 +59,9 @@ class LibraryDispatcher:
             raw_path = params["path"]
             if not isinstance(raw_path, str) or not 1 <= len(raw_path) <= 4096 or "\0" in raw_path:
                 raise LibraryError("invalid_request")
-            if self.ingestion is not None and self.ingestion.preparation.busy:
+            if self.ingestion is not None and (
+                self.ingestion.preparation.busy or self.ingestion.commands.busy
+            ):
                 self.ingestion.close(timeout=0)
                 raise LibraryError("busy")
             action = self.owner.create if method == "library.create" else self.owner.open
@@ -86,7 +88,9 @@ class LibraryDispatcher:
         if "session_id" not in params:
             raise LibraryError("stale_session")
         active = self.require_session(params["session_id"])
-        if self.ingestion is not None and self.ingestion.preparation.busy:
+        if self.ingestion is not None and (
+            self.ingestion.preparation.busy or self.ingestion.commands.busy
+        ):
             raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
         try:
             return _dispatch(
@@ -122,6 +126,14 @@ class LibraryDispatcher:
                 "recursive",
                 "client_request_id",
             },
+            "ingestion.apply": {
+                "session_id",
+                "window_id",
+                "proposal_id",
+                "candidate_ids",
+                "client_request_id",
+            },
+            "ingestion.application_status": {"session_id", "window_id", "command_id"},
             "ingestion.status": {"session_id", "window_id", "operation_id"},
             "ingestion.cancel": {"session_id", "window_id", "operation_id"},
             "ingestion.page": {"session_id", "window_id", "proposal_id", "cursor", "page_size"},
@@ -142,6 +154,12 @@ class LibraryDispatcher:
                 return service.select(params)
             if method == "ingestion.prepare":
                 return service.prepare(params)
+            if method == "ingestion.apply":
+                return service.apply(params)
+            if method == "ingestion.application_status":
+                return service.application_status(
+                    params["session_id"], window, _uuid(params["command_id"])
+                )
             controller = service.preparation
             if method == "ingestion.status":
                 return controller.status(

@@ -20,6 +20,7 @@ from ..catalog.repository import CatalogRepository
 from ..library import LibraryError, LibrarySession, read_library_connection
 from ..scanner import PhysicalIdentity
 from .application_commands import ApplicationCommands
+from .application_supervisor import ApplicationSupervisor
 from .media import _Changed, _Directories, _identity, _mount_id
 from .preparation import PreparationController, PreparationError, PreparationInput, _uuid
 
@@ -139,10 +140,12 @@ class RootGrantService:
             resolve_proposal=self._application_source,
             validate_source=self._application_binding,
         )
+        self.application = ApplicationSupervisor(self.commands)
         try:
             session._bind_close_guard(self._before_session_close)
         except BaseException:
             self.preparation.shutdown()
+            self.application.shutdown()
             raise
 
     def _require(self):
@@ -461,10 +464,32 @@ class RootGrantService:
         self._admissions[request_id] = (signature, value)
         return job
 
+    def apply(self, params):
+        value = self.commands.admit(params)
+        if value["state"] == "queued":
+            identifier = value["command_id"]
+            payload = self.commands.claim(self.session_id, self.window_id, identifier)
+            try:
+                self.application.start(payload, params["client_request_id"])
+            except Exception:
+                if self.application.busy:
+                    self.application._abort("protocol_failure")
+                else:
+                    self.commands.worker_failed(
+                        self.session_id, self.window_id, identifier, reaped=True
+                    )
+        return self.commands.status(self.session_id, self.window_id, value["command_id"])
+
+    def application_status(self, session_id, window_id, command_id):
+        self._require()
+        self.application.tick()
+        return self.commands.status(session_id, window_id, command_id)
+
     def tick(self):
         if threading.get_ident() != self._owner:
             raise PreparationError("invalid_request")
         self.preparation.tick()
+        self.application.tick()
         self._expire()
 
     def _before_session_close(self):
@@ -484,8 +509,10 @@ class RootGrantService:
                     self._grants.clear()
                     self._bindings.clear()
                     self._admissions.clear()
+                    self.application.shutdown(timeout=0)
                     return False
                 raise
+            self.application.shutdown(timeout=0)
             self._closed = True
             for grant in self._grants.values():
                 grant.held.close()

@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 from dataclasses import replace
 from uuid import uuid4
@@ -309,3 +310,77 @@ def test_proposal_from_previous_preparation_cannot_be_claimed(ready):
     with pytest.raises(PreparationError, match="stale_session"):
         claim(service, command)
     assert service.commands.admit(params)["result"]["status"] == "rejected"
+
+
+def test_real_application_worker_updates_catalog_and_replays_without_new_process(ready):
+    import time
+
+    session, service, _, params = ready
+    started = service.apply(params)
+    assert started["state"] == "running" and service.application.busy
+    process = service.application._process
+    deadline = time.monotonic() + 10
+    while service.application.busy and time.monotonic() < deadline:
+        service.tick()
+        time.sleep(0.005)
+    assert not service.application.busy
+    result = service.application_status(
+        service.session_id, service.window_id, started["command_id"]
+    )
+    assert result["state"] == "completed", result
+    assert result["result"]["status"] == "applied", result
+    assert len(Catalog(session.query_connection).list_assets()) == 2
+    assert service.apply(params) == result
+    assert service.application._process is None
+    assert process.poll() == 0
+    assert service.application._value is None
+
+
+def test_application_worker_kill_is_reaped_before_unknown_is_published(ready):
+    import time
+
+    _, service, _, params = ready
+    started = service.apply(params)
+    process = service.application._process
+    process.kill()
+    deadline = time.monotonic() + 5
+    while service.application.busy and time.monotonic() < deadline:
+        service.tick()
+        time.sleep(0.005)
+    assert process.poll() is not None and not service.application.busy
+    status = service.application_status(
+        service.session_id, service.window_id, started["command_id"]
+    )
+    assert status["state"] == "outcome_unknown" and service.commands.suspended
+    assert service.apply(params) == status
+
+
+def test_sealed_application_payload_cannot_be_mutated(ready, monkeypatch):
+    import errno
+
+    from playmemories_photo_manager.catalog_ingestion import preparation as parent
+
+    _, service, _, params = ready
+    original = parent.subprocess.Popen
+    checked = []
+
+    def spawn(arguments, **kwargs):
+        (fd,) = kwargs["pass_fds"]
+        try:
+            os.write(fd, b"forged")
+        except OSError as error:
+            assert error.errno == errno.EPERM
+        else:
+            pytest.fail("sealed proposal was writable")
+        checked.append(True)
+        return original(arguments, **kwargs)
+
+    monkeypatch.setattr(parent.subprocess, "Popen", spawn)
+    service.apply(params)
+    import time
+
+    deadline = time.monotonic() + 5
+    while service.application.busy and time.monotonic() < deadline:
+        service.tick()
+        time.sleep(0.005)
+    assert checked and not service.application.busy

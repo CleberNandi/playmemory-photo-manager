@@ -1,3 +1,4 @@
+import { CatalogingReview } from "./CatalogingReview";
 import { useEffect, useRef, useState } from "react";
 
 interface Job {
@@ -8,7 +9,7 @@ interface Job {
 }
 interface Page {
   proposal_id: string; next_cursor: string | null;
-  items: {candidate_id: string; relative_path: string; state: string; reason: string; profile: string; decoding: string}[];
+  items: {candidate_id: string; relative_path: string; state: string; reason: string; profile: string; decoding: string; selectable?: boolean}[];
 }
 const terminal = (job: Job) => ["completed", "cancelled", "failed"].includes(job.state);
 const labels: Record<string, string> = {
@@ -32,7 +33,8 @@ function errorText(error: unknown) {
   return code ? errors[code] : "Não foi possível concluir a operação. Selecione novamente a pasta; nenhum pedido será repetido automaticamente.";
 }
 
-export function CatalogingPanel({sessionId}: {sessionId: string}) {
+export function CatalogingPanel({sessionId, onApplied, onShowLibrary}: {sessionId: string; onApplied?: () => void; onShowLibrary?: () => void}) {
+  const [applicationBlocked, setApplicationBlocked] = useState(false);
   const [grant, setGrant] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [page, setPage] = useState<Page | null>(null);
@@ -100,9 +102,9 @@ export function CatalogingPanel({sessionId}: {sessionId: string}) {
   });
   return <section className="cataloging-panel" aria-label="Preparar catalogação">
     <h2>Preparar catalogação</h2>
-    <p>Examina a pasta e suas subpastas para preparar uma proposta. Os originais permanecem inalterados; nenhuma foto será adicionada ao catálogo nesta etapa.</p>
-    <button className="primary-button" disabled={pending || active} onClick={() => void choose()}>Selecionar pasta</button>{" "}
-    <button className="primary-button" disabled={pending || active || !grant} onClick={() => void prepare()}>Preparar proposta</button>
+    <p>Examina a pasta e suas subpastas para preparar uma proposta. Os originais permanecem inalterados. Preparar não adiciona fotos; a catalogação exige revisão e confirmação separadas.</p>
+    <button className="primary-button" disabled={pending || active || applicationBlocked} onClick={() => void choose()}>Selecionar pasta</button>{" "}
+    <button className="primary-button" disabled={pending || active || applicationBlocked || !grant} onClick={() => void prepare()}>Preparar proposta</button>
     {grant && <p role="status">Pasta confirmada. Inicie em até cinco minutos; depois será necessário selecionar novamente.</p>}
     {job && <div role="status" aria-live="polite"><p>{labels[job.state]}{job.phase ? ` · ${labels[job.phase] ?? job.phase}` : ""}</p>
       <p>{job.observed_count} entradas observadas · {job.verified_count} verificadas · {job.excluded_count} excluídas. Total desconhecido.</p>
@@ -111,8 +113,10 @@ export function CatalogingPanel({sessionId}: {sessionId: string}) {
     </div>}
     {active && <button className="primary-button" disabled={pending || job.state === "cancelling"} onClick={() => void cancel()}>Cancelar preparação</button>}
     {error && <p role="alert">{error}</p>}
-    {job?.state === "completed" && (!page || page.next_cursor) && <button className="primary-button" disabled={pending} onClick={() => void loadPage()}>{page ? "Próxima página" : "Ver proposta"}</button>}
+    {job?.state === "completed" && (!page || page.next_cursor) && <button className="primary-button" disabled={pending || applicationBlocked} onClick={() => void loadPage()}>{page ? "Próxima página" : "Ver proposta"}</button>}
     {page && <><p>Esta página contém {page.items.length} itens. {page.next_cursor ? "Há mais itens." : "Fim da proposta."}</p>
-      <div className="cataloging-table"><table><caption>Candidatos da proposta — sem aplicação</caption><thead><tr><th>Caminho relativo</th><th>Classificação</th><th>Motivo</th></tr></thead><tbody>{page.items.map((item) => <tr key={item.candidate_id}><td>{item.relative_path}</td><td>{item.state}</td><td>{item.reason}</td></tr>)}</tbody></table></div></>}
+      {window.photoManager?.applyCataloging && job?.proposal_id
+        ? <CatalogingReview key={job.proposal_id} sessionId={sessionId} proposalId={job.proposal_id} page={page} onLockChange={setApplicationBlocked} onApplied={onApplied} onShowLibrary={onShowLibrary} />
+        : <div className="cataloging-table"><table><caption>Candidatos da proposta — sem aplicação</caption><thead><tr><th>Caminho relativo</th><th>Classificação</th><th>Motivo</th></tr></thead><tbody>{page.items.map((item) => <tr key={item.candidate_id}><td>{item.relative_path}</td><td>{item.state}</td><td>{item.reason}</td></tr>)}</tbody></table></div>}</>}
   </section>;
 }

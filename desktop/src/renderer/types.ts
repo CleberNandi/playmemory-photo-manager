@@ -24,6 +24,8 @@ declare global {
       getPreparationStatus?(sessionId: string, operationId: string): Promise<unknown>;
       cancelPreparation?(sessionId: string, operationId: string): Promise<unknown>;
       listCatalogingCandidates?(sessionId: string, proposalId: string, cursor: string | null, pageSize: number): Promise<unknown>;
+      applyCataloging?(sessionId: string, proposalId: string, candidateIds: string[]): Promise<unknown>;
+      getCatalogingApplicationStatus?(sessionId: string, commandId: string): Promise<unknown>;
       getLibraryState?(): Promise<LibraryState>;
       chooseCreateLibrary?(): Promise<LibraryState>;
       chooseOpenLibrary?(): Promise<LibraryState>;

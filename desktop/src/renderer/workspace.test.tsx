@@ -72,3 +72,26 @@ it("restores focus to the selection after switching from thumbnails to table", a
   await click("Fechar detalhes");
   expect(document.activeElement).toBe(host.querySelector(".gallery-table [data-asset-id=first]"));
 });
+
+it("refreshes gallery after cataloging and discards a delayed pre-commit page", async () => {
+  let oldPage!: (page: unknown) => void;
+  const list = vi.fn().mockResolvedValueOnce({items:[item("before","Natureza",false)],next_cursor:"old",has_more:true})
+    .mockImplementationOnce(()=>new Promise(resolve=>{oldPage=resolve;}))
+    .mockResolvedValueOnce({items:[item("created","Natureza",false)],next_cursor:null,has_more:false});
+  Object.assign(window.photoManager!, {
+    listGallery:list,
+    getLibraryState:vi.fn().mockResolvedValue({state:"active",session:{session_id:"A",display_name:"lab"},cataloging_enabled:true,reopen:false}),
+    chooseMediaRoot:vi.fn().mockResolvedValue({root_grant_id:"grant"}),
+    prepareCataloging:vi.fn().mockResolvedValue({session_id:"A",operation_id:"op",revision:1,state:"completed",phase:null,observed_count:1,verified_count:1,excluded_count:0,total:null,proposal_id:"proposal",terminal_reason:null}),
+    listCatalogingCandidates:vi.fn().mockResolvedValue({proposal_id:"proposal",next_cursor:null,items:[{candidate_id:"candidate",relative_path:"new.jpg",state:"eligible",reason:"eligible_jpeg",profile:"jpeg_structural_v1",decoding:"not_checked",selectable:true}]}),
+    applyCataloging:vi.fn().mockResolvedValue({command_id:"command",state:"completed",result:{status:"applied",diagnostic:null,items:[{candidate_id:"candidate",disposition:"created",asset_id:"created",location_id:"location"}]}}),
+    getCatalogingApplicationStatus:vi.fn(),
+  });
+  await act(async()=>root.render(<App />));
+  await click("Carregar mais");await click("+ Adicionar pastas");await click("Selecionar pasta");await click("Preparar proposta");await click("Ver proposta");
+  await click("Selecionar elegíveis desta página");await click("Catalogar selecionados");
+  expect(host.querySelectorAll(".media-card")).toHaveLength(1);
+  expect(host.querySelector(".media-card")?.textContent).toContain("created");
+  await act(async()=>oldPage({items:[item("stale","Natureza",false)],next_cursor:null,has_more:false}));
+  expect(host.querySelectorAll(".media-card")).toHaveLength(1);expect(host.querySelector(".media-card")?.textContent).not.toContain("stale");
+});

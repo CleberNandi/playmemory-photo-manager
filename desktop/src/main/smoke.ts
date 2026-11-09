@@ -1,10 +1,10 @@
 import { BrowserWindow } from "electron";
-import { writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import type { PythonBackend } from "./backend.js";
 
 // Exercises the production preload and renderer. Never supplies a substitute bridge.
-export async function smoke(window: BrowserWindow, backend: PythonBackend): Promise<void> {
+export async function smoke(window: BrowserWindow, backend: PythonBackend, mediaRoot?: string): Promise<void> {
   const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
   const waitFor = async (expression: string) => {
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -14,7 +14,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     throw new Error(`smoke timeout: ${expression}`);
   };
   const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
-  if (!demo) { await smokeLibraries(window, backend); return; }
+  if (!demo) { await smokeLibraries(window, backend, mediaRoot); return; }
   const ready = demo ? 'document.querySelectorAll(".media-card").length === 24' : 'document.querySelector(".status-panel h2")?.textContent === "Sua biblioteca está vazia"';
   await waitFor(ready);
   const result = await evaluate<{ items: {asset_id: string}[] }>('window.photoManager.listGallery({pageSize: 24})');
@@ -64,7 +64,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getDuplicateGroup,getLibraryState,getPreparationStatus,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCatalogingApplicationStatus,getDuplicateGroup,getLibraryState,getPreparationStatus,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -167,7 +167,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend): Prom
 
 // Production preload/IPC/supervisor/Python; only the native selection source is
 // supplied by the temporary harness in main. This does not validate native dialogs.
-async function smokeLibraries(window: BrowserWindow, backend: PythonBackend): Promise<void> {
+async function smokeLibraries(window: BrowserWindow, backend: PythonBackend, mediaRoot?: string): Promise<void> {
   const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
   for (let attempt = 0; attempt < 100; attempt++) {
     if (await evaluate<boolean>('!!document.querySelector(".library-welcome")')) break;
@@ -190,7 +190,7 @@ async function smokeLibraries(window: BrowserWindow, backend: PythonBackend): Pr
   await evaluate('window.photoManager.retryGallery()');
   const restarted = await state();
   if (restarted.session?.session_id === reopened.session?.session_id || restarted.session?.library_handle !== reopened.session?.library_handle) throw new Error("restart session failed");
-  if (process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1") await smokePreparation(window, restarted.session!.session_id);
+  if (process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1") await smokePreparation(window, restarted.session!.session_id, mediaRoot);
   await evaluate('window.photoManager.setReopenLibrary(false)');
   await evaluate(`window.photoManager.closeLibrary(${JSON.stringify(restarted.session!.session_id)})`);
   const missing = await evaluate<State>('window.photoManager.chooseOpenLibrary()');
@@ -201,7 +201,7 @@ async function smokeLibraries(window: BrowserWindow, backend: PythonBackend): Pr
 }
 
 
-async function smokePreparation(window: BrowserWindow, session: string): Promise<void> {
+async function smokePreparation(window: BrowserWindow, session: string, mediaRoot?: string): Promise<void> {
   const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
   const id = JSON.stringify(session);
   if (!await evaluate<boolean>(`window.photoManager.chooseMediaRoot(${id}).then(r => r.cancelled === true)`)) throw new Error("selection cancel registered root");
@@ -224,4 +224,43 @@ async function smokePreparation(window: BrowserWindow, session: string): Promise
   await evaluate(`window.photoManager.cancelPreparation(${id}, ${JSON.stringify(cancelled.operation_id)})`);
   await wait(cancelled.operation_id, "cancelled");
   console.log("SMOKE D04-02A IPC PASS: synthetic cancel/select/prepare/status/page/cancel/reap; native dialogs NOT TESTED");
+  if (!mediaRoot) throw new Error("missing synthetic application root");
+  await smokeApplication(window, mediaRoot);
+
+}
+
+function syntheticJpeg(): Buffer {
+  const segment = (marker: number, data: number[]) => Buffer.from([255, marker, (data.length + 2) >> 8, (data.length + 2) & 255, ...data]);
+  const huffman = [1, ...Array<number>(15).fill(0), 0];
+  return Buffer.concat([Buffer.from([255, 216]), segment(0xDB, [0, ...Array<number>(64).fill(1)]), segment(0xC4, [0, ...huffman, 0x10, ...huffman]), segment(0xC0, [8, 0, 8, 0, 8, 1, 1, 0x11, 0]), segment(0xDA, [1, 1, 0, 0, 0x3f, 0]), Buffer.from([0x3f, 255, 217])]);
+}
+async function smokeApplication(window: BrowserWindow, root: string): Promise<void> {
+  const evaluate = <T>(code: string): Promise<T> => window.webContents.executeJavaScript(code);
+  const waitFor = async (expression: string) => {
+    for (let i = 0; i < 150; i++) { if (await evaluate<boolean>(expression)) return; await new Promise((done) => setTimeout(done, 50)); }
+    throw new Error(`application smoke timeout: ${expression}`);
+  };
+  const jpeg = syntheticJpeg();
+  await writeFile(join(root, "synthetic-a.jpg"), jpeg);
+  await writeFile(join(root, "synthetic-b.jpg"), jpeg);
+  await writeFile(join(root, "excluded.txt"), "synthetic excluded file");
+  const click = (text: string) => evaluate(`Array.from(document.querySelectorAll("button")).find(b => b.textContent === ${JSON.stringify(text)}).click()`);
+  await click("+ Adicionar pastas");
+  await click("Selecionar pasta");
+  await waitFor('Array.from(document.querySelectorAll("button")).some(b => b.textContent === "Preparar proposta" && !b.disabled)');
+  await click("Preparar proposta");
+  await waitFor('Array.from(document.querySelectorAll("button")).some(b => b.textContent === "Ver proposta")');
+  await click("Ver proposta");
+  await waitFor('!!document.querySelector(".cataloging-review")');
+  await click("Selecionar elegíveis desta página");
+  await writeFile("/tmp/playmemories-d04-02b-review.png", (await window.webContents.capturePage()).toPNG());
+  await click("Catalogar selecionados");
+  await waitFor('document.querySelector(".cataloging-result")?.textContent.includes("2 item(ns) adicionado(s)")');
+  await waitFor('document.querySelectorAll(".media-card").length === 2');
+  await click("Ver itens na biblioteca");
+  await evaluate('document.querySelector(".card-select").click()');
+  await waitFor('!!document.querySelector(".asset-details dl")');
+  await writeFile("/tmp/playmemories-d04-02b-catalog.png", (await window.webContents.capturePage()).toPNG());
+  if (!Buffer.from(await readFile(join(root, "synthetic-a.jpg"))).equals(jpeg) || !Buffer.from(await readFile(join(root, "synthetic-b.jpg"))).equals(jpeg)) throw new Error("synthetic originals changed");
+  console.log("SMOKE D04-02B VISIBLE PASS: review/select/confirm-fixture/application-worker/commit/gallery-refresh/details; originals unchanged; native dialogs NOT TESTED");
 }

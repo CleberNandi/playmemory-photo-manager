@@ -25,7 +25,7 @@ const smokeDirectory = process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" || process
 if (smokeDirectory) { app.setPath("userData", smokeDirectory); app.setPath("sessionData", smokeDirectory); }
 const smokeSelections = smokeDirectory && process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" && !demo ? [null, join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "B.sqlite3"), join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "missing.sqlite3")] : null;
 const ingestionSmokeRoot = ingestionLab && smokeSelections && smokeDirectory ? mkdtempSync(join(tmpdir(), "pm-ingestion-smoke-")) : null;
-const ingestionSelections = ingestionSmokeRoot ? [null, ingestionSmokeRoot, ingestionSmokeRoot] : null;
+const ingestionSelections = ingestionSmokeRoot ? [null, ingestionSmokeRoot, ingestionSmokeRoot, ingestionSmokeRoot, ingestionSmokeRoot] : null;
 const rendererFile = resolve(import.meta.dirname, "../renderer/index.html");
 const expectedUrl = process.env.VITE_DEV_SERVER_URL ? new URL(process.env.VITE_DEV_SERVER_URL).href : pathToFileURL(rendererFile).href;
 
@@ -144,11 +144,24 @@ app.whenReady().then(async () => {
     const physical = await nativePath(selected.filePaths[0]);
     const answer = await dialog.showMessageBox(mainWindow, {type: "question", title: "Preparar catalogação", message: "Autorizar leitura recursiva desta pasta?", detail: `Seleção: ${selected.filePaths[0]}\nDestino físico: ${physical}\nA configuração da raiz será registrada no catálogo. Arquivos e metadados serão examinados, sem modificar originais ou catalogar fotos nesta etapa. Ao reutilizar uma raiz, sua identidade histórica pode não estar disponível: confirme o destino atual.`, buttons: ["Cancelar", "Preparar"], defaultId: 0, cancelId: 0});
     return answer.response === 1 ? physical : null;
+  }, async (count) => {
+    if (!mainWindow) return false;
+    if (process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1") return true;
+    const state = libraries.current();
+    const answer = await dialog.showMessageBox(mainWindow, {
+      type: "question", title: "Confirmar catalogação",
+      message: `Adicionar ${count} item(ns) escolhido(s) à biblioteca?`,
+      detail: `Biblioteca: ${state.session?.display_name ?? ""}\nSomente os candidatos selecionados serão registrados no catálogo. Os arquivos originais não serão movidos nem modificados. Se algum item tiver mudado, o lote inteiro será bloqueado.`,
+      buttons: ["Cancelar", "Catalogar selecionados"], defaultId: 0, cancelId: 0,
+    });
+    return answer.response === 1;
   });
   register("ingestion:select", 1, (id) => cataloging.choose(id));
   register("ingestion:prepare", 3, (id, grant, recursive) => cataloging.prepare(id, grant, recursive));
   register("ingestion:status", 2, (id, operation) => cataloging.operation("ingestion.status", id, operation));
   register("ingestion:cancel", 2, (id, operation) => cataloging.operation("ingestion.cancel", id, operation));
+  register("ingestion:apply", 3, (id, proposal, selection) => cataloging.apply(id, proposal, selection));
+  register("ingestion:application-status", 2, (id, command) => cataloging.applicationStatus(id, command));
   register("ingestion:page", 4, (id, proposal, cursor, size) => cataloging.page(id, proposal, cursor, size));
   register("backend:retry", 0, async () => {
     if (recovering || libraries.isBusy) throw new Error("busy");
@@ -179,7 +192,7 @@ app.whenReady().then(async () => {
     }, 45_000);
     window.webContents.once("render-process-gone", () => { process.exitCode = 1; app.quit(); });
     window.webContents.once("did-finish-load", () => {
-      void smoke(window, backend).then(() => { clearTimeout(watchdog); app.quit(); }).catch((error: unknown) => {
+      void smoke(window, backend, ingestionSmokeRoot ?? undefined).then(() => { clearTimeout(watchdog); app.quit(); }).catch((error: unknown) => {
         clearTimeout(watchdog);
         console.error(error);
         process.exitCode = 1;
