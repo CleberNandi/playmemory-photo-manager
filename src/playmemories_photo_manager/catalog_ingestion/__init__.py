@@ -17,6 +17,11 @@ from .models import (
     IngestionProposal,
     IngestionReport,
 )
+from .scoped_authorization import (
+    ScopedIngestionAuthorization,
+    authorize_scoped_ingestion,
+    validate_scoped_authorization,
+)
 from .scoping import ProposalResourceLimitError, ScopedIngestionProposal, scope_catalogable_proposal
 from .service import (
     apply_ingestion,
@@ -43,6 +48,9 @@ __all__ = [
     "MediaVerificationCancelled",
     "ProposalResourceLimitError",
     "ScopedIngestionProposal",
+    "ScopedIngestionAuthorization",
+    "authorize_scoped_ingestion",
+    "validate_scoped_authorization",
     "classify_media",
     "scope_catalogable_proposal",
     "SnapshotLimits",
