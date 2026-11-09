@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 
@@ -260,6 +260,8 @@ class Catalog:
         root_id: str,
         expected_root_path: str,
         registrations: tuple[NewFileRegistration, ...],
+        *,
+        before_write: Callable[[], None] | None = None,
     ) -> tuple[FileRegistrationResult, ...]:
         """Create authorized file Assets and locations as one atomic catalog batch."""
         _uuid(root_id, "root_id")
@@ -305,8 +307,12 @@ class Catalog:
                 )
             )
 
+        if before_write is not None and not callable(before_write):
+            raise InvalidInputError("before_write must be callable")
         results: list[FileRegistrationResult] = []
         with self._write():
+            if before_write is not None:
+                before_write()
             root = self._repository.get_root(root_id)
             if root is None:
                 raise InvalidReferenceError("library root does not exist")
@@ -530,7 +536,11 @@ class Catalog:
             raise PersistenceError("could not start catalog transaction") from error
         try:
             yield
-            self._connection.commit()
+            try:
+                self._connection.commit()
+            except Exception as error:
+                error.add_note("catalog commit outcome unknown")
+                raise
         except sqlite3.IntegrityError as error:
             rolled_back = self._rollback_preserving(error)
             message = "unexpected catalog persistence failure"

@@ -64,53 +64,13 @@ def capture_catalog_snapshot(
     limits = SnapshotLimits() if limits is None else limits
     if not isinstance(limits, SnapshotLimits):
         raise TypeError("limits must be SnapshotLimits")
-    budget = _ByteBudget(limits.max_bytes)
     try:
         with read_library_connection(
             path, max_value_bytes=limits.max_bytes, expected_identity=expected_catalog_identity
         ) as connection:
             connection.execute("BEGIN")
             try:
-                catalog = Catalog(connection)
-                repository = CatalogRepository(connection)
-                root = catalog.get_root(root_id)
-                budget.add(root)
-                locations = []
-                offset = 0
-                while True:
-                    # Bound each page, including the single excess-row sentinel.
-                    page_size = min(100, limits.max_locations - len(locations) + 1)
-                    loaded = 0
-                    for location in repository.iter_root_locations(root_id, page_size, offset):
-                        loaded += 1
-                        if len(locations) == limits.max_locations:
-                            raise SnapshotResourceLimitError("max_locations")
-                        budget.add(location)
-                        locations.append(location)
-                    if loaded < page_size:
-                        break
-                    offset += loaded
-                assets = []
-                asset_ids = tuple(sorted({item.asset_id for item in locations}))
-                for start in range(0, len(asset_ids), 100):
-                    loaded = 0
-                    batch = asset_ids[start : start + 100]
-                    for asset in repository.iter_assets(batch):
-                        loaded += 1
-                        budget.add(asset)
-                        assets.append(asset)
-                    if loaded != len(batch):
-                        raise LibraryError("corrupt")
-                assets = tuple(assets)
-                locations = tuple(locations)
-                return CatalogSnapshot(
-                    root,
-                    assets,
-                    locations,
-                    (),
-                    ScanScope(".", recursive=True, follows_links=False),
-                    _snapshot_read_version(root, assets, locations),
-                )
+                return _capture_connection_snapshot(connection, root_id, limits)
             finally:
                 connection.rollback()
     except LibraryError as error:
@@ -125,3 +85,68 @@ def capture_catalog_snapshot(
                 raise SnapshotResourceLimitError("max_bytes") from None
             cause = cause.__cause__
         raise
+
+
+def _capture_connection_snapshot(
+    connection: sqlite3.Connection, root_id: str, limits: SnapshotLimits
+) -> CatalogSnapshot:
+    """Bounded snapshot on the caller's active transaction; no connection ownership."""
+    if not connection.in_transaction:
+        raise ValueError("an active catalog transaction is required")
+    previous = connection.getlimit(sqlite3.SQLITE_LIMIT_LENGTH)
+    try:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, min(previous, limits.max_bytes))
+        return _capture_snapshot_rows(connection, root_id, limits)
+    except Exception as error:
+        cause = error
+        while cause is not None:
+            if getattr(cause, "sqlite_errorcode", 0) & 255 == sqlite3.SQLITE_TOOBIG:
+                raise SnapshotResourceLimitError("max_bytes") from None
+            cause = cause.__cause__
+        raise
+    finally:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, previous)
+
+
+def _capture_snapshot_rows(connection, root_id, limits):
+    budget = _ByteBudget(limits.max_bytes)
+    catalog = Catalog(connection)
+    repository = CatalogRepository(connection)
+    root = catalog.get_root(root_id)
+    budget.add(root)
+    locations = []
+    offset = 0
+    while True:
+        # Bound each page, including the single excess-row sentinel.
+        page_size = min(100, limits.max_locations - len(locations) + 1)
+        loaded = 0
+        for location in repository.iter_root_locations(root_id, page_size, offset):
+            loaded += 1
+            if len(locations) == limits.max_locations:
+                raise SnapshotResourceLimitError("max_locations")
+            budget.add(location)
+            locations.append(location)
+        if loaded < page_size:
+            break
+        offset += loaded
+    assets = []
+    asset_ids = tuple(sorted({item.asset_id for item in locations}))
+    for start in range(0, len(asset_ids), 100):
+        loaded = 0
+        batch = asset_ids[start : start + 100]
+        for asset in repository.iter_assets(batch):
+            loaded += 1
+            budget.add(asset)
+            assets.append(asset)
+        if loaded != len(batch):
+            raise LibraryError("corrupt")
+    assets = tuple(assets)
+    locations = tuple(locations)
+    return CatalogSnapshot(
+        root,
+        assets,
+        locations,
+        (),
+        ScanScope(".", recursive=True, follows_links=False),
+        _snapshot_read_version(root, assets, locations),
+    )

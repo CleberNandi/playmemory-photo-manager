@@ -17,6 +17,7 @@ from .models import (
     IngestionProposal,
     IngestionReport,
 )
+from .scoped_application import apply_scoped_ingestion
 from .scoped_authorization import (
     ScopedIngestionAuthorization,
     authorize_scoped_ingestion,
@@ -60,6 +61,7 @@ __all__ = [
     "SnapshotLimits",
     "SnapshotResourceLimitError",
     "apply_ingestion",
+    "apply_scoped_ingestion",
     "authorize_ingestion",
     "candidate_reference",
     "capture_catalog_snapshot",
