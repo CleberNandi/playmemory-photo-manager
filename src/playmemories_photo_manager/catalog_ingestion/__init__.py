@@ -22,6 +22,7 @@ from .scoped_authorization import (
     authorize_scoped_ingestion,
     validate_scoped_authorization,
 )
+from .scoped_preflight import ScopedPreflight, ScopedPreflightError, preflight_scoped_ingestion
 from .scoping import ProposalResourceLimitError, ScopedIngestionProposal, scope_catalogable_proposal
 from .service import (
     apply_ingestion,
@@ -49,6 +50,9 @@ __all__ = [
     "ProposalResourceLimitError",
     "ScopedIngestionProposal",
     "ScopedIngestionAuthorization",
+    "ScopedPreflight",
+    "ScopedPreflightError",
+    "preflight_scoped_ingestion",
     "authorize_scoped_ingestion",
     "validate_scoped_authorization",
     "classify_media",
