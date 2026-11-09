@@ -162,3 +162,10 @@ button, summary { touch-action: manipulation; }
 @media (forced-colors: active) { .nav-item.is-active, .media-card { border: 1px solid CanvasText; } }
 
 .with-properties .duplicate-layout { grid-template-columns: minmax(0, 1fr); }
+.review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-block: 10px; }
+.review-actions h3, .review-actions p { margin: 3px 0; }
+.review-selection { padding-left: 20px; overflow-wrap: anywhere; }
+.review-selection li { margin: 5px 0; }
+.review-selection button { border: 0; background: transparent; color: var(--color-accent-strong); text-decoration: underline; }
+.cataloging-review { border-top: 1px solid var(--color-border); margin-top: 12px; }
+.cataloging-result { border-left: 3px solid var(--color-success); padding: 8px 12px; margin-block: 10px; }

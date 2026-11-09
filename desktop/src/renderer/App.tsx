@@ -34,6 +34,8 @@ function GalleryApp() {
   const [leftWidth, setLeftWidth] = useState(210);
   const [rightWidth, setRightWidth] = useState(300);
   const [view, setView] = useState<"gallery" | "duplicates">("gallery");
+  const [galleryRevision, setGalleryRevision] = useState(0);
+  const galleryEpoch = useRef(0);
   const [generation, setGeneration] = useState(0);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [selected, setSelected] = useState<string | null>(null);
@@ -49,20 +51,22 @@ function GalleryApp() {
   const inFlight = useRef(false);
   const more = async () => {
     if (inFlight.current || state.kind !== "ready" || !state.page.next_cursor) return;
+    const epoch = galleryEpoch.current;
     inFlight.current = true;
     setPaging(true);
     setPageError(false);
     try {
       const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor });
-      setState({ kind: "ready", page: { ...page, items: [...state.page.items, ...page.items] } });
-    } catch { setPageError(true); }
-    finally { inFlight.current = false; setPaging(false); }
+      if (epoch === galleryEpoch.current) setState({ kind: "ready", page: { ...page, items: [...state.page.items, ...page.items] } });
+    } catch { if (epoch === galleryEpoch.current) setPageError(true); }
+    finally { if (epoch === galleryEpoch.current) {inFlight.current = false; setPaging(false);} }
   };
   const load = () => {
     setSelected(null);
     setPageError(false);
     setState({ kind: "loading" });
-    void requestGallery(true).then((page) => setState({ kind: "ready", page })).catch(() => setState({ kind: "error" }));
+    const epoch = galleryEpoch.current;
+    void requestGallery(true).then((page) => {if (epoch === galleryEpoch.current) setState({ kind: "ready", page });}).catch(() => {if (epoch === galleryEpoch.current) setState({ kind: "error" });});
   };
   useEffect(() => {
     let active = true;
@@ -70,7 +74,7 @@ function GalleryApp() {
       .then((page) => { if (active) setState({ kind: "ready", page }); })
       .catch(() => { if (active) setState({ kind: "error" }); });
     return () => { active = false; };
-  }, []);
+  }, [galleryRevision]);
 
   const items = state.kind === "ready" ? state.page.items : [];
   // Scope and filters apply only to the loaded page; cursors remain backend-owned.
@@ -104,7 +108,11 @@ function GalleryApp() {
       </header>
       {session?.catalogingEnabled && <section className="preparation-workflow" hidden={!preparing} aria-label="Adicionar pastas">
         <button className="workflow-close" onClick={() => setPreparing(false)}>Recolher preparação</button>
-        <CatalogingPanel sessionId={session.sessionId} />
+        <CatalogingPanel sessionId={session.sessionId} onShowLibrary={() => setPreparing(false)} onApplied={() => {
+          galleryEpoch.current++; inFlight.current = false; setPaging(false); setPageError(false);
+          setSelected(null); setQuery(""); setFolder(null); setFavorites(false); setView("gallery");
+          setState({kind: "loading"}); setGalleryRevision((value) => value + 1);
+        }} />
       </section>}
       {view === "gallery" && <div className="gallery-filters">
         <label>Pesquisar nos itens carregados <input type="search" value={query} onChange={(event) => {setQuery(event.target.value); resetSelection();}} /></label>

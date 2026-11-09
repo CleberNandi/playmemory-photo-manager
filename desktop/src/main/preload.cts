@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("photoManager", {
   getPreparationStatus: (id: string, operation: string) => ipcRenderer.invoke("ingestion:status", id, operation),
   cancelPreparation: (id: string, operation: string) => ipcRenderer.invoke("ingestion:cancel", id, operation),
   listCatalogingCandidates: (id: string, proposal: string, cursor: string | null, pageSize: number) => ipcRenderer.invoke("ingestion:page", id, proposal, cursor, pageSize),
+  applyCataloging: (id: string, proposal: string, selection: string[]) => ipcRenderer.invoke("ingestion:apply", id, proposal, selection),
+  getCatalogingApplicationStatus: (id: string, command: string) => ipcRenderer.invoke("ingestion:application-status", id, command),
   getLibraryState: () => stateRequest("library:state"),
   chooseCreateLibrary: () => stateRequest("library:create"),
   chooseOpenLibrary: () => stateRequest("library:open"),

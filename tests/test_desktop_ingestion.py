@@ -264,3 +264,79 @@ def test_replayed_admission_and_busy_selection_do_not_touch_filesystem(tmp_path,
             assert service.prepare(params)["operation_id"] == admitted["operation_id"]
         finally:
             assert service.close()
+
+
+def complete_proposal(client, scope, operation):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        status = client.request("ingestion.status", scope | {"operation_id": operation})["result"]
+        if status["state"] == "completed":
+            return status["proposal_id"]
+        time.sleep(0.01)
+    pytest.fail("preparation timed out")
+
+
+def test_authenticated_vertical_flow_apply_refresh_reopen_and_no_duplicate_admission(
+    client, tmp_path
+):
+    root, scope, operation = setup(client, tmp_path, 3)
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir()}
+    proposal = complete_proposal(client, scope, operation)
+    page = client.request(
+        "ingestion.page", scope | {"proposal_id": proposal, "cursor": None, "page_size": 50}
+    )["result"]
+    assert all(item["selectable"] for item in page["items"])
+    request = scope | {
+        "proposal_id": proposal,
+        "candidate_ids": [item["candidate_id"] for item in page["items"][:2]],
+        "client_request_id": str(uuid4()),
+    }
+    result = client.request("ingestion.apply", request)
+    assert result["ok"], result
+    command = result["result"]["command_id"]
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        result = client.request("ingestion.application_status", scope | {"command_id": command})
+        assert result["ok"], result
+        if result["result"]["state"] in ("completed", "outcome_unknown"):
+            break
+        time.sleep(0.01)
+    assert result["result"]["result"]["status"] == "applied", result
+    assert client.request("ingestion.apply", request)["result"] == result["result"]
+    gallery = client.request("gallery.list", {"session_id": scope["session_id"], "page_size": 24})
+    assert len(gallery["result"]["items"]) == 2, gallery
+    ids = {item["asset_id"] for item in gallery["result"]["items"]}
+    assert str(root) not in json.dumps(result)
+    assert client.request("library.close", {"session_id": scope["session_id"]})["ok"]
+    opened = client.request(
+        "library.open", {"path": str(tmp_path / "catalog.sqlite3"), "library_handle": str(uuid4())}
+    )
+    new_session = opened["result"]["session"]["session_id"]
+    assert new_session != scope["session_id"]
+    reopened = client.request("gallery.list", {"session_id": new_session, "page_size": 24})
+    assert {item["asset_id"] for item in reopened["result"]["items"]} == ids
+    assert (
+        client.request("ingestion.application_status", scope | {"command_id": command})["error"][
+            "code"
+        ]
+        == "stale_session"
+    )
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir()} == before
+
+
+def test_apply_route_rejects_paths_and_cross_window_without_admission(client, tmp_path):
+    _, scope, operation = setup(client, tmp_path)
+    proposal = complete_proposal(client, scope, operation)
+    request = scope | {
+        "proposal_id": proposal,
+        "candidate_ids": [],
+        "client_request_id": str(uuid4()),
+    }
+    assert (
+        client.request("ingestion.apply", request | {"path": "/untrusted"})["error"]["code"]
+        == "invalid_request"
+    )
+    assert (
+        client.request("ingestion.apply", request | {"window_id": str(uuid4())})["error"]["code"]
+        == "stale_session"
+    )

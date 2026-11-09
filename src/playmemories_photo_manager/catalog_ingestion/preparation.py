@@ -185,10 +185,27 @@ class PreparationController:
     def busy(self):
         return self._process is not None
 
+    _worker_module = "playmemories_photo_manager.catalog_ingestion.preparation_worker"
+
+    def _validate_value(self, value):
+        _validate_input(value)
+
+    def _operation_identifier(self, _value):
+        return str(uuid4())
+
+    def _request_bytes(self, value):
+        return json.dumps(asdict(value), ensure_ascii=True, separators=(",", ":")).encode() + b"\n"
+
+    def _child_arguments(self):
+        return ()
+
+    def _inherited_fds(self):
+        return ()
+
     def start(self, value: PreparationInput, client_request_id: str):
         self._require()
         _uuid(client_request_id)
-        _validate_input(value)
+        self._validate_value(value)
         if client_request_id in self._admissions:
             previous, operation_id = self._admissions[client_request_id]
             if previous != value:
@@ -198,10 +215,8 @@ class PreparationController:
             raise PreparationError("busy")
         if len(self._admissions) == 32:
             raise PreparationError("resource_limit")
-        operation_id = str(uuid4())
-        request = (
-            json.dumps(asdict(value), ensure_ascii=True, separators=(",", ":")).encode() + b"\n"
-        )
+        operation_id = self._operation_identifier(value)
+        request = self._request_bytes(value)
         if len(request) > MAX_FRAME_BYTES:
             raise PreparationError("resource_limit")
         try:
@@ -209,14 +224,16 @@ class PreparationController:
                 [
                     sys.executable,
                     "-m",
-                    "playmemories_photo_manager.catalog_ingestion.preparation_worker",
+                    self._worker_module,
                     operation_id,
                     str(os.getpid()),
+                    *self._child_arguments(),
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 close_fds=True,
+                pass_fds=self._inherited_fds(),
                 shell=False,
                 cwd=Path(__file__).resolve().parents[2],
                 env={
@@ -501,8 +518,15 @@ class PreparationController:
         }
 
     def _validate_public_pages(self, result):
+        eligible = set(result.eligible_candidates)
         sizes = [
-            len(json.dumps(self._public(item), ensure_ascii=True).encode()) + 1
+            len(
+                json.dumps(
+                    self._public(item) | {"selectable": item.candidate in eligible},
+                    ensure_ascii=True,
+                ).encode()
+            )
+            + 1
             for item in result.eligibilities
         ]
         if any(sum(sizes[start : start + 50]) + 1024 > 256 * 1024 for start in range(len(sizes))):
@@ -534,6 +558,7 @@ class PreparationController:
             raise PreparationError("invalid_request")
         position = self._cursors[cursor] if cursor is not None else 0
         items = self._published.eligibilities[position : position + page_size]
+        eligible = set(self._published.eligible_candidates)
         next_position = position + len(items)
         token = None
         if next_position < len(self._published.eligibilities):
@@ -544,7 +569,9 @@ class PreparationController:
             token = self._tokens[next_position]
         return {
             "proposal_id": proposal_id,
-            "items": [self._public(item) for item in items],
+            "items": [
+                self._public(item) | {"selectable": item.candidate in eligible} for item in items
+            ],
             "next_cursor": token,
         }
 

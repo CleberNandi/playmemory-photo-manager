@@ -60,3 +60,27 @@ describe("cataloging privileged IPC composition", () => {
     expect(backend.request).toHaveBeenCalledOnce();
   });
 });
+
+it("confirms application natively and sends only the exact opaque choice", async () => {
+ const {backend,libraries}=setup(); const confirm=vi.fn(async()=>true);
+ const controller=new CatalogingController(backend,libraries,windowId,true,async()=>null,confirm);
+ await controller.apply(id,grant,[next]);
+ expect(confirm).toHaveBeenCalledWith(1);
+ expect(backend.request).toHaveBeenCalledWith("ingestion.apply",expect.objectContaining({session_id:id,window_id:windowId,proposal_id:grant,candidate_ids:[next],client_request_id:expect.any(String)}));
+ await controller.apply(id,grant,[next]);expect(backend.request.mock.calls[1]).toEqual(backend.request.mock.calls[0]);
+});
+it("native application cancel and malformed choices never admit a write", async () => {
+ const {backend,libraries}=setup(); const confirm=vi.fn(async()=>false);
+ const controller=new CatalogingController(backend,libraries,windowId,true,async()=>null,confirm);
+ await expect(controller.apply(id,grant,[next])).resolves.toEqual({cancelled:true});
+ await expect(controller.apply(id,grant,[])).rejects.toThrow("invalid_request");
+ await expect(controller.apply(id,grant,[next,next])).rejects.toThrow("invalid_request");
+ await expect(controller.apply(id,grant,["/private/path"])).rejects.toThrow("invalid_request");
+ expect(backend.request).not.toHaveBeenCalled();
+});
+it("rejects confirmation completed after a session switch", async()=>{
+ const value=setup();let finish!:(value:boolean)=>void;
+ const controller=new CatalogingController(value.backend,value.libraries,windowId,true,async()=>null,()=>new Promise(resolve=>{finish=resolve;}));
+ const request=controller.apply(id,grant,[next]);value.switch();finish(true);
+ await expect(request).rejects.toThrow("stale_session");expect(value.backend.request).not.toHaveBeenCalled();
+});

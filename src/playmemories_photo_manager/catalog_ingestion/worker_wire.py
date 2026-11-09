@@ -104,3 +104,12 @@ def decode_result(payload):
     if result != expected:
         raise ValueError("result does not match its evidence")
     return result
+
+
+def decode_application_report(payload):
+    if not 0 < len(payload) <= MAX_RESULT_BYTES:
+        raise ValueError("invalid report size")
+    result = _restore(json.loads(payload, object_pairs_hook=unique_object))
+    if not isinstance(result, models.IngestionReport):
+        raise ValueError("invalid report type")
+    return result
