@@ -32,8 +32,9 @@ declare global {
       closeLibrary?(sessionId: string): Promise<LibraryState>;
       setReopenLibrary?(value: boolean): Promise<LibraryState>;
       forgetLibrary?(): Promise<LibraryState>;
-      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null }): Promise<GalleryPage>;
+      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean }): Promise<GalleryPage>;
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
+      setFavorite?(assetId: string, favorite: boolean): Promise<{asset_id: string; favorite: boolean}>;
       getCalendar?(period: string | null): Promise<{period: string | null; buckets: [string,number][]; undated:number; partial:number}>;
       getPreview?(assetId: string): Promise<unknown>;
       getThumbnail?(assetId: string): Promise<unknown>;

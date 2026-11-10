@@ -13,14 +13,15 @@ beforeEach(() => {
 });
 afterEach(async () => {await act(async () => root.unmount()); host.remove(); delete window.photoManager; vi.useRealTimers();});
 async function click(text: string) {await act(async () => {[...host.querySelectorAll("button")].find((b) => b.textContent === text)!.click();});}
-it("filters loaded roots and favorites without new IPC and preserves pagination", async () => {
+it("filters loaded roots locally and queries favorites across the catalog", async () => {
   await act(async () => root.render(<App />));
   await click("Viagens"); expect(host.querySelectorAll(".media-card")).toHaveLength(1);
   expect(host.querySelector(".media-card")?.textContent).toContain("second");
   await click("☆ Favoritos"); expect(host.querySelector(".media-card")?.textContent).toContain("first");
   await act(async () => host.querySelector<HTMLButtonElement>('.view-toolbar button:nth-of-type(2)')!.click());
   expect(host.querySelectorAll(".gallery-table tbody tr")).toHaveLength(1);
-  expect(window.photoManager!.listGallery).toHaveBeenCalledOnce();
+  expect(window.photoManager!.listGallery).toHaveBeenCalledTimes(2);
+  expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,favoritesOnly:true});
   expect(host.querySelector(".pagination button")?.textContent).toBe("Carregar mais");
 });
 it("clears selection when filtering and supports keyboard-compatible pane ranges", async () => {

@@ -71,7 +71,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setReopenLibrary') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setFavorite,setReopenLibrary') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -283,6 +283,13 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await writeFile("/tmp/playmemories-capture-calendar.png", (await window.webContents.capturePage()).toPNG());
   await evaluate(`document.querySelector('[aria-label="2024-02-29: 2 foto(s)"]').click()`);
   await waitFor('document.querySelectorAll(".media-card").length === 2 && document.querySelector(".gallery-filters").textContent.includes("2024-02-29")');
+  await evaluate('document.querySelector(".favorite-toggle").click()');
+  await waitFor('document.querySelector(".favorite-toggle").getAttribute("aria-pressed") === "true"');
+  await click("☆ Favoritos");
+  await waitFor('document.querySelectorAll(".media-card").length === 1');
+  await evaluate('document.querySelector(".favorite-toggle").click()');
+  await waitFor('document.querySelectorAll(".media-card").length === 0 && document.querySelector(".status-panel h2")?.textContent === "Nenhum favorito encontrado"');
+  console.log("SMOKE FAVORITES PASS: explicit mark/global filtered list/unmark/empty; originals unchanged");
   console.log("SMOKE MEDIA CALENDAR PASS: progressive JPEG/real thumbnails/decoded preview/EXIF/capture year-month-leap-day/filter; originals unchanged");
   console.log("SMOKE D04-02B VISIBLE PASS: review/select/confirm-fixture/application-worker/commit/gallery-refresh/details; originals unchanged; native dialogs NOT TESTED");
 }

@@ -93,6 +93,14 @@ export class LibraryController {
   private requireSession(id: unknown): void {
     if (!canonicalId(id) || this.state.state !== "active" || id !== this.state.session?.session_id) throw Object.assign(new Error(), {code: "stale_session"});
   }
+  async setFavorite(sessionId: unknown, assetId: string, favorite: boolean): Promise<unknown> {
+    if (this.busy) throw Object.assign(new Error(), {code: "busy"});
+    this.requireSession(sessionId);
+    const epoch = this.epoch;
+    const result = await this.backend.request("annotation.favorite", {session_id: sessionId, asset_id: assetId, favorite});
+    if (epoch !== this.epoch) throw Object.assign(new Error(), {code: "stale_session"});
+    return result;
+  }
   async query(method: "gallery.list" | "calendar.summary" | "preview.get" | "asset.details" | "thumbnail.get" | "duplicates.list" | "duplicates.group", sessionId: unknown, params: Record<string, unknown>): Promise<unknown> {
     if (this.busy) throw Object.assign(new Error(), {code: "busy"});
     this.requireSession(sessionId);

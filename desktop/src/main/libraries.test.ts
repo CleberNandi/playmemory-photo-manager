@@ -100,3 +100,12 @@ it("rejects foreign windows, subframes, unexpected origins and destroyed senders
   expect(trustedSender(event, owner, "https://other.invalid")).toBe(false);
   expect(trustedSender(event, {...owner, isDestroyed: () => true}, frame.url)).toBe(false);
 });
+
+it("scopes favorite commands and rejects late responses after a library switch",async()=>{
+ const f=fixture();await f.controller.initialize();const state=await f.controller.choose(true);const asset=randomUUID();
+ await expect(f.controller.setFavorite(randomUUID(),asset,true)).rejects.toMatchObject({code:"stale_session"});
+ let finish!:(value:{items:never[]})=>void;f.request.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const save=f.controller.setFavorite(state.session!.session_id,asset,true);const rejected=expect(save).rejects.toMatchObject({code:"stale_session"});
+ expect(f.request).toHaveBeenLastCalledWith("annotation.favorite",{session_id:state.session!.session_id,asset_id:asset,favorite:true});
+ await f.controller.choose(true);finish({items:[]});await rejected;
+});
