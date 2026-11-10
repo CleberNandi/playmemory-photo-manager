@@ -215,3 +215,5 @@ button, summary { touch-action: manipulation; }
 .image-viewer .viewer-image { flex: 1 1 0; height: auto; min-height: 0; }
 .viewer-stage { position: relative; flex: 0 0 auto; margin: auto; }
 .viewer-stage img { position: absolute; left: 50%; top: 50%; }
+.viewer-unsaved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; background: #343b41; color: #fff; border-bottom: 1px solid #77828c; }
+.viewer-unsaved strong { flex-basis: 100%; }

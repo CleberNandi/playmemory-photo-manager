@@ -1,10 +1,11 @@
+import { ImageEdits } from "./image-edits.js";
 import { MediaActions, type MediaAction } from "./media-actions.js";
 import { FolderImportController } from "./folder-import.js";
 import { nativePath } from "./native-path.js";
 import { randomUUID } from "node:crypto";
 import { CatalogingController } from "./cataloging.js";
 import { app, BrowserWindow, dialog, ipcMain, session, Menu, shell } from "electron";
-import { join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +23,7 @@ let mainWindow: BrowserWindow | null = null;
 let libraries: LibraryController;
 let recovering = false;
 let folderImports: FolderImportController;
+let imageEdits: ImageEdits;
 const ingestionLab = process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1";
 const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
 const managedSmoke=process.env.PLAYMEMORIES_DESKTOP_MANAGED_SMOKE === "1";
@@ -106,10 +108,10 @@ app.whenReady().then(async () => {
   };
   const demoState = () => ({state: "demo", session: null, reopen: false});
   register("library:state", 0, () => demo ? demoState() : libraries.current());
-  register("library:create", 0, () => demo ? demoState() : folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.choose(true));
-  register("library:open", 0, () => demo ? demoState() : folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.choose(false));
-  register("library:close", 1, (id) => demo ? demoState() : folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.close(id));
-  register("library:default",0,()=>demo?demoState():folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.openManaged());
+  register("library:create", 0, () => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.choose(true));
+  register("library:open", 0, () => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.choose(false));
+  register("library:close", 1, (id) => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.close(id));
+  register("library:default",0,()=>demo?demoState():(folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.openManaged());
   register("library:reopen", 1, (value) => demo ? demoState() : libraries.setReopen(value));
   register("library:forget", 0, () => demo ? demoState() : libraries.forget());
   register("gallery:list", 1, (raw) => {
@@ -121,6 +123,24 @@ app.whenReady().then(async () => {
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
     return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
   });
+  imageEdits=new ImageEdits(libraries,async(source,angle)=>{
+    if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return join(dirname(source),basename(source,extname(source))+"-rotacionada"+extname(source));
+    if(!mainWindow)return null;
+    const extension=extname(source);
+    const result=await dialog.showSaveDialog(mainWindow,{title:`Salvar cópia rotacionada ${angle}° na mesma pasta`,defaultPath:join(dirname(source),basename(source,extension)+"-rotacionada"+extension),message:"Escolha um nome novo na mesma pasta do original. Arquivos existentes não serão substituídos.",filters:[{name:"Imagem no formato original",extensions:[extension.slice(1)]}]});
+    return result.canceled||!result.filePath?null:nativePath(result.filePath,true);
+  },async(source,angle)=>{
+    if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return true;
+    if(!mainWindow)return false;
+    const result=await dialog.showMessageBox(mainWindow,{type:"warning",title:"Salvar alterações no arquivo original",message:`Substituir a imagem original pela versão rotacionada ${angle}°?`,detail:source+"\nA imagem será gravada em resolução original. JPEG será recomprimido; metadados podem ser normalizados. Salvar como cópia preserva o original.",buttons:["Cancelar","Salvar alterações"],defaultId:0,cancelId:0});
+    return result.response===1;
+  });
+  register("image:save",1,(raw)=>{
+    const {sessionId,params}=envelope(raw);
+    if(demo||folderImports?.busy||!params||typeof params!=="object"||Array.isArray(params)||Object.keys(params).sort().join()!=="angle,assetId,mode")throw new Error("invalid_request");
+    const p=params as {assetId:unknown;angle:unknown;mode:unknown};return imageEdits.start(sessionId,p.assetId,p.angle,p.mode);
+  });
+  register("image:save-status",1,(raw)=>{const {sessionId,params}=envelope(raw);return imageEdits.status(sessionId,params);});
   const mediaActions=new MediaActions(libraries,async(items)=>{
     if(!mainWindow||mainWindow.isDestroyed())return null;
     const window=mainWindow;
@@ -222,10 +242,10 @@ app.whenReady().then(async () => {
     const result=await dialog.showOpenDialog(mainWindow,{title:"Adicionar pasta e subpastas à biblioteca",message:"As imagens serão adicionadas ao catálogo. Os originais permanecem inalterados.",properties:["openDirectory"]});
     return result.canceled||result.filePaths.length!==1?null:nativePath(result.filePaths[0]);
   });
-  register("folder:add",1,(id)=>{if(!managedMode)throw new Error("unavailable");return folderImports.start(id);});
+  register("folder:add",1,(id)=>{if(imageEdits.busy)throw new Error("busy");if(!managedMode)throw new Error("unavailable");return folderImports.start(id);});
   register("folder:status",2,(id,job)=>folderImports.status(id,job));
   register("folder:stop",2,(id,job)=>folderImports.stop(id,job));
-  const manual=()=>{if(folderImports.busy)throw new Error("busy");};
+  const manual=()=>{if(folderImports.busy||imageEdits?.busy)throw new Error("busy");};
   register("ingestion:select", 1, (id) => {manual();return cataloging.choose(id);});
   register("ingestion:prepare", 3, (id, grant, recursive) => {manual();return cataloging.prepare(id, grant, recursive);});
   register("ingestion:status", 2, (id, operation) => cataloging.operation("ingestion.status", id, operation));

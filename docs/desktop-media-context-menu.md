@@ -23,8 +23,9 @@ a primeira ocorrência disponível por ID de localização, não necessariamente
 nas propriedades. Selecionar individualmente uma ocorrência fica para outro incremento.
 
 Renomear continua pendente, pois requer operação consistente filesystem/catálogo. A continuação
-[desktop-viewer-navigation.md](desktop-viewer-navigation.md) adiciona rotação temporária da prévia
-ao menu e ao visualizador; não é regravação nem orientação persistida.
+[desktop-viewer-navigation.md](desktop-viewer-navigation.md) documenta a rotação no visualizador. O contrato
+[desktop-save-rotation.md](desktop-save-rotation.md) permite gravação explícita; o menu da galeria
+não inclui rotação.
 
 ## Fronteiras
 

@@ -1,18 +1,27 @@
 import {useEffect,useRef,useState} from "react";
+import type {ImageSaveJob} from "./types";
 export function viewerGeometry(width:number,height:number,rotation:number,zoom:number,viewportWidth:number,viewportHeight:number){
  const sideways=rotation%180!==0;
  const rotatedWidth=sideways?height:width,rotatedHeight=sideways?width:height;
  const scale=zoom?zoom/100:Math.min(1,Math.max(1,viewportWidth-24)/Math.max(1,rotatedWidth),Math.max(1,viewportHeight-24)/Math.max(1,rotatedHeight));
  return {width:width*scale,height:height*scale,boxWidth:rotatedWidth*scale,boxHeight:rotatedHeight*scale};
 }
-export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name="Imagem selecionada",position,onPrevious,onNext}: {assetId:string;onClose:()=>void;restoreFocus?:()=>void;initialRotation?:number;name?:string;position?:string;onPrevious?:()=>void;onNext?:()=>void}) {
+export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name="Imagem selecionada",position,onPrevious,onNext,onSaved,canSave=true}: {assetId:string;onClose:()=>void;restoreFocus?:()=>void;initialRotation?:number;name?:string;position?:string;onPrevious?:()=>void;onNext?:()=>void;canSave?:boolean;onSaved?:(mode:"replace"|"copy",assetId:string)=>void}) {
+ const [saving,setSaving]=useState(false);
+ const [saveMessage,setSaveMessage]=useState("");
+ const [uncertain,setUncertain]=useState(false);
+ const [leaving,setLeaving]=useState<{action:()=>void}|null>(null);
+ const inFlight=useRef(false),mounted=useRef(true);
+ useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;};},[]);
  const [image,setImage]=useState<{id:string;url:string}|null>(null);
  const [failure,setFailure]=useState<string|null>(null);
  const [dimensions,setDimensions]=useState<{id:string;width:number;height:number}|null>(null);
  const [view,setView]=useState({id:assetId,zoom:0,rotation:initialRotation});
  const [retry,setRetry]=useState({id:assetId,value:0});
  const [viewport,setViewport]=useState({width:1280,height:960});
+ const unsaved=useRef<HTMLElement>(null);
  const closeButton=useRef<HTMLButtonElement>(null);
+ useEffect(()=>{if(leaving)unsaved.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();},[leaving]);
  const dialog=useRef<HTMLDialogElement>(null),canvas=useRef<HTMLDivElement>(null);
  const rotation=view.id===assetId?view.rotation:initialRotation,zoom=view.id===assetId?view.zoom:0;
  const attempt=retry.id===assetId?retry.value:0;
@@ -21,6 +30,33 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  const failed=failure===assetId;
  if(view.id!==assetId)setView({id:assetId,zoom:0,rotation:initialRotation});
  const update=(next:{zoom?:number;rotation?:number})=>setView({id:assetId,zoom,rotation,...next});
+ const leave=(action:(()=>void)|undefined)=>{if(!action||saving)return;if(rotation!==0)setLeaving({action});else action();};
+ const save=async(mode:"replace"|"copy")=>{
+  if(inFlight.current||!rotation||uncertain||!window.photoManager?.saveRotation||!canSave)return;
+  inFlight.current=true;setSaving(true);setSaveMessage("");
+  const continuation=leaving?.action;setLeaving(null);
+  try{
+   let result=await window.photoManager.saveRotation(assetId,rotation,mode);
+   const jobId=result.job_id;
+   const validate=(job:ImageSaveJob)=>{if(job.asset_id!==assetId||job.job_id!==jobId)throw new Error();};validate(result);
+   while(mounted.current&&["choosing","confirming","running"].includes(result.state)){
+    await new Promise(resolve=>setTimeout(resolve,250));if(!mounted.current)return;
+    result=await window.photoManager!.getImageSaveStatus!(jobId);validate(result);
+   }
+   if(!mounted.current)return;
+   if(result.state==="completed"&&result.result_asset_id){
+    update({rotation:0});setImage(null);setRetry({id:assetId,value:attempt+1});
+    setSaveMessage(mode==="copy"?"Cópia salva e adicionada à biblioteca. O original foi preservado.":"Alterações salvas no arquivo original.");
+    onSaved?.(mode,result.result_asset_id);continuation?.();
+   }else if(result.state==="cancelled"){setSaveMessage("Gravação cancelada. A rotação ainda não foi salva.");}
+   else {
+    const messages:Record<string,string>={already_exists:"Esse nome já existe. Escolha outro nome para a cópia.",unsafe_location:"O arquivo mudou ou o destino não é seguro. Para copiar, escolha um nome novo na mesma pasta do original. Substituição de hardlinks ou múltiplas ocorrências não é permitida.",unsupported_format:"Gravação disponível para PNG e JPEG de uma única imagem.",outcome_unknown:"Não foi possível confirmar a gravação. Reabra a biblioteca e confira o arquivo antes de editar novamente; não haverá repetição automática."};
+    if(result.state==="outcome_unknown")setUncertain(true);
+    setSaveMessage(messages[result.error??""]??"Não foi possível salvar. A rotação continua pendente; nenhum pedido será repetido automaticamente.");
+   }
+  }catch{if(mounted.current){setUncertain(true);setSaveMessage("A conexão foi interrompida. Reabra a biblioteca e confira o arquivo antes de editar novamente; não haverá repetição automática.");}}
+  finally{inFlight.current=false;if(mounted.current)setSaving(false);}
+ };
  const rotate=(delta:number)=>update({rotation:(rotation+delta+360)%360});
  useEffect(()=>{const previous=document.activeElement as HTMLElement|null;dialog.current?.showModal();return ()=>{if(restoreFocus)restoreFocus();else previous?.focus({preventScroll:true});};},[restoreFocus]);
  useEffect(()=>{const node=dialog.current;if(node?.open&&!node.contains(document.activeElement))closeButton.current?.focus({preventScroll:true});},[assetId]);
@@ -47,24 +83,29 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  },[assetId,attempt]);
  useEffect(()=>{
   const keyboard=(event:KeyboardEvent)=>{
-   if(!dialog.current?.open||event.altKey||event.ctrlKey||event.metaKey)return;
+   if(saving||leaving||!dialog.current?.open||event.altKey||event.ctrlKey||event.metaKey)return;
    if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
-   event.preventDefault();event.stopPropagation();if(event.key==="ArrowLeft")onPrevious?.();else onNext?.();
+   event.preventDefault();event.stopPropagation();if(event.key==="ArrowLeft")leave(onPrevious);else leave(onNext);
   };
   document.addEventListener("keydown",keyboard);return ()=>document.removeEventListener("keydown",keyboard);
- },[onPrevious,onNext]);
+ // The current edit and leave guard belong to the active viewer frame.
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[onPrevious,onNext,rotation,saving,leaving]);
  const geometry=size?viewerGeometry(size.width,size.height,rotation,zoom,viewport.width,viewport.height):null;
  return <dialog className="image-viewer" ref={dialog} aria-label="Visualizar imagem" onKeyDown={event=>{
   if(event.key==="Escape"){event.stopPropagation();return;}
 
- }} onCancel={event=>{event.preventDefault();onClose();}}>
-  <header><strong>Visualizar imagem</strong><span>Prévia até 1280 × 960 · Original preservado · Rotação temporária</span>
-   <button aria-label="Imagem anterior" disabled={!onPrevious} onClick={onPrevious}>Anterior</button><button aria-label="Próxima imagem" disabled={!onNext} onClick={onNext}>Próxima</button>
+ }} onCancel={event=>{event.preventDefault();if(leaving)setLeaving(null);else leave(onClose);}}>
+  <header inert={!!leaving}><strong>Visualizar imagem</strong><span>Prévia até 1280 × 960 · A rotação só altera o arquivo ao salvar{!canSave?" · Gravação disponível para PNG e JPEG":""}</span>
+   <button aria-label="Imagem anterior" disabled={!onPrevious||saving} onClick={()=>leave(onPrevious)}>Anterior</button><button aria-label="Próxima imagem" disabled={!onNext||saving} onClick={()=>leave(onNext)}>Próxima</button>
    <button onClick={()=>update({zoom:0})}>Ajustar</button><button onClick={()=>update({zoom:100})}>100%</button><button aria-label="Ampliar imagem" onClick={()=>update({zoom:Math.min(200,(zoom||100)+25)})}>+</button><button aria-label="Reduzir imagem" onClick={()=>update({zoom:Math.max(25,(zoom||100)-25)})}>−</button>
-   <button disabled={!url} onClick={()=>rotate(-90)}>Girar à esquerda</button><button disabled={!url} onClick={()=>rotate(90)}>Girar à direita</button><button disabled={rotation===0} onClick={()=>update({rotation:0})}>Restaurar rotação</button><button ref={closeButton} autoFocus onClick={onClose}>Fechar imagem</button>
+   <button disabled={!url||saving} onClick={()=>rotate(-90)}>Girar à esquerda</button><button disabled={!url||saving} onClick={()=>rotate(90)}>Girar à direita</button><button disabled={rotation===0||saving} onClick={()=>update({rotation:0})}>Restaurar rotação</button><button disabled={saving||uncertain||!rotation||!window.photoManager?.saveRotation||!canSave} onClick={()=>void save("replace")}>Salvar alterações</button><button disabled={saving||uncertain||!rotation||!window.photoManager?.saveRotation||!canSave} onClick={()=>void save("copy")}>Salvar como cópia</button><button ref={closeButton} autoFocus disabled={saving} onClick={()=>leave(onClose)}>Fechar imagem</button>
   </header>
+  {leaving&&<section ref={unsaved} className="viewer-unsaved" role="alertdialog" aria-modal="true" aria-label="Rotação não salva"><strong>Salvar a rotação antes de sair desta imagem?</strong><button disabled={!window.photoManager?.saveRotation||uncertain||!canSave} onClick={()=>void save("replace")}>Salvar alterações e continuar</button><button disabled={!window.photoManager?.saveRotation||uncertain||!canSave} onClick={()=>void save("copy")}>Salvar cópia e continuar</button><button onClick={()=>{const action=leaving.action;setLeaving(null);update({rotation:0});action();}}>Descartar rotação</button><button onClick={()=>{setLeaving(null);closeButton.current?.focus();}}>Continuar editando</button></section>}
+  {saving&&<p className="viewer-caption" role="status">Salvando imagem em resolução original… Aguarde a conclusão.</p>}
+  {saveMessage&&<p className="viewer-caption" role="status">{saveMessage}</p>}
   <p className="viewer-caption" role="status">{name}{position?` · ${position}`:""} · {rotation}°</p>
-  <div ref={canvas} className={`viewer-image${zoom?" viewer-zoomed":""}`}>
+  <div ref={canvas} inert={!!leaving} className={`viewer-image${zoom?" viewer-zoomed":""}`}>
    {url?<div className="viewer-stage" style={geometry?{width:geometry.boxWidth,height:geometry.boxHeight}:undefined}><img key={assetId} src={url} alt={`Prévia de ${name}`} onLoad={event=>setDimensions({id:assetId,width:event.currentTarget.naturalWidth,height:event.currentTarget.naturalHeight||1})} onError={()=>{setImage(null);setFailure(assetId);}} style={geometry?{width:`${geometry.width}px`,height:`${geometry.height}px`,maxWidth:"none",maxHeight:"none",transform:`translate(-50%, -50%) rotate(${rotation}deg)`}:{transform:`rotate(${rotation}deg)`}}/></div>:failed?<div role="alert"><p>Prévia indisponível. O arquivo pode estar offline, ter mudado ou não ser decodificável dentro dos limites.</p><button onClick={()=>{setFailure(null);setRetry({id:assetId,value:attempt+1});}}>Tentar prévia novamente</button></div>:<p role="status">Preparando prévia…</p>}
   </div>
  </dialog>;

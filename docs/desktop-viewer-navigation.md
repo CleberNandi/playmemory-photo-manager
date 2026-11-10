@@ -15,11 +15,10 @@ volta a zero; Ajustar calcula a caixa delimitadora considerando a orientação. 
 à prévia derivada, não à resolução integral do original. O layout reserva a área correta para
 rolagem quando o zoom excede a janela, inclusive em 90/270 graus.
 
-O menu contextual ganhou Girar para a esquerda/direita, abrindo o visualizador já girado. As
-opções físicas continuam desabilitadas para imagens catalogadas como indisponíveis e vídeos.
-Esta etapa **não salva orientação no catálogo**, não modifica EXIF, não regrava imagem e não
-gira miniaturas. Ao navegar ou fechar, o ajuste é descartado. A interface informa Rotação
-temporária. Uma futura orientação persistida exigirá contrato próprio; renomear também continua
+A rotação fica somente no visualizador. A continuação
+[desktop-save-rotation.md](desktop-save-rotation.md) oferece Salvar alterações e Salvar como cópia,
+com gravação explícita em resolução original. Sem salvar, o original não muda. Fechar/navegar com
+rotação pendente pede uma decisão; ela não é mais descartada silenciosamente. Renomear continua
 pendente, por envolver consistência entre filesystem e catálogo.
 
 O diálogo permanece montado durante a navegação. A seleção e as propriedades acompanham a imagem
@@ -32,11 +31,10 @@ preservados. Nenhuma nova API de filesystem, dependência ou migração é adici
 
 Testes de renderer cobrem passos e restauração, geometria em 90 graus com ajuste/100%, navegação
 por botões e setas, extremos, manutenção do diálogo, reset de rotação, resposta antiga, foco e
-seleção ao fechar. O menu é testado com ação de rotação simulada. O smoke Electron de laboratório
+seleção ao fechar. A ausência de Girar no menu da galeria é preservada pela lista de ações testada. O smoke Electron de laboratório
 usa duas imagens sintéticas reais, verifica a caixa girada dentro do visualizador, navega com
 botões/setas e confere a recuperação de foco. Demo e biblioteca gerenciada preservam os smokes.
-O usuário homologou as ações anteriores do menu; as novas entradas de rotação precisam de teste
-manual no KDE, assim como uso prolongado e janelas pequenas.
+O usuário homologou as ações anteriores do menu; os diálogos de gravação precisam de teste manual no KDE, assim como uso prolongado e janelas pequenas.
 
 ```sh
 git switch feat/desktop-viewer-navigation
@@ -45,7 +43,7 @@ pnpm --dir desktop start
 
 1. Abrir uma imagem e conferir nome/posição.
 2. Girar à direita/esquerda, ajustar e testar 100% com rolagem.
-3. Avançar com Próxima e voltar com seta esquerda: a nova visualização deve iniciar sem rotação.
+3. Avançar com Próxima e escolher salvar ou descartar; voltar com seta esquerda.
 4. Fechar com Escape e conferir seleção/propriedades da última imagem visualizada.
-5. Usar botão direito → Girar para a direita e conferir 90 graus iniciais.
-6. Reabrir normalmente: a rotação temporária não deve permanecer.
+5. Conferir que o botão direito da galeria não possui Girar.
+6. Reabrir o arquivo salvo e conferir a orientação; ajustes descartados não devem permanecer.

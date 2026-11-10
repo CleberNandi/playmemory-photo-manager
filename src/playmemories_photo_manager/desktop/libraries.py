@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from uuid import UUID
 
+from ..imaging.rotation import RotationService
 from ..imaging.service import ImageService
 from ..library import LibraryError, LibraryLifecycle
 
@@ -27,6 +28,7 @@ class LibraryDispatcher:
         self.protected_paths = protected_paths
         self.ingestion = None
         self.images = ImageService()
+        self.edits = RotationService()
         self.owner = LibraryLifecycle()
         self.handle: str | None = None
 
@@ -52,6 +54,35 @@ class LibraryDispatcher:
             raise LibraryError("invalid_request")
         if method == "library.state" and not params:
             return self.state()
+        if method in ("image.save", "image.save_status"):
+            active = self.require_session(params.get("session_id"))
+            if self.ingestion is not None and (
+                self.ingestion.preparation.busy or self.ingestion.commands.busy
+            ):
+                raise LibraryError("busy")
+            if method == "image.save_status":
+                if set(params) != {"session_id", "job_id"}:
+                    raise LibraryError("invalid_request")
+                return self.edits.status(_uuid(params["job_id"]))
+            if set(params) != {"session_id", "asset_id", "angle", "mode", "target", "request_id"}:
+                raise LibraryError("invalid_request")
+            return self.edits.start(
+                active,
+                _uuid(params["asset_id"]),
+                params["angle"],
+                params["mode"],
+                params["target"],
+                _uuid(params["request_id"]),
+            )
+        if self.edits.busy and method not in (
+            "library.state",
+            "asset.details",
+            "gallery.list",
+            "thumbnail.get",
+            "preview.get",
+            "calendar.summary",
+        ):
+            raise LibraryError("busy")
         if method.startswith("ingestion."):
             return self._ingestion_request(method, params)
         if method in ("library.open", "library.create"):
@@ -72,6 +103,7 @@ class LibraryDispatcher:
             action = self.owner.create if method == "library.create" else self.owner.open
             action(Path(raw_path))
             self.ingestion = None
+            self.edits = RotationService()
             self.images = ImageService()
             self.handle = handle
             return self.state()
@@ -229,11 +261,14 @@ class LibraryDispatcher:
             raise LibraryError(error.code) from None
 
     def tick(self):
+        self.edits.tick()
         self.images.tick()
         if self.ingestion is not None:
             self.ingestion.tick()
 
     def shutdown(self, timeout=2.5):
+        if not self.edits.shutdown():
+            return False
         if self.ingestion is not None and not self.ingestion.close(timeout=timeout):
             return False
         if not self.images.shutdown():

@@ -9,9 +9,9 @@ export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTML
  try{
   const action=await window.photoManager.showMediaMenu(assetId);
   if(!host.isConnected)return;
-  if(action==="view"||action==="rotate-left"||action==="rotate-right")onOpen?.(action==="rotate-left"?270:action==="rotate-right"?90:0);
+  if(action==="view")onOpen?.();
   else if(action==="properties"){if(button)onSelect?.(button);}
   else if(action==="favorite")host.querySelector<HTMLButtonElement>(".favorite-toggle")?.click();
-  if(action!=="view"&&action!=="rotate-left"&&action!=="rotate-right"&&action!=="properties")button?.focus({preventScroll:true});
+  if(action!=="view"&&action!=="properties")button?.focus({preventScroll:true});
  }catch{if(host.isConnected)onError?.();}
 }
