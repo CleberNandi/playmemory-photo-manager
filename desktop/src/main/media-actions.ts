@@ -1,6 +1,6 @@
 import {canonicalId,validPath} from "./library-preferences.js";
 import type {LibraryController} from "./libraries.js";
-export type MediaAction="rotate-left"|"rotate-right"|"view"|"properties"|"favorite"|"reveal"|"location";
+export type MediaAction="view"|"properties"|"favorite"|"reveal"|"location";
 export interface MediaMenuItem {label:string;action:MediaAction;enabled:boolean}
 export class MediaActions {
  private busy=false;
@@ -22,8 +22,6 @@ export class MediaActions {
    const available=details.availability==="available";
    const action=await this.choose([
     {label:"Visualizar",action:"view",enabled:available&&details.asset.kind==="photo"},
-    {label:"Girar para a esquerda",action:"rotate-left",enabled:available&&details.asset.kind==="photo"},
-    {label:"Girar para a direita",action:"rotate-right",enabled:available&&details.asset.kind==="photo"},
     {label:"Abrir pasta que contém o arquivo",action:"reveal",enabled:available},
     {label:"Localização do arquivo…",action:"location",enabled:available},
     {label:details.annotation?.favorite?"Remover dos favoritos":"Adicionar aos favoritos",action:"favorite",enabled:true},

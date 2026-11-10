@@ -9,7 +9,7 @@ function fixture(){
  return {session,asset,query,choose,reveal,describe,switch:()=>{current=randomUUID();},actions:new MediaActions(libraries,choose,reveal,describe)};
 }
 it("returns only actions, and cancellation performs no external operation",async()=>{
- const f=fixture();expect(await f.actions.menu(f.session,f.asset)).toBeNull();expect(f.reveal).not.toHaveBeenCalled();expect(f.query).toHaveBeenCalledTimes(1);expect(f.choose.mock.calls[0][0].map((item:{action:string})=>item.action)).toEqual(["view","rotate-left","rotate-right","reveal","location","favorite","properties"]);
+ const f=fixture();expect(await f.actions.menu(f.session,f.asset)).toBeNull();expect(f.reveal).not.toHaveBeenCalled();expect(f.query).toHaveBeenCalledTimes(1);expect(f.choose.mock.calls[0][0].map((item:{action:string})=>item.action)).toEqual(["view","reveal","location","favorite","properties"]);
 });
 it("reveals only a backend-resolved path and never returns it to the renderer",async()=>{
  const f=fixture();f.choose.mockResolvedValue("reveal");expect(await f.actions.menu(f.session,f.asset)).toBeNull();expect(f.reveal).toHaveBeenCalledWith("/synthetic/media/photo.jpg");

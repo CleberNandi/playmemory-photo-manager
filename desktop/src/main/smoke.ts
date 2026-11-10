@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,openManagedLibrary,prepareCataloging,retryGallery,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,openManagedLibrary,prepareCataloging,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -90,7 +90,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     window.webContents.debugger.attach("1.3");
     try {
       const tree = await window.webContents.debugger.sendCommand("Accessibility.getFullAXTree");
-      if (!tree.nodes.some((node: { ignored: boolean; name?: { value: string } }) => !node.ignored && node.name?.value.includes("Seus originais não são alterados."))) throw new Error("privacy text absent from accessibility tree");
+      if (!tree.nodes.some((node: { ignored: boolean; name?: { value: string } }) => !node.ignored && node.name?.value.includes("Imagens só são alteradas ao salvar."))) throw new Error("privacy text absent from accessibility tree");
     } finally { window.webContents.debugger.detach(); }
     if (demo) await evaluate('document.querySelector(".asset-details button").click()');
     console.log(`SMOKE resize PASS: ${width}x${height}, no horizontal overflow; privacy in accessibility tree`);
@@ -275,7 +275,7 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await click("Girar à direita");
   await waitFor('document.querySelector(".image-viewer img")?.style.transform.includes("rotate(90deg)")');
   if(!await evaluate<boolean>('(()=>{const image=document.querySelector(".image-viewer img").getBoundingClientRect(),canvas=document.querySelector(".viewer-image").getBoundingClientRect();return image.width<=canvas.width+1&&image.height<=canvas.height+1;})()'))throw new Error("rotated fit overflow");
-  await click("Próxima");await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2") && document.querySelector(".image-viewer img")?.naturalWidth>0');
+  await click("Próxima");await waitFor('!!document.querySelector(".viewer-unsaved")');await click("Descartar rotação");await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2") && document.querySelector(".image-viewer img")?.naturalWidth>0');
   window.webContents.sendInputEvent({type:"keyDown",keyCode:"Left"});
   await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("1 de 2") && document.querySelector(".viewer-caption")?.textContent.includes("0°")');
   window.webContents.sendInputEvent({type:"keyDown",keyCode:"Right"});
@@ -329,13 +329,25 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  if(!location.path.startsWith(root+"/"))throw new Error("reveal escaped synthetic root");
  await evaluate('document.querySelector(".card-select").click()');await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
  console.log("SMOKE MEDIA ORIGIN PASS: catalog occurrence resolved, origin shown; native popup and file manager NOT TESTED");
+ const beforeEdit=Buffer.from(await readFile(location.path));
+ await evaluate('document.querySelector(".open-image").click()');await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');
+ await click("Girar à direita");await click("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');
+ if(!Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("save copy changed source");
+ await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');
+ await click("Girar à direita");await click("Salvar alterações");await wait('document.querySelector(".image-viewer")?.textContent.includes("Alterações salvas no arquivo original")');
+ if(Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("replace did not change full original");
+ const afterEdit=await backend.request("asset.reveal",{session_id:initial.session.session_id,asset_id:first}) as {path:string};
+ if(afterEdit.path!==location.path)throw new Error("edited asset lost location");
+ await click("Fechar imagem");await wait('document.querySelectorAll(".media-card").length===24');
+ console.log("SMOKE SAVE ROTATION PASS: native-choice fixtures; copy preserves source; replace reconciles same Asset; full-resolution backend worker; native save dialogs NOT TESTED");
+
  await evaluate('document.querySelector(".favorite-toggle").click()');await wait('document.querySelector(".favorite-toggle")?.getAttribute("aria-pressed") === "true"');
  await backend.stop();await evaluate('window.photoManager.retryGallery()');
  await wait('document.querySelector(".library-identity strong")?.textContent === "Minha biblioteca" && document.querySelectorAll(".media-card").length===24 && document.querySelector(".favorite-toggle")?.getAttribute("aria-pressed")==="true"');
  const reopened=await evaluate<{session:{session_id:string}}>('window.photoManager.getLibraryState()');
  if(reopened.session.session_id===initial.session.session_id)throw new Error("session did not restart");
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("0 imagem(ns)")');
- if(!Buffer.from(await readFile(join(root,"image-000.jpg"))).equals(bytes))throw new Error("managed import changed original");
+ if(location.path!==join(root,"image-000.jpg")&&!Buffer.from(await readFile(join(root,"image-000.jpg"))).equals(bytes))throw new Error("managed import changed unrelated original");
  await writeFile("/tmp/playmemories-managed-library.png",(await window.webContents.capturePage()).toPNG());
- console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; originals unchanged; native dialogs NOT TESTED");
+ console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; unrelated originals unchanged; explicit fixture rotation saved; native dialogs NOT TESTED");
 }

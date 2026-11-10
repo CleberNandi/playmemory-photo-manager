@@ -2,13 +2,15 @@
 
 import os
 import stat
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from ..catalog_ingestion.media import _Changed, _Directories, _mount_id
 from ..library import LibraryError
 
 
-def reveal_location(connection, asset_id):
+@contextmanager
+def held_location(connection, asset_id):
     row = connection.execute(
         """SELECT fl.*,lr.normalized_path FROM file_location fl
         JOIN library_root lr ON lr.id=fl.library_root_id
@@ -52,10 +54,17 @@ def reveal_location(connection, asset_id):
         ):
             raise LibraryError("unsafe_location")
         directories.check()
-        return {"path": str(root / relative)}
+        yield row, directories, parent, fd, info, root / relative
+    except LibraryError:
+        raise
     except (OSError, RuntimeError, _Changed):
         raise LibraryError("unsafe_location") from None
     finally:
         if fd is not None:
             os.close(fd)
         directories.close()
+
+
+def reveal_location(connection, asset_id):
+    with held_location(connection, asset_id) as (_, _, _, _, _, path):
+        return {"path": str(path)}

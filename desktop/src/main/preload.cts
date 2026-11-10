@@ -15,6 +15,8 @@ ipcRenderer.on("backend:reset", () => { sessionId = null; applied = ++sequence; 
 contextBridge.exposeInMainWorld("photoManager", {
   listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean } = {}) =>
     scoped("gallery:list", params),
+  saveRotation:(assetId:string,angle:number,mode:"replace"|"copy")=>scoped("image:save",{assetId,angle,mode}),
+  getImageSaveStatus:(jobId:string)=>scoped("image:save-status",jobId),
   showMediaMenu: (assetId:string)=>scoped("asset:menu",assetId),
   locateMedia: (assetId:string,describe=false)=>scoped("asset:locate",{assetId,describe}),
   getAssetDetails: (assetId: string) => scoped("asset:details", assetId),

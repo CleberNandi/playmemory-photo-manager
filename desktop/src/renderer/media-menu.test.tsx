@@ -20,6 +20,3 @@ it("drops late menu actions after unmount and sanitizes failures",async()=>{
  let finish!:(action:"view")=>void;window.photoManager!.showMediaMenu=vi.fn().mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));const open=vi.fn();await act(async()=>root.render(<MediaCard item={item} onOpen={open}/>));await act(async()=>{host.querySelector("article")!.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true}));});await act(async()=>root.render(<div/>));await act(async()=>finish("view"));expect(open).not.toHaveBeenCalled();
  window.photoManager!.showMediaMenu=vi.fn().mockRejectedValue(new Error("private path"));await act(async()=>root.render(<MediaCard item={item}/>));await act(async()=>{host.querySelector("article")!.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true}));});expect(host.querySelector('[role="alert"]')).not.toBeNull();expect(host.textContent).not.toContain("private path");
 });
-it("context rotation opens the selected image with a temporary quarter turn",async()=>{
- window.photoManager!.showMediaMenu=vi.fn().mockResolvedValue("rotate-left");const open=vi.fn();await act(async()=>root.render(<MediaCard item={item} onOpen={open}/>));await act(async()=>{host.querySelector("article")!.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true}));});expect(open).toHaveBeenCalledWith(270);
-});

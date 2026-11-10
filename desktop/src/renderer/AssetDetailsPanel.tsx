@@ -17,7 +17,7 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
   }, [onClose,suspended]);
-  useEffect(() => requestThumbnail(assetId, (url) => setThumbnail(url ? {id: assetId, url} : null)), [assetId]);
+  useEffect(() => requestThumbnail(assetId, (url) => setThumbnail(url ? {id: assetId, url} : null)), [assetId,revision]);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -32,7 +32,7 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
   const value = result?.id === assetId ? result.value : null;
   return <aside className="asset-details" aria-labelledby="details-heading">
     <header><h2 id="details-heading">Propriedades</h2><button ref={close} className="primary-button" onClick={onClose}>Fechar detalhes</button></header>
-    <p className="section-kicker">{onFavoriteChanged?"Favorito salvo no catálogo; os originais permanecem inalterados.":"Somente leitura"}</p>
+    <p className="section-kicker">{onFavoriteChanged?"Favoritos ficam no catálogo. Edições da imagem exigem salvar.":"Somente leitura"}</p>
     {!value && <p role="status">Carregando detalhes…</p>}
     {value?.status === "not_found" && <p role="status">Asset não encontrado no catálogo.</p>}
     {value && value.status !== "ready" && value.status !== "not_found" && <div role="alert"><p>{value.status === "internal_error" ? "Não foi possível interpretar os detalhes." : "Detalhes temporariamente indisponíveis."}</p><button className="primary-button" onClick={() => { setResult(null); void (async () => { try { if (value.status === "temporarily_unavailable") await window.photoManager?.retryGallery(); } catch { /* The details request presents the sanitized failure. */ } setAttempt((n) => n + 1); })(); }}>Tentar detalhes novamente</button><p>Tentar novamente reconecta o backend local quando necessário.</p></div>}

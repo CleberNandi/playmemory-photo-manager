@@ -37,7 +37,9 @@ declare global {
       setReopenLibrary?(value: boolean): Promise<LibraryState>;
       forgetLibrary?(): Promise<LibraryState>;
       listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean }): Promise<GalleryPage>;
-      showMediaMenu?(assetId:string):Promise<"rotate-left"|"rotate-right"|"view"|"properties"|"favorite"|null>;
+      saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;
+      getImageSaveStatus?(jobId:string):Promise<ImageSaveJob>;
+      showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|null>;
       locateMedia?(assetId:string,describe?:boolean):Promise<{status:string}>;
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
       setFavorite?(assetId: string, favorite: boolean): Promise<{asset_id: string; favorite: boolean}>;
@@ -105,3 +107,5 @@ export interface DuplicateGroupPage extends DuplicatePage {group: DuplicateGroup
 export type DuplicateResult<P> = {status: "ready"; page: P} | {status: "analysis_not_available" | "temporarily_unavailable" | "internal_error" | "invalid_request" | "stale_snapshot" | "not_found" | "response_too_large"};
 export interface DuplicateListParams {pageSize?: number; after?: string | null}
 export interface DuplicateGroupParams extends DuplicateListParams {snapshotId: string; groupKey: string}
+
+export interface ImageSaveJob {job_id:string;asset_id:string;state:string;result_asset_id:string|null;error:string|null}
