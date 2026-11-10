@@ -6,6 +6,7 @@ import type { AssetDetails, DetailsResult } from "./types";
 
 export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, suspended=false}: {assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void}) {
   const [result, setResult] = useState<{id: string; value: DetailsResult} | null>(null);
+  const [locationError,setLocationError]=useState(false);
   const [attempt, setAttempt] = useState(0);
   const [thumbnail, setThumbnail] = useState<{id: string; url: string} | null>(null);
   const close = useRef<HTMLButtonElement>(null);
@@ -36,6 +37,12 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
     {value?.status === "not_found" && <p role="status">Asset não encontrado no catálogo.</p>}
     {value && value.status !== "ready" && value.status !== "not_found" && <div role="alert"><p>{value.status === "internal_error" ? "Não foi possível interpretar os detalhes." : "Detalhes temporariamente indisponíveis."}</p><button className="primary-button" onClick={() => { setResult(null); void (async () => { try { if (value.status === "temporarily_unavailable") await window.photoManager?.retryGallery(); } catch { /* The details request presents the sanitized failure. */ } setAttempt((n) => n + 1); })(); }}>Tentar detalhes novamente</button><p>Tentar novamente reconecta o backend local quando necessário.</p></div>}
     {value?.status === "ready" && <>
+      <section className="asset-origin" aria-label="Origem do arquivo">
+        <h3>Origem do arquivo</h3>
+        {value.details.locations.length?value.details.locations.map(location=><div key={location.id}><strong>{location.relative_path.split("/").pop()}</strong><p>Pasta: {location.root_display_name}</p><p className="preserve-text">{location.relative_path}</p></div>):<p>Sem localização conhecida.</p>}
+        {window.photoManager?.locateMedia&&<><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Abrir pasta que contém o arquivo</button><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId,true).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Localização completa…</button></>}
+        {locationError&&<p role="alert">Não foi possível localizar o arquivo. Ele pode estar offline, ter mudado ou não estar mais disponível.</p>}
+      </section>
       {onFavoriteChanged && <FavoriteButton key={assetId} assetId={assetId} favorite={value.details.annotation?.favorite??false} onChanged={onFavoriteChanged} />}
       {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Miniatura da imagem" onError={() => setThumbnail(null)} /><figcaption>Miniatura</figcaption></figure>}
       <DetailsContent details={value.details} />
