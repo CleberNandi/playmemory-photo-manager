@@ -86,6 +86,7 @@ class LibraryDispatcher:
             self.handle = None
             return self.state()
         if method not in (
+            "asset.reveal",
             "annotation.favorite",
             "gallery.list",
             "calendar.summary",
@@ -103,6 +104,12 @@ class LibraryDispatcher:
             self.ingestion.preparation.busy or self.ingestion.commands.busy
         ):
             raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
+        if method == "asset.reveal":
+            from .media_location import reveal_location
+
+            if set(params) != {"session_id", "asset_id"}:
+                raise LibraryError("invalid_request")
+            return reveal_location(active.query_connection, _uuid(params["asset_id"]))
         if method == "annotation.favorite":
             from ..catalog import Catalog
             from ..catalog.errors import CatalogError, InvalidReferenceError

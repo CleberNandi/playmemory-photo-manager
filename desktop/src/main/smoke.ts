@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,openManagedLibrary,prepareCataloging,retryGallery,setFavorite,setReopenLibrary,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,openManagedLibrary,prepareCataloging,retryGallery,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -291,7 +291,7 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await writeFile("/tmp/playmemories-capture-calendar.png", (await window.webContents.capturePage()).toPNG());
   await evaluate(`document.querySelector('[aria-label="2024-02-29: 2 foto(s)"]').click()`);
   await waitFor('document.querySelectorAll(".media-card").length === 2 && document.querySelector(".gallery-filters").textContent.includes("2024-02-29")');
-  await evaluate('document.querySelector(".favorite-toggle").click()');
+ await evaluate('document.querySelector(".favorite-toggle").click()');
   await waitFor('document.querySelector(".favorite-toggle").getAttribute("aria-pressed") === "true"');
   await click("☆ Favoritos");
   await waitFor('document.querySelectorAll(".media-card").length === 1');
@@ -315,6 +315,11 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("125 imagem(ns)")');
  await wait('document.querySelectorAll(".media-card").length === 24');
  if(await evaluate<boolean>('Array.from(document.querySelectorAll(".cataloging-review,.cataloging-panel")).some(node=>!node.closest("[hidden]"))'))throw new Error("technical preparation leaked into automatic path");
+  const first=await evaluate<string>('document.querySelector("[data-asset-id]").dataset.assetId');
+ const location=await backend.request("asset.reveal",{session_id:initial.session.session_id,asset_id:first}) as {path:string};
+ if(!location.path.startsWith(root+"/"))throw new Error("reveal escaped synthetic root");
+ await evaluate('document.querySelector(".card-select").click()');await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
+ console.log("SMOKE MEDIA ORIGIN PASS: catalog occurrence resolved, origin shown; native popup and file manager NOT TESTED");
  await evaluate('document.querySelector(".favorite-toggle").click()');await wait('document.querySelector(".favorite-toggle")?.getAttribute("aria-pressed") === "true"');
  await backend.stop();await evaluate('window.photoManager.retryGallery()');
  await wait('document.querySelector(".library-identity strong")?.textContent === "Minha biblioteca" && document.querySelectorAll(".media-card").length===24 && document.querySelector(".favorite-toggle")?.getAttribute("aria-pressed")==="true"');

@@ -1,8 +1,9 @@
+import { MediaActions, type MediaAction } from "./media-actions.js";
 import { FolderImportController } from "./folder-import.js";
 import { nativePath } from "./native-path.js";
 import { randomUUID } from "node:crypto";
 import { CatalogingController } from "./cataloging.js";
-import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, Menu, shell } from "electron";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -119,6 +120,31 @@ app.whenReady().then(async () => {
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
     return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+  });
+  const mediaActions=new MediaActions(libraries,async(items)=>{
+    if(!mainWindow||mainWindow.isDestroyed())return null;
+    const window=mainWindow;
+    return new Promise<MediaAction|null>(resolve=>{
+      let selected:MediaAction|null=null;
+      const menu=Menu.buildFromTemplate(items.map(item=>({label:item.label,enabled:item.enabled,click:()=>{selected=item.action;}})));
+      menu.popup({window,callback:()=>resolve(selected)});
+    });
+  },path=>shell.showItemInFolder(path),async(path)=>{
+    if(!mainWindow||mainWindow.isDestroyed())return false;
+    const result=await dialog.showMessageBox(mainWindow,{type:"info",title:"Localização do arquivo",message:"Arquivo original",detail:path,buttons:["Fechar","Abrir pasta"],defaultId:0,cancelId:0});
+    return result.response===1;
+  });
+  register("asset:menu",1,async(raw)=>{
+    const {sessionId,params}=envelope(raw);
+    if(demo||!canonicalId(params))return null;
+    try{return await mediaActions.menu(sessionId,params);}catch{throw new Error("unavailable");}
+  });
+  register("asset:locate",1,async(raw)=>{
+    const {sessionId,params}=envelope(raw);
+    if(demo||!params||typeof params!=="object"||Array.isArray(params)||Object.keys(params).sort().join()!=="assetId,describe")throw new Error("invalid_request");
+    const p=params as {assetId:unknown;describe:unknown};
+    if(!canonicalId(p.assetId)||typeof p.describe!=="boolean")throw new Error("invalid_request");
+    try{return await mediaActions.locate(sessionId,p.assetId,p.describe);}catch{return {status:"unavailable"};}
   });
   register("annotation:favorite", 1, (raw) => {
     const {sessionId, params} = envelope(raw);

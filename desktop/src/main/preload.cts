@@ -15,6 +15,8 @@ ipcRenderer.on("backend:reset", () => { sessionId = null; applied = ++sequence; 
 contextBridge.exposeInMainWorld("photoManager", {
   listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean } = {}) =>
     scoped("gallery:list", params),
+  showMediaMenu: (assetId:string)=>scoped("asset:menu",assetId),
+  locateMedia: (assetId:string,describe=false)=>scoped("asset:locate",{assetId,describe}),
   getAssetDetails: (assetId: string) => scoped("asset:details", assetId),
   setFavorite: (assetId: string, favorite: boolean) => scoped("annotation:favorite", {assetId, favorite}),
   getCalendar: (period: string | null) => scoped("calendar:summary", period),
