@@ -26,6 +26,10 @@ declare global {
       listCatalogingCandidates?(sessionId: string, proposalId: string, cursor: string | null, pageSize: number): Promise<unknown>;
       applyCataloging?(sessionId: string, proposalId: string, candidateIds: string[]): Promise<unknown>;
       getCatalogingApplicationStatus?(sessionId: string, commandId: string): Promise<unknown>;
+      openManagedLibrary?():Promise<LibraryState>;
+      addMediaFolder?(id:string):Promise<unknown>;
+      getFolderImportStatus?(id:string,job:string):Promise<unknown>;
+      stopFolderImport?(id:string,job:string):Promise<unknown>;
       getLibraryState?(): Promise<LibraryState>;
       chooseCreateLibrary?(): Promise<LibraryState>;
       chooseOpenLibrary?(): Promise<LibraryState>;
@@ -48,6 +52,7 @@ declare global {
 
 export interface LibraryState {
   cataloging_enabled?: boolean;
+  folder_import_enabled?:boolean;
   state: "active" | "no_library" | "unavailable" | "demo";
   session: {session_id: string; library_handle: string; generation: number; display_name: string} | null;
   reopen: boolean;

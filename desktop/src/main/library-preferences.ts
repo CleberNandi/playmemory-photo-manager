@@ -26,22 +26,7 @@ export class LibraryPreferences {
     this.file = join(this.folder, "selection.json");
   }
   private async directory(create: boolean): Promise<void> {
-    const root = parse(this.folder).root;
-    let current = root;
-    for (const part of relative(root, this.folder).split("/")) {
-      current = join(current, part);
-      let info;
-      try { info = await lstat(current); }
-      catch (error) {
-        if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        await mkdir(current, {mode: 0o700});
-        info = await lstat(current);
-      }
-      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("unsafe preferences");
-      const owner = process.getuid?.();
-      if ((info.uid !== 0 && info.uid !== owner) || ((info.mode & 0o022) !== 0 && (info.mode & 0o1000) === 0)) throw new Error("unsafe preferences");
-      if (current === this.folder && ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())) throw new Error("unsafe preferences");
-    }
+    await ensurePrivateDirectory(this.folder, create);
   }
   async read(): Promise<LibraryPreference> {
     try {
@@ -77,4 +62,23 @@ export class LibraryPreferences {
       await rename(temporary, this.file);
     } catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
   }
+}
+
+export async function ensurePrivateDirectory(folder: string, create: boolean): Promise<void> {
+    const root = parse(folder).root;
+    let current = root;
+    for (const part of relative(root, folder).split("/")) {
+      current = join(current, part);
+      let info;
+      try { info = await lstat(current); }
+      catch (error) {
+        if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await mkdir(current, {mode: 0o700});
+        info = await lstat(current);
+      }
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("unsafe preferences");
+      const owner = process.getuid?.();
+      if ((info.uid !== 0 && info.uid !== owner) || ((info.mode & 0o022) !== 0 && (info.mode & 0o1000) === 0)) throw new Error("unsafe preferences");
+      if (current === folder && ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())) throw new Error("unsafe preferences");
+    }
 }

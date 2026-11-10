@@ -206,3 +206,6 @@ button, summary { touch-action: manipulation; }
 .favorite-toggle { padding: 4px 6px; border: 1px solid var(--color-border); border-radius: 3px; color: var(--color-accent-strong); background: var(--color-surface); }
 .favorite-toggle[aria-pressed="true"] { background: var(--color-sidebar-active); border-color: #7298b3; }
 .favorite-control [role="alert"] { display: block; margin-top: 6px; font-size: 12px; color: var(--color-danger); }
+.folder-import-panel { padding: 12px 16px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.folder-import-panel p { margin: 7px 0; }
+.folder-import-panel [role="alert"] { color: var(--color-danger); }

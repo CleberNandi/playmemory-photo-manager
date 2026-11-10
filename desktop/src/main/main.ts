@@ -1,3 +1,4 @@
+import { FolderImportController } from "./folder-import.js";
 import { nativePath } from "./native-path.js";
 import { randomUUID } from "node:crypto";
 import { CatalogingController } from "./cataloging.js";
@@ -7,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { LibraryController } from "./libraries.js";
-import { LibraryPreferences, canonicalId } from "./library-preferences.js";
+import { LibraryPreferences, canonicalId, ensurePrivateDirectory } from "./library-preferences.js";
 import { trustedSender } from "./trusted-ipc.js";
 import { smoke } from "./smoke.js";
 import { duplicatesRequest } from "./duplicates.js";
@@ -19,12 +20,15 @@ let thumbnailRequests = 0;
 let mainWindow: BrowserWindow | null = null;
 let libraries: LibraryController;
 let recovering = false;
+let folderImports: FolderImportController;
 const ingestionLab = process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1";
 const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
-const smokeDirectory = process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" || process.env.PLAYMEMORIES_DESKTOP_LIBRARY_LAB === "1" || ingestionLab ? mkdtempSync(join(tmpdir(), "pm-desktop-smoke-")) : null;
+const managedSmoke=process.env.PLAYMEMORIES_DESKTOP_MANAGED_SMOKE === "1";
+const managedMode=!demo && (process.env.PLAYMEMORIES_DESKTOP_SMOKE !== "1" || managedSmoke);
+const smokeDirectory = process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" || demo ? mkdtempSync(join(tmpdir(), "pm-desktop-smoke-")) : null;
 if (smokeDirectory) { app.setPath("userData", smokeDirectory); app.setPath("sessionData", smokeDirectory); }
 const smokeSelections = smokeDirectory && process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" && !demo ? [null, join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "B.sqlite3"), join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "missing.sqlite3")] : null;
-const ingestionSmokeRoot = ingestionLab && smokeSelections && smokeDirectory ? mkdtempSync(join(tmpdir(), "pm-ingestion-smoke-")) : null;
+const ingestionSmokeRoot = (ingestionLab||managedSmoke) && smokeSelections && smokeDirectory ? mkdtempSync(join(tmpdir(), "pm-ingestion-smoke-")) : null;
 const ingestionSelections = ingestionSmokeRoot ? [null, ingestionSmokeRoot, ingestionSmokeRoot, ingestionSmokeRoot, ingestionSmokeRoot] : null;
 const rendererFile = resolve(import.meta.dirname, "../renderer/index.html");
 const expectedUrl = process.env.VITE_DEV_SERVER_URL ? new URL(process.env.VITE_DEV_SERVER_URL).href : pathToFileURL(rendererFile).href;
@@ -78,13 +82,17 @@ app.whenReady().then(async () => {
     const selection = await dialog.showOpenDialog(mainWindow, {title: "Abrir biblioteca existente", properties: ["openFile"], filters: [{name: "Catálogo SQLite", extensions: ["sqlite3", "sqlite", "db"]}]});
     if (selection.canceled || selection.filePaths.length !== 1) return null;
     return nativePath(selection.filePaths[0]);
-  }});
+  }}, managedMode ? async()=>{
+    const folder=join(app.getPath("userData"),"library-state");
+    await ensurePrivateDirectory(folder,true);
+    return join(folder,"principal.sqlite3");
+  } : undefined);
   const register = (channel: string, count: number, handler: (...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
       const result = handler(...args);
-      return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: ingestionLab && !demo})) : result;
+      return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
   };
   const envelope = (raw: unknown) => {
@@ -97,9 +105,10 @@ app.whenReady().then(async () => {
   };
   const demoState = () => ({state: "demo", session: null, reopen: false});
   register("library:state", 0, () => demo ? demoState() : libraries.current());
-  register("library:create", 0, () => demo ? demoState() : libraries.choose(true));
-  register("library:open", 0, () => demo ? demoState() : libraries.choose(false));
-  register("library:close", 1, (id) => demo ? demoState() : libraries.close(id));
+  register("library:create", 0, () => demo ? demoState() : folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.choose(true));
+  register("library:open", 0, () => demo ? demoState() : folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.choose(false));
+  register("library:close", 1, (id) => demo ? demoState() : folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.close(id));
+  register("library:default",0,()=>demo?demoState():folderImports?.busy?{...libraries.current(),error:"busy"}:libraries.openManaged());
   register("library:reopen", 1, (value) => demo ? demoState() : libraries.setReopen(value));
   register("library:forget", 0, () => demo ? demoState() : libraries.forget());
   register("gallery:list", 1, (raw) => {
@@ -159,7 +168,8 @@ app.whenReady().then(async () => {
       return duplicatesRequest(scoped, method, params);
     });
   }
-  const cataloging = new CatalogingController(backend, libraries, randomUUID(), ingestionLab && !demo, async () => {
+  const windowId=randomUUID();
+  const cataloging = new CatalogingController(backend, libraries, windowId, (ingestionLab||managedMode) && !demo, async () => {
     if (ingestionSelections) return ingestionSelections.shift() ?? null;
     if (!mainWindow) return null;
     const selected = await dialog.showOpenDialog(mainWindow, {title: "Selecionar pasta de fotografias", properties: ["openDirectory"]});
@@ -179,11 +189,22 @@ app.whenReady().then(async () => {
     });
     return answer.response === 1;
   });
-  register("ingestion:select", 1, (id) => cataloging.choose(id));
-  register("ingestion:prepare", 3, (id, grant, recursive) => cataloging.prepare(id, grant, recursive));
+  const folderSelections=managedSmoke&&ingestionSmokeRoot?[null,ingestionSmokeRoot,ingestionSmokeRoot]:null;
+  folderImports=new FolderImportController(backend,libraries,windowId,async()=>{
+    if(folderSelections)return folderSelections.shift()??null;
+    if(!mainWindow)return null;
+    const result=await dialog.showOpenDialog(mainWindow,{title:"Adicionar pasta e subpastas à biblioteca",message:"As imagens serão adicionadas ao catálogo. Os originais permanecem inalterados.",properties:["openDirectory"]});
+    return result.canceled||result.filePaths.length!==1?null:nativePath(result.filePaths[0]);
+  });
+  register("folder:add",1,(id)=>{if(!managedMode)throw new Error("unavailable");return folderImports.start(id);});
+  register("folder:status",2,(id,job)=>folderImports.status(id,job));
+  register("folder:stop",2,(id,job)=>folderImports.stop(id,job));
+  const manual=()=>{if(folderImports.busy)throw new Error("busy");};
+  register("ingestion:select", 1, (id) => {manual();return cataloging.choose(id);});
+  register("ingestion:prepare", 3, (id, grant, recursive) => {manual();return cataloging.prepare(id, grant, recursive);});
   register("ingestion:status", 2, (id, operation) => cataloging.operation("ingestion.status", id, operation));
   register("ingestion:cancel", 2, (id, operation) => cataloging.operation("ingestion.cancel", id, operation));
-  register("ingestion:apply", 3, (id, proposal, selection) => cataloging.apply(id, proposal, selection));
+  register("ingestion:apply", 3, (id, proposal, selection) => {manual();return cataloging.apply(id, proposal, selection);});
   register("ingestion:application-status", 2, (id, command) => cataloging.applicationStatus(id, command));
   register("ingestion:page", 4, (id, proposal, cursor, size) => cataloging.page(id, proposal, cursor, size));
   register("backend:retry", 0, async () => {
@@ -202,6 +223,7 @@ app.whenReady().then(async () => {
       return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24});
     } finally { recovering = false; }
   });
+  if(managedMode)process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB="1";
   process.env.PLAYMEMORIES_DESKTOP_PROTECTED_PATHS = JSON.stringify([app.getPath("userData"), join(app.getPath("sessionData"), "Cache")]);
   try { await backend.start(); if (!demo) await libraries.initialize(); }
   catch { libraries.invalidate(); }

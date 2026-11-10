@@ -109,3 +109,16 @@ it("scopes favorite commands and rejects late responses after a library switch",
  expect(f.request).toHaveBeenLastCalledWith("annotation.favorite",{session_id:state.session!.session_id,asset_id:asset,favorite:true});
  await f.controller.choose(true);finish({items:[]});await rejected;
 });
+
+it("creates the managed library only after a proven not_found and saves automatic reopen",async()=>{
+ const f=fixture();const original=f.request.getMockImplementation()!;
+ f.request.mockImplementation(async(method,p={})=>{if(method==="library.open")throw Object.assign(new Error(),{code:"not_found"});return original(method,p);});
+ const controller=new LibraryController({request:f.request},f.preferences,f.dialogs,async()=>"/synthetic/profile/principal.sqlite3");
+ const state=await controller.initialize();expect(state.state).toBe("active");expect(state.session!.display_name).toBe("Minha biblioteca");expect(state.reopen).toBe(true);expect(f.dialogs.choose).not.toHaveBeenCalled();expect(f.preferences.write).toHaveBeenCalledWith(expect.objectContaining({reopen:true,last:expect.objectContaining({path:"/synthetic/profile/principal.sqlite3"})}));
+});
+it("reopens an existing managed library and never recreates a corrupt one",async()=>{
+ const f=fixture();const controller=new LibraryController({request:f.request},f.preferences,f.dialogs,async()=>"/synthetic/profile/principal.sqlite3");
+ await controller.initialize();expect(f.request.mock.calls.some(([method])=>method==="library.create")).toBe(false);
+ const failed=fixture();const original=failed.request.getMockImplementation()!;failed.request.mockImplementation(async(method,p={})=>{if(method==="library.open")throw Object.assign(new Error(),{code:"corrupt"});return original(method,p);});
+ const second=new LibraryController({request:failed.request},failed.preferences,failed.dialogs,async()=>"/synthetic/profile/principal.sqlite3");const state=await second.initialize();expect(state.state).toBe("unavailable");expect(state.error).toBe("corrupt");expect(failed.request.mock.calls.some(([method])=>method==="library.create")).toBe(false);
+});

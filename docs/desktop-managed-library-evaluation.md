@@ -1,6 +1,6 @@
 # Biblioteca gerenciada e indexação — avaliação de UX
 
-Status: proposta para próximo incremento; não altera contratos aceitos nem implementa monitoramento.
+Status: avaliação arquitetural. A biblioteca principal e a carga ao selecionar uma pasta foram implementadas em [desktop-managed-import.md](desktop-managed-import.md). Monitoramento continua proposto.
 Motivação: o usuário confirmou favoritos/imagens e apontou a fricção de criar e selecionar um
 arquivo de catálogo antes de navegar pelo acervo.
 
@@ -62,7 +62,7 @@ O modo de revisão explícita atual continua útil como operação avançada e f
 - Mudanças ambíguas e renomes exigem reconciliação conservadora, preservando UUIDs e anotações.
 - O banco gerenciado precisa de backup/restauração. Catálogos existentes não devem ser copiados,
   mesclados, descartados ou substituídos automaticamente.
-- Os laboratórios atuais usam userData temporário e removem esse diretório ao sair. O catálogo
+- Os laboratórios anteriores usavam userData temporário e removiam esse diretório ao sair. O fluxo normal agora usa perfil persistente; somente demonstração e smoke explícito continuam temporários. O catálogo
   principal nunca pode ser armazenado nesse diretório efêmero. O lifecycle persistente deve ser
   explícito e verificado antes de oferecer uma biblioteca interna como padrão.
 

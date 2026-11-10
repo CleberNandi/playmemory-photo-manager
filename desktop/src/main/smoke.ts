@@ -13,6 +13,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     }
     throw new Error(`smoke timeout: ${expression}`);
   };
+  if(process.env.PLAYMEMORIES_DESKTOP_MANAGED_SMOKE === "1"){if(!mediaRoot)throw new Error("missing managed fixture");await smokeManaged(window,backend,mediaRoot);return;}
   const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
   if (!demo) { await smokeLibraries(window, backend, mediaRoot); return; }
   const ready = demo ? 'document.querySelectorAll(".media-card").length === 24' : 'document.querySelector(".status-panel h2")?.textContent === "Sua biblioteca está vazia"';
@@ -71,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,prepareCataloging,retryGallery,setFavorite,setReopenLibrary') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,onBackendReset,openManagedLibrary,prepareCataloging,retryGallery,setFavorite,setReopenLibrary,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -299,4 +300,28 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   console.log("SMOKE FAVORITES PASS: explicit mark/global filtered list/unmark/empty; originals unchanged");
   console.log("SMOKE MEDIA CALENDAR PASS: progressive JPEG/real thumbnails/decoded preview/EXIF/capture year-month-leap-day/filter; originals unchanged");
   console.log("SMOKE D04-02B VISIBLE PASS: review/select/confirm-fixture/application-worker/commit/gallery-refresh/details; originals unchanged; native dialogs NOT TESTED");
+}
+
+async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:string):Promise<void>{
+ const evaluate=<T>(code:string):Promise<T>=>window.webContents.executeJavaScript(code);
+ const wait=async(expression:string)=>{for(let i=0;i<300;i++){if(await evaluate<boolean>(expression))return;await new Promise(resolve=>setTimeout(resolve,50));}throw new Error(`managed smoke timeout: ${expression}`);};
+ await wait('document.querySelector(".library-identity strong")?.textContent === "Minha biblioteca" && document.querySelector(".status-panel h2")?.textContent === "Sua biblioteca está vazia"');
+ const initial=await evaluate<{session:{session_id:string}}>('window.photoManager.getLibraryState()');
+ const bytes=syntheticJpeg();
+ for(let i=0;i<125;i++)await writeFile(join(root,`image-${String(i).padStart(3,"0")}.jpg`),bytes);
+ await writeFile(join(root,"notes.txt"),"synthetic unsupported file");
+ const click=(label:string)=>evaluate(`Array.from(document.querySelectorAll("button")).find(button=>button.textContent===${JSON.stringify(label)}).click()`);
+ await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Seleção cancelada")');
+ await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("125 imagem(ns)")');
+ await wait('document.querySelectorAll(".media-card").length === 24');
+ if(await evaluate<boolean>('Array.from(document.querySelectorAll(".cataloging-review,.cataloging-panel")).some(node=>!node.closest("[hidden]"))'))throw new Error("technical preparation leaked into automatic path");
+ await evaluate('document.querySelector(".favorite-toggle").click()');await wait('document.querySelector(".favorite-toggle")?.getAttribute("aria-pressed") === "true"');
+ await backend.stop();await evaluate('window.photoManager.retryGallery()');
+ await wait('document.querySelector(".library-identity strong")?.textContent === "Minha biblioteca" && document.querySelectorAll(".media-card").length===24 && document.querySelector(".favorite-toggle")?.getAttribute("aria-pressed")==="true"');
+ const reopened=await evaluate<{session:{session_id:string}}>('window.photoManager.getLibraryState()');
+ if(reopened.session.session_id===initial.session.session_id)throw new Error("session did not restart");
+ await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("0 imagem(ns)")');
+ if(!Buffer.from(await readFile(join(root,"image-000.jpg"))).equals(bytes))throw new Error("managed import changed original");
+ await writeFile("/tmp/playmemories-managed-library.png",(await window.webContents.capturePage()).toPNG());
+ console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; originals unchanged; native dialogs NOT TESTED");
 }
