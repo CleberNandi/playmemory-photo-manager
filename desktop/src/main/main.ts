@@ -105,10 +105,19 @@ app.whenReady().then(async () => {
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
-    return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {})});
+    if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
+    return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+  });
+  register("annotation:favorite", 1, (raw) => {
+    const {sessionId, params} = envelope(raw);
+    if (demo) throw new Error("unavailable");
+    if (!params || typeof params !== "object" || Array.isArray(params) || Object.keys(params).sort().join() !== "assetId,favorite") throw new Error("invalid_request");
+    const p = params as {assetId: unknown; favorite: unknown};
+    if (!canonicalId(p.assetId) || typeof p.favorite !== "boolean") throw new Error("invalid_request");
+    return libraries.setFavorite(sessionId, p.assetId as string, p.favorite);
   });
   register("calendar:summary", 1, (raw) => {
     const {sessionId, params: period} = envelope(raw);

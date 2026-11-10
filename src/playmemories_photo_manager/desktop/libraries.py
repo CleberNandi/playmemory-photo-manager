@@ -86,6 +86,7 @@ class LibraryDispatcher:
             self.handle = None
             return self.state()
         if method not in (
+            "annotation.favorite",
             "gallery.list",
             "calendar.summary",
             "asset.details",
@@ -102,6 +103,26 @@ class LibraryDispatcher:
             self.ingestion.preparation.busy or self.ingestion.commands.busy
         ):
             raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
+        if method == "annotation.favorite":
+            from ..catalog import Catalog
+            from ..catalog.errors import CatalogError, InvalidReferenceError
+
+            if (
+                set(params) != {"session_id", "asset_id", "favorite"}
+                or type(params["favorite"]) is not bool
+            ):
+                raise LibraryError("invalid_request")
+            asset_id = _uuid(params["asset_id"])
+            try:
+                with active.command_connection() as connection:
+                    annotation = Catalog(connection).set_favorite(asset_id, params["favorite"])
+                return {"asset_id": asset_id, "favorite": annotation.favorite}
+            except InvalidReferenceError:
+                raise LibraryError("not_found") from None
+            except CatalogError:
+                # A lost commit acknowledgement cannot be treated as a proven rollback.
+                # The operation sets an explicit boolean; the UI never automatically retries.
+                raise LibraryError("outcome_unknown") from None
         if method in ("thumbnail.get", "preview.get"):
             if set(params) != {"session_id", "asset_id"}:
                 raise LibraryError("invalid_request")

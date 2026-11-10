@@ -94,6 +94,8 @@ class GalleryQueries:
                     END AS projected_availability
                 FROM asset a
                 WHERE (? IS NULL OR a.kind = ?)
+                  AND (? = 0 OR EXISTS (SELECT 1 FROM user_annotation ua
+                    WHERE ua.asset_id=a.id AND ua.favorite=1))
                   AND (? IS NULL OR (? = 'undated' AND
                     capture_bucket(captured_local_value,captured_precision) IS NULL)
                     OR (? <> 'undated' AND
@@ -113,6 +115,7 @@ class GalleryQueries:
         parameters = (
             filters["kind"],
             filters["kind"],
+            filters["favorites_only"],
             *([filters["capture_period"]] * 5),
             filters["root_id"],
             filters["root_id"],
@@ -283,28 +286,33 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
     root_id = _canonical_uuid(query.root_id, "root_id") if query.root_id is not None else None
     if query.after is not None and not isinstance(query.after, str):
         raise InvalidCursorError("cursor must be text")
+    if type(query.favorites_only) is not bool:
+        raise InvalidGalleryQueryError("favorites_only must be boolean")
     try:
         period = validate_period(query.capture_period)
     except ValueError as error:
         raise InvalidGalleryQueryError("invalid capture period") from error
-    return GalleryQuery(query.page_size, query.after, kind, root_id, availability, period)
+    return GalleryQuery(
+        query.page_size, query.after, kind, root_id, availability, period, query.favorites_only
+    )
 
 
-def _filter_values(query: GalleryQuery) -> dict[str, str | None]:
+def _filter_values(query: GalleryQuery) -> dict[str, str | bool | None]:
     return {
         "kind": query.kind.value if query.kind else None,
         "capture_period": query.capture_period,
+        "favorites_only": query.favorites_only,
         "root_id": query.root_id,
         "availability": query.availability.value if query.availability else None,
     }
 
 
-def _filter_fingerprint(filters: dict[str, str | None]) -> str:
+def _filter_fingerprint(filters: dict[str, str | bool | None]) -> str:
     encoded = json.dumps(filters, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _encode_cursor(created_at: str, asset_id: str, filters: dict[str, str | None]) -> str:
+def _encode_cursor(created_at: str, asset_id: str, filters: dict[str, str | bool | None]) -> str:
     payload = {
         "v": _CURSOR_VERSION,
         "c": created_at,
@@ -317,7 +325,7 @@ def _encode_cursor(created_at: str, asset_id: str, filters: dict[str, str | None
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def _decode_cursor(cursor: str, filters: dict[str, str | None]) -> tuple[str, str]:
+def _decode_cursor(cursor: str, filters: dict[str, str | bool | None]) -> tuple[str, str]:
     if not cursor or len(cursor) > _MAX_CURSOR_LENGTH or not cursor.isascii():
         raise InvalidCursorError("invalid cursor")
     try:

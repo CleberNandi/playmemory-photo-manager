@@ -47,6 +47,7 @@ class GalleryQuery:
     root_id: str | None = None
     availability: AssetAvailability | None = None
     capture_period: str | None = None
+    favorites_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

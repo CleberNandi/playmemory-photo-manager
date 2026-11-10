@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { FavoriteButton } from "./FavoriteButton";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import { requestThumbnail } from "./thumbnails";
 import type { AssetDetails, DetailsResult } from "./types";
 
-export function AssetDetailsPanel({assetId, onClose}: {assetId: string; onClose: () => void}) {
+export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged}: {assetId: string; onClose: () => void; revision?:number; onFavoriteChanged?:(favorite:boolean)=>void}) {
   const [result, setResult] = useState<{id: string; value: DetailsResult} | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [thumbnail, setThumbnail] = useState<{id: string; url: string} | null>(null);
@@ -25,15 +26,16 @@ export function AssetDetailsPanel({assetId, onClose}: {assetId: string; onClose:
       } catch { if (active) setResult({id: assetId, value: {status: "temporarily_unavailable"}}); }
     })();
     return () => { active = false; };
-  }, [assetId, attempt]);
+  }, [assetId, attempt, revision]);
   const value = result?.id === assetId ? result.value : null;
   return <aside className="asset-details" aria-labelledby="details-heading">
     <header><h2 id="details-heading">Propriedades</h2><button ref={close} className="primary-button" onClick={onClose}>Fechar detalhes</button></header>
-    <p className="section-kicker">Somente leitura</p>
+    <p className="section-kicker">{onFavoriteChanged?"Favorito salvo no catálogo; os originais permanecem inalterados.":"Somente leitura"}</p>
     {!value && <p role="status">Carregando detalhes…</p>}
     {value?.status === "not_found" && <p role="status">Asset não encontrado no catálogo.</p>}
     {value && value.status !== "ready" && value.status !== "not_found" && <div role="alert"><p>{value.status === "internal_error" ? "Não foi possível interpretar os detalhes." : "Detalhes temporariamente indisponíveis."}</p><button className="primary-button" onClick={() => { setResult(null); void (async () => { try { if (value.status === "temporarily_unavailable") await window.photoManager?.retryGallery(); } catch { /* The details request presents the sanitized failure. */ } setAttempt((n) => n + 1); })(); }}>Tentar detalhes novamente</button><p>Tentar novamente reconecta o backend local quando necessário.</p></div>}
     {value?.status === "ready" && <>
+      {onFavoriteChanged && <FavoriteButton key={assetId} assetId={assetId} favorite={value.details.annotation?.favorite??false} onChanged={onFavoriteChanged} />}
       {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Miniatura da imagem" onError={() => setThumbnail(null)} /><figcaption>Miniatura</figcaption></figure>}
       <DetailsContent details={value.details} />
     </>}
