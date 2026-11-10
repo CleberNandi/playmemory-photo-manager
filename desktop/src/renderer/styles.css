@@ -200,3 +200,5 @@ button, summary { touch-action: manipulation; }
 .image-viewer header span { color: var(--color-text-muted); }
 .image-viewer button { color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); }
 .viewer-image { color: #eee; }
+
+.media-card-body .open-image { display: block; margin-top: 8px; }

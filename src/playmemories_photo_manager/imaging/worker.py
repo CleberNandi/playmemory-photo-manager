@@ -10,6 +10,22 @@ import signal
 import sys
 import warnings
 
+MAX_OUTPUT = 160 * 1024
+
+
+def _preview(image):
+    """Fit a derived JPEG into the transport budget, never grow the IPC ceiling."""
+    image.thumbnail((1280, 960))
+    for _ in range(6):
+        for quality in (65, 50, 40):
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=quality)
+            data = output.getvalue()
+            if len(data) <= MAX_OUTPUT:
+                return data
+        image.thumbnail((max(1, image.width * 3 // 4), max(1, image.height * 3 // 4)))
+    return None
+
 
 def main():
     if len(sys.argv) != 4 or sys.platform != "linux":
@@ -44,13 +60,12 @@ def main():
                 canvas = Image.new("RGB", (256, 160), "#e5e7eb")
                 canvas.paste(upright, ((256 - upright.width) // 2, (160 - upright.height) // 2))
                 canvas.save(output, format="PNG")
+                data = output.getvalue()
             elif variant == "preview":
-                upright.thumbnail((1280, 960))
-                upright.save(output, format="JPEG", quality=65)
+                data = _preview(upright)
             else:
                 return 2
-            data = output.getvalue()
-            if len(data) > 160 * 1024:
+            if data is None or len(data) > MAX_OUTPUT:
                 return 2
             sys.stdout.buffer.write(data)
             return 0

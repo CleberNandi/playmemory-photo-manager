@@ -12,8 +12,8 @@ export function CaptureCalendar({period, onPeriod, onBrowse}: {period:string | n
   },[period,attempt]);
   const data=result?.key===period ? result.value : null;
   const counts = new Map(data?.buckets ?? []);
-  const year = Number(period?.slice(0,4));
-  const month = Number(period?.slice(5,7));
+  const year = period ? Number(period.slice(0,4)) : 2000;
+  const month = period?.length === 7 ? Number(period.slice(5,7)) : 0;
   const monthDate = new Date(0); monthDate.setUTCFullYear(year || 2000,month ? month-1 : 0,1);
   const firstWeekday=monthDate.getUTCDay();
   const last=new Date(monthDate); last.setUTCMonth(last.getUTCMonth()+1,0);
@@ -23,7 +23,7 @@ export function CaptureCalendar({period, onPeriod, onBrowse}: {period:string | n
   };
   return <section className="capture-calendar" aria-label="Calendário de captura">
     <header className="calendar-heading"><div><h2>{!period ? "Anos de captura" : month ? `${months[month-1]} de ${year}` : `Capturas em ${year}`}</h2><p>Datas de captura do catálogo inteiro. A data de catalogação não é usada.</p></div>
-      <div><button onClick={()=>onPeriod(null)}>Todos os anos</button>{month&&<button onClick={()=>onPeriod(period!.slice(0,4))}>Meses do ano</button>}{period&&<><button aria-label="Período anterior" onClick={()=>shift(-1)}>‹</button><button aria-label="Próximo período" onClick={()=>shift(1)}>›</button><button onClick={()=>onBrowse(period)}>Ver fotos do período</button></>}</div>
+      <div><button onClick={()=>onPeriod(null)}>Todos os anos</button>{!!month&&<button onClick={()=>onPeriod(period!.slice(0,4))}>Meses do ano</button>}{period&&<><button aria-label="Período anterior" onClick={()=>shift(-1)}>‹</button><button aria-label="Próximo período" onClick={()=>shift(1)}>›</button><button onClick={()=>onBrowse(period)}>Ver fotos do período</button></>}</div>
     </header>
     {error ? <div role="alert">Não foi possível consultar o calendário. <button onClick={()=>setAttempt(n=>n+1)}>Tentar calendário novamente</button></div> : !data ? <p role="status">Carregando datas…</p> : <>
       {!period && <div className="calendar-years">{data.buckets.map(([key,count])=><button key={key} onClick={()=>onPeriod(key)}><strong>{key}</strong><span>{count} foto(s)</span></button>)}{!data.buckets.length&&<p>Nenhuma data de captura disponível.</p>}</div>}

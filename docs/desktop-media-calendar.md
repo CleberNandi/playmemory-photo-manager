@@ -113,3 +113,19 @@ substituem somente as seleções/confirmações nativas por fixtures sintéticas
 
 Essas evidências usam somente mídia sintética. Não constituem homologação universal de variantes,
 codecs, câmeras RAW ou diálogos KDE.
+
+### Correção após teste manual — 2026-11-10
+
+Os prints confirmaram miniaturas, prévia em parte das imagens e anos extraídos do acervo de
+estudo. Também mostraram `NaN` no cabeçalho do calendário e uma prévia indisponível.
+
+O cabeçalho agora usa condições booleanas explícitas: o short-circuit numérico não renderiza
+`NaN` nem `0`. A prévia passou a adaptar qualidade JPEG e, quando necessário, dimensões para
+caber nos mesmos 160 KiB. Não se aumentou o limite da ponte, não se alterou o original e não
+é necessário recriar o catálogo para receber essa correção. Um teste com imagem sintética de
+alta entropia demonstra que a codificação anterior ultrapassava o limite e que a nova prévia
+é decodificável dentro do orçamento. Isso reproduz uma causa possível da falha observada;
+o arquivo específico do print não foi usado nos testes.
+
+O botão Abrir imagem também ganhou uma linha própria, separado da disponibilidade. Regressões:
+659 testes Python, 120 testes desktop, typecheck/lint/build e smoke Electron de imagens/calendário.

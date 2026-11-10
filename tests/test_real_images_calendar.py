@@ -305,3 +305,33 @@ def test_changed_parent_symlink_and_mutation_during_render_fail_closed(library):
         assert all(value is None for value in service.cache.values())
     finally:
         close_images(service)
+
+
+def test_detailed_preview_adapts_to_ipc_budget_instead_of_disappearing(library):
+    import random
+
+    root, path, connection, root_id = library
+    # Deterministic high-entropy input: unlike a solid-color fixture, quality=65
+    # at maximum preview dimensions exceeds the existing transport limit.
+    source = root / "detailed.png"
+    image = Image.frombytes("RGB", (1280, 960), random.Random(42).randbytes(1280 * 960 * 3))
+    old_encoding = io.BytesIO()
+    image.save(old_encoding, format="JPEG", quality=65)
+    assert len(old_encoding.getvalue()) > 160 * 1024
+    image.save(source)
+    before = source.read_bytes(), source.stat().st_mtime_ns
+    apply(root, path, connection, root_id)
+    asset_id = connection.execute("SELECT id FROM asset").fetchone()[0]
+    service = ImageService()
+    try:
+        preview = wait_image(service, connection, asset_id, "preview")
+        assert preview is not None
+        data = base64.b64decode(preview["base64"], validate=True)
+        assert len(data) <= 160 * 1024
+        with Image.open(io.BytesIO(data)) as rendered:
+            rendered.load()
+            assert rendered.width <= 1280 and rendered.height <= 960
+            assert rendered.width >= 640 and rendered.height >= 480
+        assert (source.read_bytes(), source.stat().st_mtime_ns) == before
+    finally:
+        close_images(service)

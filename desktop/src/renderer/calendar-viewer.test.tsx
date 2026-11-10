@@ -40,3 +40,12 @@ it("rejects external preview URLs and stops polling after unmount",async()=>{
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"https://invalid.test/private"});
  await act(async()=>root.render(<ImageViewer assetId="asset" onClose={vi.fn()}/>));expect(host.querySelector("img")).toBeNull();expect(host.textContent).toContain("Prévia indisponível");
 });
+
+it("never renders numeric short-circuit values in year or month headers",async()=>{
+ const props={onPeriod:vi.fn(),onBrowse:vi.fn()};
+ await act(async()=>root.render(<CaptureCalendar period={null} {...props}/>));
+ expect(host.querySelector(".calendar-heading")!.textContent).not.toContain("NaN");
+ expect(host.querySelector(".calendar-heading > div:last-child")!.textContent).toBe("Todos os anos");
+ await act(async()=>root.render(<CaptureCalendar period="2024" {...props}/>));
+ expect(host.querySelector(".calendar-heading > div:last-child")!.textContent).toBe("Todos os anos‹›Ver fotos do período");
+});
