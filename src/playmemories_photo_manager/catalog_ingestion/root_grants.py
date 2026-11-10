@@ -420,6 +420,53 @@ class RootGrantService:
                 if held is not None:
                     held.close()
 
+    def binding(self, root_id):
+        """Private trusted-shell anchor; never a renderer DTO."""
+        self._require()
+        return self._bindings[root_id]
+
+    def select_monitored(self, root_id, anchor):
+        """Fresh one-use grant under the explicit registered-folder monitoring policy."""
+        self._require()
+        roots = self._roots()
+        root = next((item for item in roots if item.id == root_id), None)
+        if root is None or str(root.availability) != "available":
+            raise PreparationError("root_changed")
+        held = _HeldRoot(_path(root.normalized_path))
+        try:
+            if anchor is None:
+                # Legacy catalogs have no persisted root inode. Require a known file witness;
+                # the existing admission below verifies all known occurrences before scanning.
+                known = self.session.query_connection.execute(
+                    "SELECT 1 FROM file_location WHERE library_root_id=? "
+                    "AND filesystem_id IS NOT NULL LIMIT 1",
+                    (root_id,),
+                ).fetchone()
+                if known is None:
+                    raise PreparationError("root_changed")
+            elif list(anchor) != [
+                root.normalized_path,
+                held.identity.device,
+                held.identity.file_id,
+            ]:
+                raise PreparationError("root_changed")
+            expected = (root.normalized_path, held.identity, held.mount)
+            held.check()
+            result = self.select(
+                {
+                    "session_id": self.session_id,
+                    "window_id": self.window_id,
+                    "path": root.normalized_path,
+                    "recursive": True,
+                    "identity_reviewed": True,
+                }
+            )
+            if self._bindings.get(root_id) != expected:
+                raise PreparationError("root_changed")
+            return result
+        finally:
+            held.close()
+
     def prepare(self, params: object) -> dict:
         self._params(
             params, ("session_id", "window_id", "root_grant_id", "recursive", "client_request_id")

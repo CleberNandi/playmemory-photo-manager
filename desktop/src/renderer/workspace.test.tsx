@@ -96,3 +96,9 @@ it("refreshes gallery after cataloging and discards a delayed pre-commit page", 
   await act(async()=>oldPage({items:[item("stale","Natureza",false)],next_cursor:null,has_more:false}));
   expect(host.querySelectorAll(".media-card")).toHaveLength(1);expect(host.querySelector(".media-card")?.textContent).not.toContain("stale");
 });
+it("reloads new catalog additions without clearing the selected image",async()=>{
+ let changed!:()=>void;window.photoManager!.onGalleryChanged=(listener)=>{changed=listener;return ()=>{};};
+ await act(async()=>root.render(<App/>));await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="first"]')!.click());
+ window.photoManager!.listGallery=vi.fn().mockResolvedValue({items:[item("first","Natureza",true),item("second","Viagens",false),item("new","Natureza",false)],next_cursor:null,has_more:false});
+ await act(async()=>changed());expect(host.querySelectorAll(".media-card")).toHaveLength(3);expect(host.querySelector('[data-asset-id="first"]')?.getAttribute("aria-pressed")).toBe("true");
+});

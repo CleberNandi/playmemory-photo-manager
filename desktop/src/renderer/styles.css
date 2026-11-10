@@ -217,3 +217,11 @@ button, summary { touch-action: manipulation; }
 .viewer-stage img { position: absolute; left: 50%; top: 50%; }
 .viewer-unsaved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; background: #343b41; color: #fff; border-bottom: 1px solid #77828c; }
 .viewer-unsaved strong { flex-basis: 100%; }
+.image-viewer .viewer-toolbar { display: block; padding: 10px 12px; }
+.viewer-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.viewer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.viewer-control-group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding-right: 10px; border-right: 1px solid #697077; }
+.viewer-save-group { margin-left: auto; border-right: 0; padding-right: 0; }
+.viewer-hint { margin: 8px 0 0; font-size: 12px; color: var(--color-text-muted); line-height: 1.4; }
+.folder-monitor { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--color-border); color: var(--color-text-muted); font-size: 12px; }
+.folder-monitor p { margin: 0; }

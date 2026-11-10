@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {FolderMonitor} from "./FolderMonitor";
 import { FolderImportPanel } from "./FolderImportPanel";
 import { FavoriteButton } from "./FavoriteButton";
 import { CaptureCalendar } from "./CaptureCalendar";
@@ -76,6 +77,9 @@ function GalleryApp() {
     } catch { if (epoch === galleryEpoch.current) setPageError(true); }
     finally { if (epoch === galleryEpoch.current) {inFlight.current = false; setPaging(false);} }
   };
+  useEffect(()=>window.photoManager?.onGalleryChanged?.(()=>{
+    galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setGalleryRevision(value=>value+1);
+  }),[]);
   const load = () => {
     setSelected(null);
     setPageError(false);
@@ -147,6 +151,7 @@ function GalleryApp() {
         <label>Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>
         <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
       </header>
+      {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor/>}
       {actionError&&<p role="alert">Não foi possível executar a ação. Confira se a imagem e a biblioteca continuam disponíveis.</p>}
       {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onApplied={()=>{
         galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setQuery("");setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);

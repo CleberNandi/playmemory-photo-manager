@@ -1,3 +1,4 @@
+import { IndexCoordinator } from "./index-coordinator.js";
 import { ImageEdits } from "./image-edits.js";
 import { MediaActions, type MediaAction } from "./media-actions.js";
 import { FolderImportController } from "./folder-import.js";
@@ -24,6 +25,7 @@ let libraries: LibraryController;
 let recovering = false;
 let folderImports: FolderImportController;
 let imageEdits: ImageEdits;
+let indexer:IndexCoordinator|undefined;
 const ingestionLab = process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1";
 const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
 const managedSmoke=process.env.PLAYMEMORIES_DESKTOP_MANAGED_SMOKE === "1";
@@ -94,7 +96,8 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const result = handler(...args);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
   };
@@ -107,6 +110,8 @@ app.whenReady().then(async () => {
     return demo ? backend.request(method, params) : libraries.query(method, id, params);
   };
   const demoState = () => ({state: "demo", session: null, reopen: false});
+  register("index:status",0,()=>indexer?.current()??{state:"disabled",busy:false,revision:0,added_count:0,error:null,last_check:null});
+  register("index:refresh",0,()=>indexer?.refresh());
   register("library:state", 0, () => demo ? demoState() : libraries.current());
   register("library:create", 0, () => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.choose(true));
   register("library:open", 0, () => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.choose(false));
@@ -239,7 +244,7 @@ app.whenReady().then(async () => {
   folderImports=new FolderImportController(backend,libraries,windowId,async()=>{
     if(folderSelections)return folderSelections.shift()??null;
     if(!mainWindow)return null;
-    const result=await dialog.showOpenDialog(mainWindow,{title:"Adicionar pasta e subpastas à biblioteca",message:"As imagens serão adicionadas ao catálogo. Os originais permanecem inalterados.",properties:["openDirectory"]});
+    const result=await dialog.showOpenDialog(mainWindow,{title:"Adicionar pasta e subpastas à biblioteca",message:"A pasta será acompanhada para carregar imagens novas automaticamente. Os originais permanecem inalterados.",properties:["openDirectory"]});
     return result.canceled||result.filePaths.length!==1?null:nativePath(result.filePaths[0]);
   });
   register("folder:add",1,(id)=>{if(imageEdits.busy)throw new Error("busy");if(!managedMode)throw new Error("unavailable");return folderImports.start(id);});
@@ -269,13 +274,18 @@ app.whenReady().then(async () => {
       return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24});
     } finally { recovering = false; }
   });
-  if(managedMode)process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB="1";
+  if(managedMode){
+    process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB="1";
+    process.env.PLAYMEMORIES_DESKTOP_INDEX_STATE=join(app.getPath("userData"),"library-state","index-roots.json");
+  }
   process.env.PLAYMEMORIES_DESKTOP_PROTECTED_PATHS = JSON.stringify([app.getPath("userData"), join(app.getPath("sessionData"), "Cache")]);
   if(managedSmoke && smokeDirectory)await preference.write({version:1,reopen:true,last:{path:join(smokeDirectory,"deleted-test.sqlite3"),handle:randomUUID()}});
   try { await backend.start(); if (!demo) await libraries.initialize(); }
   catch { libraries.invalidate(); }
   const window = createWindow();
   mainWindow = window;
+  if(managedMode){indexer=new IndexCoordinator(backend,libraries,()=>!!folderImports?.busy||!!imageEdits?.busy,()=>window.webContents.send("gallery:changed"));indexer.start();}
+
   if (process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1") {
     const watchdog = setTimeout(() => {
       console.error("SMOKE FAIL: timeout");
@@ -302,5 +312,6 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  indexer?.dispose();
   void backend.stop().then(() => { if (smokeDirectory) rmSync(smokeDirectory, {recursive: true, force: true}); if (ingestionSmokeRoot) rmSync(ingestionSmokeRoot, {recursive: true, force: true}); app.exit(Number(process.exitCode ?? 0)); }).catch(() => { quitting = false; console.error("backend cleanup pending"); });
 });

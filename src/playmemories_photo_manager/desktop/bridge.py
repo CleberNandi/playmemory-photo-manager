@@ -273,6 +273,7 @@ def main() -> int:
         libraries = LibraryDispatcher(
             ingestion_enabled=os.environ.get("PLAYMEMORIES_DESKTOP_INGESTION_LAB") == "1",
             protected_paths=tuple(Path(p) for p in protected),
+            index_state=os.environ.get("PLAYMEMORIES_DESKTOP_INDEX_STATE"),
         )
         try:
             if sys.platform != "linux":

@@ -19,6 +19,9 @@ export interface GalleryPage {
 declare global {
   interface Window {
     photoManager?: {
+      getIndexStatus?():Promise<{state:string;busy:boolean;revision:number;added_count:number;error:string|null;last_check:number|null}>;
+      refreshFolders?():Promise<unknown>;
+      onGalleryChanged?(listener:()=>void):()=>void;
       chooseMediaRoot?(sessionId: string): Promise<unknown>;
       prepareCataloging?(sessionId: string, rootGrantId: string, recursive: boolean): Promise<unknown>;
       getPreparationStatus?(sessionId: string, operationId: string): Promise<unknown>;
