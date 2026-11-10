@@ -37,6 +37,7 @@ function GalleryApp() {
   const [calendar,setCalendar] = useState(false);
   const [calendarPeriod,setCalendarPeriod] = useState<string|null>(null);
   const [captureFilter,setCaptureFilter] = useState<string|null>(null);
+  const [viewerRotation,setViewerRotation]=useState(0);
   const [viewer,setViewer] = useState<string|null>(null);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState(false);
@@ -95,11 +96,14 @@ function GalleryApp() {
   const folders = [...new Set(items.map((item) => item.representative_location?.root_display_name).filter((name): name is string => !!name))];
   const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
-  const openAsset=(id:string)=>{
+  const openAsset=(id:string,rotation=0)=>{
     const button=[...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find(candidate=>candidate.dataset.assetId===id);
     if(button)origin.current=button;
-    setSelected(id);setPropertiesOpen(true);setViewer(id);
+    setSelected(id);setPropertiesOpen(true);setViewerRotation(rotation);setViewer(id);
   };
+  const viewerItems=visible.filter(item=>item.kind==="photo");
+  const viewerIndex=viewerItems.findIndex(item=>item.asset_id===viewer);
+  const viewerName=viewerItems[viewerIndex]?.representative_location?.relative_path.split("/").pop()??"Imagem selecionada";
   const resetSelection = () => setSelected(null);
   const canEditFavorites=!!session && !!window.photoManager?.setFavorite;
   const changeFavorites=(value:boolean)=>{
@@ -168,8 +172,8 @@ function GalleryApp() {
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
           {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
-          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(item.asset_id,value):undefined} onOpen={window.photoManager?.getPreview ? ()=>openAsset(item.asset_id) : undefined} onSelect={(button) => selectAsset(item.asset_id, button)} />)}</div>
-            : <div className="gallery-table"><table><thead><tr><th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th><th>Favorito</th></tr></thead><tbody>{visible.map((item) => <tr key={item.asset_id} onContextMenu={event=>void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true))} onKeyDown={event=>{if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true));}}><td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget)}>{item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td><td>{canEditFavorites?<FavoriteButton assetId={item.asset_id} favorite={item.annotation.favorite} onChanged={(value)=>favoriteChanged(item.asset_id,value)}/>:item.annotation.favorite?"★":"—"}</td></tr>)}</tbody></table></div>}
+          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={item.asset_id} item={item} selected={selected === item.asset_id} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(item.asset_id,value):undefined} onOpen={window.photoManager?.getPreview ? (rotation)=>openAsset(item.asset_id,rotation) : undefined} onSelect={(button) => selectAsset(item.asset_id, button)} />)}</div>
+            : <div className="gallery-table"><table><thead><tr><th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th><th>Favorito</th></tr></thead><tbody>{visible.map((item) => <tr key={item.asset_id} onContextMenu={event=>void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),(rotation)=>openAsset(item.asset_id,rotation),()=>setActionError(true))} onKeyDown={event=>{if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),(rotation)=>openAsset(item.asset_id,rotation),()=>setActionError(true));}}><td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget)}>{item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td><td>{canEditFavorites?<FavoriteButton assetId={item.asset_id} favorite={item.annotation.favorite} onChanged={(value)=>favoriteChanged(item.asset_id,value)}/>:item.annotation.favorite?"★":"—"}</td></tr>)}</tbody></table></div>}
           <div className="pagination">
             {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
             {state.page.has_more ? <button className="primary-button" disabled={paging} onClick={() => void more()}>{paging ? "Carregando…" : pageError ? "Tentar carregar novamente" : "Carregar mais"}</button> : <p role="status">Fim da biblioteca</p>}
@@ -183,7 +187,7 @@ function GalleryApp() {
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />
       {selected ? <AssetDetailsPanel suspended={viewer!==null} assetId={selected} onClose={closeDetails} revision={detailsRevision} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(selected,value):undefined} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
     </>}
-    {viewer && <ImageViewer key={viewer} assetId={viewer} restoreFocus={restoreViewerFocus} onClose={()=>setViewer(null)} />}
+    {viewer && <ImageViewer assetId={viewer} initialRotation={viewerRotation} name={viewerName} position={viewerIndex>=0?`${viewerIndex+1} de ${viewerItems.length} imagens carregadas`:undefined} onPrevious={viewerIndex>0?()=>openAsset(viewerItems[viewerIndex-1].asset_id):undefined} onNext={viewerIndex>=0&&viewerIndex<viewerItems.length-1?()=>openAsset(viewerItems[viewerIndex+1].asset_id):undefined} restoreFocus={restoreViewerFocus} onClose={()=>setViewer(null)} />}
     <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : "Duplicatas exatas · Consulta somente leitura"} · {selected ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Originais preservados</span></footer>
   </div>;
 }
