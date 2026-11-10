@@ -22,8 +22,9 @@ completo em um diálogo nativo. Com múltiplas ocorrências, a revelação escol
 a primeira ocorrência disponível por ID de localização, não necessariamente a primeira listada
 nas propriedades. Selecionar individualmente uma ocorrência fica para outro incremento.
 
-Renomear e girar não foram adicionados: renomear requer operação consistente filesystem/catálogo;
-a rotação futura deverá explicitar se é ajuste de visualização ou regravação autorizada.
+Renomear continua pendente, pois requer operação consistente filesystem/catálogo. A continuação
+[desktop-viewer-navigation.md](desktop-viewer-navigation.md) adiciona rotação temporária da prévia
+ao menu e ao visualizador; não é regravação nem orientação persistida.
 
 ## Fronteiras
 

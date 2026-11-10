@@ -272,6 +272,15 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await waitFor('document.querySelectorAll(".synthetic-thumbnail").length === 2 && [...document.querySelectorAll(".synthetic-thumbnail")].every(img => img.complete && img.naturalWidth === 256)');
   await evaluate('document.querySelector(".open-image").click()');
   await waitFor('document.querySelector(".image-viewer img")?.naturalWidth > 0');
+  await click("Girar à direita");
+  await waitFor('document.querySelector(".image-viewer img")?.style.transform.includes("rotate(90deg)")');
+  if(!await evaluate<boolean>('(()=>{const image=document.querySelector(".image-viewer img").getBoundingClientRect(),canvas=document.querySelector(".viewer-image").getBoundingClientRect();return image.width<=canvas.width+1&&image.height<=canvas.height+1;})()'))throw new Error("rotated fit overflow");
+  await click("Próxima");await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2") && document.querySelector(".image-viewer img")?.naturalWidth>0');
+  window.webContents.sendInputEvent({type:"keyDown",keyCode:"Left"});
+  await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("1 de 2") && document.querySelector(".viewer-caption")?.textContent.includes("0°")');
+  window.webContents.sendInputEvent({type:"keyDown",keyCode:"Right"});
+  await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2")');
+  console.log("SMOKE VIEWER NAVIGATION PASS: quarter-turn fits; next/previous arrows; temporary rotation resets; close restores latest thumbnail");
   await writeFile("/tmp/playmemories-image-viewer.png", (await window.webContents.capturePage()).toPNG());
   await click("Fechar imagem");
   await waitFor('!!document.querySelector(".asset-details dl") && document.activeElement?.classList.contains("card-select")');

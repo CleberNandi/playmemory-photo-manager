@@ -209,3 +209,9 @@ button, summary { touch-action: manipulation; }
 .folder-import-panel { padding: 12px 16px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
 .folder-import-panel p { margin: 7px 0; }
 .folder-import-panel [role="alert"] { color: var(--color-danger); }
+.image-viewer[open] { display: flex; flex-direction: column; }
+.image-viewer > header { flex: 0 0 auto; }
+.viewer-caption { flex: 0 0 auto; margin: 0; padding: 6px 12px; overflow-wrap: anywhere; color: #eee; background: #25292c; }
+.image-viewer .viewer-image { flex: 1 1 0; height: auto; min-height: 0; }
+.viewer-stage { position: relative; flex: 0 0 auto; margin: auto; }
+.viewer-stage img { position: absolute; left: 50%; top: 50%; }
