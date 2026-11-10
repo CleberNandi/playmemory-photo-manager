@@ -72,3 +72,25 @@ it("discards pending details after closing and reopening a different asset", asy
   expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
   expect(host.querySelector(".asset-details dl")?.textContent).not.toContain("first");
 });
+
+it.each(["button","escape"])("keeps the opened asset selected and restores its card after viewer close via %s",async(mode)=>{
+ HTMLDialogElement.prototype.showModal=vi.fn();
+ await mount(async(id)=>({status:"ready",details:details(id)}));
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+ await act(async()=>root.render(<App/>));
+ await select(0);
+ await act(async()=>host.querySelectorAll<HTMLButtonElement>(".open-image")[1].click());
+ expect(host.querySelector('.card-select[aria-pressed="true"]')?.getAttribute("data-asset-id")).toBe("second");
+ const dialog=host.querySelector("dialog")!;
+ expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
+ if(mode==="escape"){
+   await act(async()=>dialog.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+   expect(host.querySelector(".asset-details")).not.toBeNull();
+   await act(async()=>dialog.dispatchEvent(new Event("cancel",{cancelable:true})));
+ }else await act(async()=>[...dialog.querySelectorAll("button")].find(button=>button.textContent==="Fechar imagem")!.click());
+ expect(host.querySelector("dialog")).toBeNull();
+ expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
+ expect(document.activeElement).toBe(host.querySelector('[data-asset-id="second"]'));
+ await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+ expect(host.querySelector(".asset-details")).toBeNull();
+});

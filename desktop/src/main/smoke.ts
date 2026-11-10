@@ -273,6 +273,13 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await waitFor('document.querySelector(".image-viewer img")?.naturalWidth > 0');
   await writeFile("/tmp/playmemories-image-viewer.png", (await window.webContents.capturePage()).toPNG());
   await click("Fechar imagem");
+  await waitFor('!!document.querySelector(".asset-details dl") && document.activeElement?.classList.contains("card-select")');
+  await evaluate('document.querySelector(".open-image").click()');
+  await waitFor('document.querySelector(".image-viewer img")?.naturalWidth > 0');
+  window.webContents.sendInputEvent({type:"keyDown",keyCode:"Escape"});
+  window.webContents.sendInputEvent({type:"keyUp",keyCode:"Escape"});
+  await waitFor('!document.querySelector(".image-viewer") && !!document.querySelector(".asset-details dl") && document.activeElement?.classList.contains("card-select")');
+  console.log("SMOKE VIEWER FOCUS PASS: button and Escape preserve selection/properties and restore thumbnail focus");
   await click("Fechar detalhes");
   await click("Calendário");
   await waitFor('document.querySelector(".calendar-years button")?.textContent.includes("2024")');

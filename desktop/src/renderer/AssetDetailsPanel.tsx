@@ -4,17 +4,18 @@ import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import { requestThumbnail } from "./thumbnails";
 import type { AssetDetails, DetailsResult } from "./types";
 
-export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged}: {assetId: string; onClose: () => void; revision?:number; onFavoriteChanged?:(favorite:boolean)=>void}) {
+export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, suspended=false}: {assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void}) {
   const [result, setResult] = useState<{id: string; value: DetailsResult} | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [thumbnail, setThumbnail] = useState<{id: string; url: string} | null>(null);
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => { close.current?.focus(); }, []);
   useEffect(() => {
+    if(suspended)return;
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
-  }, [onClose]);
+  }, [onClose,suspended]);
   useEffect(() => requestThumbnail(assetId, (url) => setThumbnail(url ? {id: assetId, url} : null)), [assetId]);
   useEffect(() => {
     let active = true;

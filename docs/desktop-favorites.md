@@ -56,3 +56,15 @@ Gates executados: `uv sync --locked`, 670 testes Python, Ruff e formatação, wh
 arquivos novos; 126 testes desktop em 20 arquivos, typecheck, ESLint e build. Os smokes Electron
 laboratório e demo passaram, incluindo a barra fixa e as funções anteriores de imagens/calendário.
 Diálogos nativos KDE continuam sujeitos à homologação manual; favoritar não exige diálogo nativo.
+
+### Seleção preservada ao fechar a prévia
+
+O atalho Escape das propriedades fica suspenso enquanto o visualizador está aberto. Fechar a
+prévia pelo botão ou por Escape mantém o Asset selecionado e devolve o foco ao cartão sem
+forçar rolagem. Abrir outra imagem também seleciona o Asset correspondente. O smoke Electron
+confere ambos os fechamentos com painel e foco preservados; regressões React cobrem a mesma
+sequência. A avaliação de biblioteca interna e indexação está em
+[Biblioteca gerenciada](desktop-managed-library-evaluation.md), como proposta, não implementação.
+
+Validação da correção de seleção: 670 testes Python, 128 testes desktop, typecheck/lint/build e
+smoke Electron com fechamentos por botão/Escape aprovados. A indexação automática segue proposta.
