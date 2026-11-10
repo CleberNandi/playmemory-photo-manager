@@ -17,8 +17,13 @@ export class LibraryController {
   private state: LibraryState = { state: "no_library", session: null, reopen: false };
   private busy = false;
   private epoch = 0;
-  constructor(private readonly backend: Backend, private readonly preferences: Pick<LibraryPreferences, "read" | "write">, private readonly dialogs: LibraryDialogs) {}
-  current(): LibraryState { return structuredClone(this.state); }
+  private managedFile: string | null = null;
+  constructor(private readonly backend: Backend, private readonly preferences: Pick<LibraryPreferences, "read" | "write">, private readonly dialogs: LibraryDialogs, private readonly managedPath?: () => Promise<string>) {}
+  current(): LibraryState {
+    const value=structuredClone(this.state);
+    if(value.session && this.managedFile && this.preference.last?.path===this.managedFile)value.session.display_name="Minha biblioteca";
+    return value;
+  }
   get isBusy(): boolean { return this.busy; }
   invalidate(): void { this.epoch++; this.state = {state: "unavailable", session: null, reopen: this.preference.reopen, error: "internal_error"}; }
   private async exclusive(action: () => Promise<void>): Promise<LibraryState> {
@@ -44,13 +49,28 @@ export class LibraryController {
       this.accept(await this.backend.request("library.state"));
       try { this.preference = await this.preferences.read(); }
       catch { this.preference = emptyPreference(); this.state.warning = "preference_invalid"; }
+      if(this.managedPath){try{this.managedFile=await this.managedPath();}catch(error){this.state={state:"unavailable",session:null,reopen:true,error:failure(error)};return;}this.preference.reopen=true;}
       this.state.reopen = this.preference.reopen;
       if (this.preference.reopen && this.preference.last) {
         try { await this.activate(false, this.preference.last.path, this.preference.last.handle); }
-        catch (error) { this.state = {state: "unavailable", session: null, reopen: true, error: failure(error)}; }
-      }
+        catch (error) {
+          if(this.managedPath && (error as {code?:string}).code === "not_found") {
+            try {await this.activateManaged();this.state.warning="previous_library_not_found";}
+            catch(fallbackError){this.state={state:"unavailable",session:null,reopen:true,error:failure(fallbackError)};}
+          } else this.state = {state: "unavailable", session: null, reopen: true, error: failure(error)};
+        }
+      } else if(this.managedPath){try{await this.activateManaged();}catch(error){this.state={state:"unavailable",session:null,reopen:true,error:failure(error)};}}
     });
   }
+  private async activateManaged(): Promise<void> {
+    if(!this.managedPath)throw Object.assign(new Error(),{code:"invalid_request"});
+    this.managedFile=await this.managedPath();
+    const handle=randomUUID();
+    try {await this.activate(false,this.managedFile,handle);}
+    catch(error){if((error as {code?:string}).code!=="not_found")throw error;await this.activate(true,this.managedFile,handle);}
+    this.preference.reopen=true;this.state.reopen=true;await this.save();
+  }
+  async openManaged(): Promise<LibraryState> {return this.exclusive(()=>this.activateManaged());}
   private async activate(create: boolean, path: string, handle: string): Promise<void> {
     if (!validPath(path)) throw Object.assign(new Error(), {code: "invalid_request"});
     try {
@@ -69,6 +89,7 @@ export class LibraryController {
       if (epoch !== this.epoch) throw Object.assign(new Error(), {code: "stale_session"});
       if (path === null) return;
       await this.activate(create, path, this.preference.last?.path === path ? this.preference.last.handle : randomUUID());
+      if(this.managedPath){this.preference.reopen=true;this.state.reopen=true;}
       await this.save();
     });
   }

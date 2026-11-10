@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { FolderImportPanel } from "./FolderImportPanel";
 import { FavoriteButton } from "./FavoriteButton";
 import { CaptureCalendar } from "./CaptureCalendar";
 import { ImageViewer } from "./ImageViewer";
@@ -28,6 +29,7 @@ export function App() {
 
 function GalleryApp() {
   const session = useLibrarySession();
+  const [importSequence,setImportSequence]=useState(0);
   const [preparing, setPreparing] = useState(false);
   const [display, setDisplay] = useState<"thumbnails" | "details">("thumbnails");
   const [calendar,setCalendar] = useState(false);
@@ -125,10 +127,10 @@ function GalleryApp() {
           <hr />
           <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
         </DesktopMenu>
-        <DesktopMenu label="Ferramentas"><button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
+        <DesktopMenu label="Ferramentas">{session?.catalogingEnabled && <button onClick={()=>{setCalendar(false);setPreparing(true);}}>Preparação avançada</button>}<button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
         <DesktopMenu label="Ajuda"><p>Operação local. Seus originais não são alterados. Favoritos e período consultam todo o catálogo; pastas e pesquisa de texto filtram os itens carregados.</p></DesktopMenu>
       </nav>
-    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled} preparing={preparing} onPrepare={() => {setCalendar(false);setPreparing(true);}} onSource={(name, favorite) => {if(calendar||captureFilter)browsePeriod(null);setFolder(name); changeFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
+    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled} preparing={preparing} onPrepare={() => {setCalendar(false);if(session?.folderImportEnabled){setPreparing(false);setImportSequence(value=>value+1);}else setPreparing(true);}} onSource={(name, favorite) => {if(calendar||captureFilter)browsePeriod(null);setFolder(name); changeFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
     <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />
     <main className="workspace">
       <header className="view-toolbar">
@@ -139,6 +141,9 @@ function GalleryApp() {
         <label>Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>
         <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
       </header>
+      {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onApplied={()=>{
+        galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setQuery("");setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);
+      }} />}
       {session?.catalogingEnabled && <section className="preparation-workflow" hidden={!preparing} aria-label="Adicionar pastas">
         <button className="workflow-close" onClick={() => setPreparing(false)}>Recolher preparação</button>
         <CatalogingPanel sessionId={session.sessionId} onShowLibrary={() => setPreparing(false)} onApplied={() => {
@@ -156,7 +161,7 @@ function GalleryApp() {
       <div hidden={view !== "gallery" || calendar} className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
-        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title={favorites?"Nenhum favorito encontrado":captureFilter?"Nenhuma imagem neste período":"Sua biblioteca está vazia"} body={favorites?"Marque fotos como favoritas na biblioteca. Este filtro consulta todo o catálogo, respeitando o período selecionado.":"O catálogo local está aberto e pronto. Use Adicionar pastas para preparar, revisar e catalogar suas imagens."} note="Nada foi importado ou alterado nos seus arquivos." />}
+        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title={favorites?"Nenhum favorito encontrado":captureFilter?"Nenhuma imagem neste período":"Sua biblioteca está vazia"} body={favorites?"Marque fotos como favoritas na biblioteca. Este filtro consulta todo o catálogo, respeitando o período selecionado.":"O catálogo local está aberto e pronto. Use Adicionar pastas para escolher um diretório e carregar suas imagens."} note="Nada foi importado ou alterado nos seus arquivos." />}
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
           {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
@@ -183,7 +188,7 @@ function GalleryApp() {
 export function Sidebar({view = "gallery", onNavigate, folders = [], folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource}: {view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void; folders?: string[]; folder?: string | null; favorites?: boolean; canPrepare?: boolean; preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void}) {
   return <aside className="sidebar">
     <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span className="brand-name">PlayMemories<span className="sr-only"> Photo Manager</span></span></div>
-    <section className="source-section"><h2>Notificações</h2><p>{preparing ? "Consulte a preparação no painel central" : "Consulte tarefas em Adicionar pastas"}</p></section>
+    <section className="source-section"><h2>Notificações</h2><p>{preparing ? "Consulte o andamento no painel central" : "Consulte tarefas em Adicionar pastas"}</p></section>
     <section className="source-section"><h2>Câmeras e mídias</h2><p>Detecção de dispositivos ainda indisponível.</p></section>
     <nav className="primary-nav" aria-label="Principal">
       <NavItem icon="library" label="Biblioteca" active={view === "gallery" && !folder && !favorites} onClick={() => {onNavigate?.("gallery"); onSource?.(null, false);}} />
@@ -191,7 +196,7 @@ export function Sidebar({view = "gallery", onNavigate, folders = [], folder = nu
       <section className="source-section"><h2>Pastas do catálogo</h2><p>Raízes dos itens carregados</p>{folders.map((name) => <button key={name} className={`nav-item${folder === name ? " is-active" : ""}`} aria-pressed={folder === name} onClick={() => onSource?.(name, false)}>{name}</button>)}{!folders.length && <p>Nenhuma raiz carregada.</p>}</section>
       <p className="nav-label">Ferramentas</p><NavItem icon="album" label="Duplicatas exatas" active={view === "duplicates"} onClick={() => onNavigate?.("duplicates")} /><NavItem icon="album" label="Álbuns" disabled />
     </nav>
-    <div className="sidebar-footer"><button className="nav-item" disabled={!canPrepare} onClick={onPrepare} title={canPrepare ? "Abrir preparação de catalogação" : "Disponível no laboratório de ingestão"}>+ Adicionar pastas</button><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Seus originais não são alterados.</span></p></div>
+    <div className="sidebar-footer"><button className="nav-item" disabled={!canPrepare} onClick={onPrepare} title={canPrepare ? "Adicionar pasta à biblioteca" : "Disponível no laboratório de ingestão"}>+ Adicionar pastas</button><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Seus originais não são alterados.</span></p></div>
   </aside>;
 }
 
