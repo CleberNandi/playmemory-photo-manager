@@ -43,6 +43,13 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
       console.log(`SMOKE thumbnails PASS: ${count} decoded PNGs`);
       console.log(`SMOKE pagination PASS: ${count} cards, exact backend order`);
     }
+    const toolbarTop = await evaluate<number>('document.querySelector(".view-toolbar").getBoundingClientRect().top');
+    const cardTop = await evaluate<number>('document.querySelector(".media-card").getBoundingClientRect().top');
+    await evaluate('document.querySelector(".workspace").scrollTop = 350');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (!await evaluate<boolean>(`document.querySelector(".workspace").scrollTop > 0 && Math.abs(document.querySelector(".view-toolbar").getBoundingClientRect().top - ${toolbarTop}) < 1 && document.querySelector(".media-card").getBoundingClientRect().top < ${cardTop}`)) throw new Error("view toolbar scrolled away with gallery");
+    await evaluate('document.querySelector(".workspace").scrollTop = 0');
+    console.log("SMOKE toolbar PASS: controls remain pinned while cards scroll");
     window.focus();
     window.webContents.focus();
     await evaluate('document.querySelector(".card-select").focus()');

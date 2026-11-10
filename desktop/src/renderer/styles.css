@@ -69,7 +69,7 @@ button, summary { touch-action: manipulation; }
 .library-toolbar > .desktop-menu { order: -1; }
 .view-toolbar button, .workflow-close, .gallery-table button { border: 1px solid transparent; background: transparent; padding: 6px 8px; }
 .view-toolbar button:hover:not(:disabled) { background: var(--color-surface); }
-.view-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--color-border); padding: 6px 8px; }
+.view-toolbar { position: sticky; top: 0; z-index: 2; background: var(--color-canvas); display: flex; align-items: center; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--color-border); padding: 6px 8px; }
 .view-toolbar h1 { margin-right: 6px; }
 .view-toolbar button[aria-pressed="true"], .gallery-table button[aria-pressed="true"] { background: var(--color-sidebar-active); border-color: #7298b3; }
 .view-toolbar label { display: inline-flex; gap: 4px; align-items: center; }

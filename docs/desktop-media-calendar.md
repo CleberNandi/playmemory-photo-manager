@@ -129,3 +129,11 @@ o arquivo específico do print não foi usado nos testes.
 
 O botão Abrir imagem também ganhou uma linha própria, separado da disponibilidade. Regressões:
 659 testes Python, 120 testes desktop, typecheck/lint/build e smoke Electron de imagens/calendário.
+
+### Barra de visualização fixa
+
+A barra central de Miniaturas/Detalhes/Calendário/Propriedades permanece no topo do painel
+durante a rolagem, com fundo opaco. Um smoke no Electron mede a posição da barra e dos cartões
+antes/depois da rolagem: a barra permanece e os cartões se deslocam. Favoritos já filtra os
+itens carregados, mas marcar/desmarcar favorito e persistir essa edição ainda não está exposto
+na interface; os detalhes continuam somente leitura.
