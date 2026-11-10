@@ -22,9 +22,10 @@ finita de suas imagens aceitas, sem confirmação por arquivo. Não autoriza um 
 
 O perfil normal agora é persistente inclusive com as flags de laboratório. Apenas demonstração
 ou `PLAYMEMORIES_DESKTOP_SMOKE=1` usam diretórios temporários removidos ao sair. Dados de antigos
-perfis temporários não podem ser recuperados por esta mudança. Se o catálogo preferido não puder
-ser aberto, a interface informa a falha e permite abrir outro ou usar a biblioteca principal;
-nenhum catálogo alternativo substitui silenciosamente o arquivo indisponível.
+perfis temporários não podem ser recuperados por esta mudança. Se o catálogo preferido responder `not_found`, o aplicativo abre ou cria a biblioteca principal
+automaticamente, sem recriar o arquivo externo apagado. Isso não recupera imagens ou anotações
+do catálogo removido. Para outros erros (corrupção, permissão, incompatibilidade), informa a falha
+e permite abrir outro ou usar a biblioteca principal, sem sobrescrever o arquivo indisponível.
 
 ## Fronteiras e limites
 

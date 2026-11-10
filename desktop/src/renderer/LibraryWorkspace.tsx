@@ -64,7 +64,7 @@ export function LibraryWorkspace({children}: {children: ReactNode}) {
       {library?.state !== "active" && fileMenu}
       {!library?.folder_import_enabled && <label><input type="checkbox" checked={library?.reopen ?? false} disabled={!!operation || !library} onChange={(event) => { const checked = event.target.checked; void act("Salvando preferência…", () => api.setReopenLibrary!(checked)); }} /> Reabrir ao iniciar</label>}
       {operation && <p role="status">{operation}</p>}
-      {library?.warning && <p role="alert">{library.warning === "preference_invalid" ? "A preferência anterior não pôde ser lida. Escolha uma biblioteca." : "A biblioteca continua aberta, mas a preferência não foi salva."}</p>}
+      {library?.warning && <p role="alert">{library.warning === "previous_library_not_found" ? "O catálogo anterior não foi encontrado. A biblioteca principal está aberta; os dados do catálogo anterior não foram recuperados." : library.warning === "preference_invalid" ? "A preferência anterior não pôde ser lida. Escolha uma biblioteca." : "A biblioteca continua aberta, mas a preferência não foi salva."}</p>}
       {library?.error && <p role="alert">{messages[library.error] ?? messages.internal_error}</p>}
     </section>
     {library?.state === "active" && library.session

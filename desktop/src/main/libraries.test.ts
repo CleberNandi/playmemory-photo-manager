@@ -122,3 +122,20 @@ it("reopens an existing managed library and never recreates a corrupt one",async
  const failed=fixture();const original=failed.request.getMockImplementation()!;failed.request.mockImplementation(async(method,p={})=>{if(method==="library.open")throw Object.assign(new Error(),{code:"corrupt"});return original(method,p);});
  const second=new LibraryController({request:failed.request},failed.preferences,failed.dialogs,async()=>"/synthetic/profile/principal.sqlite3");const state=await second.initialize();expect(state.state).toBe("unavailable");expect(state.error).toBe("corrupt");expect(failed.request.mock.calls.some(([method])=>method==="library.create")).toBe(false);
 });
+
+it.each([false,true])("recovers a deleted preferred catalog using the managed library (existing=%s)",async(existing)=>{
+ const f=fixture();const original=f.request.getMockImplementation()!;const managed="/synthetic/profile/principal.sqlite3";
+ f.preferences.read.mockResolvedValue({version:1,reopen:false,last:{path:"/synthetic/deleted.sqlite3",handle:randomUUID()}});
+ f.request.mockImplementation(async(method,p={})=>{if(method==="library.open"&&(p.path!==managed||!existing))throw Object.assign(new Error(),{code:"not_found"});return original(method,p);});
+ const controller=new LibraryController({request:f.request},f.preferences,f.dialogs,async()=>managed);
+ const state=await controller.initialize();expect(state.state).toBe("active");expect(state.session!.display_name).toBe("Minha biblioteca");expect(f.dialogs.choose).not.toHaveBeenCalled();
+ const creates=f.request.mock.calls.filter(([method])=>method==="library.create");expect(creates).toHaveLength(existing?0:1);if(!existing)expect(creates[0][1]?.path).toBe(managed);
+ expect(f.preferences.write).toHaveBeenCalledWith(expect.objectContaining({last:expect.objectContaining({path:managed})}));
+});
+it.each(["corrupt","permission_denied","incompatible"])("does not silently replace a preferred catalog on %s",async(code)=>{
+ const f=fixture();const original=f.request.getMockImplementation()!;
+ f.preferences.read.mockResolvedValue({version:1,reopen:true,last:{path:"/synthetic/previous.sqlite3",handle:randomUUID()}});
+ f.request.mockImplementation(async(method,p={})=>{if(method==="library.open")throw Object.assign(new Error(),{code});return original(method,p);});
+ const controller=new LibraryController({request:f.request},f.preferences,f.dialogs,async()=>"/synthetic/profile/principal.sqlite3");
+ expect(await controller.initialize()).toMatchObject({state:"unavailable",error:code});expect(f.request.mock.calls.filter(([method])=>method==="library.open")).toHaveLength(1);expect(f.request.mock.calls.some(([method])=>method==="library.create")).toBe(false);
+});

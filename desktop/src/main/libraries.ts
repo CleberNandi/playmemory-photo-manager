@@ -53,7 +53,12 @@ export class LibraryController {
       this.state.reopen = this.preference.reopen;
       if (this.preference.reopen && this.preference.last) {
         try { await this.activate(false, this.preference.last.path, this.preference.last.handle); }
-        catch (error) { this.state = {state: "unavailable", session: null, reopen: true, error: failure(error)}; }
+        catch (error) {
+          if(this.managedPath && (error as {code?:string}).code === "not_found") {
+            try {await this.activateManaged();this.state.warning="previous_library_not_found";}
+            catch(fallbackError){this.state={state:"unavailable",session:null,reopen:true,error:failure(fallbackError)};}
+          } else this.state = {state: "unavailable", session: null, reopen: true, error: failure(error)};
+        }
       } else if(this.managedPath){try{await this.activateManaged();}catch(error){this.state={state:"unavailable",session:null,reopen:true,error:failure(error)};}}
     });
   }

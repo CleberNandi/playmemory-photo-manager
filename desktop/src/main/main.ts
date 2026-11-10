@@ -225,6 +225,7 @@ app.whenReady().then(async () => {
   });
   if(managedMode)process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB="1";
   process.env.PLAYMEMORIES_DESKTOP_PROTECTED_PATHS = JSON.stringify([app.getPath("userData"), join(app.getPath("sessionData"), "Cache")]);
+  if(managedSmoke && smokeDirectory)await preference.write({version:1,reopen:true,last:{path:join(smokeDirectory,"deleted-test.sqlite3"),handle:randomUUID()}});
   try { await backend.start(); if (!demo) await libraries.initialize(); }
   catch { libraries.invalidate(); }
   const window = createWindow();
