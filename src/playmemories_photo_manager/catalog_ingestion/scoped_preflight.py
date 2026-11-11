@@ -137,6 +137,7 @@ def preflight_scoped_ingestion(
                 lambda values, path=item.candidate.relative_path: held.captures.__setitem__(
                     path, values
                 ),
+                decode=scoped.additions_only,
             )
             if (
                 reason != item.reason

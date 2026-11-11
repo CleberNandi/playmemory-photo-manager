@@ -1,7 +1,8 @@
 # Biblioteca principal e adição direta de pastas
 
 Status: implementado no desktop. O pedido de carregar a pasta escolhida autoriza a catalogação
-finita de suas imagens aceitas, sem confirmação por arquivo. Não autoriza um monitor permanente.
+de suas imagens aceitas, sem confirmação por arquivo. O acompanhamento de novas imagens está
+descrito em [Monitoramento de pastas](desktop-folder-monitor.md).
 
 ## Comportamento normal
 
@@ -36,8 +37,8 @@ Não há escrita em originais ou sidecars, nem mudança de schema ou dependênci
 
 A preparação existente continua internamente: cada passagem usa uma concessão nova de uso único,
 lista candidatos em páginas de 50 e aplica no máximo 100 IDs escolhidos. Cada transação mantém as
-verificações existentes. A mesma seleção nativa autoriza as passagens deste trabalho, não novas
-pastas nem retomadas futuras. Links internos, sobreposição de catálogo/cache e alterações físicas
+verificações existentes. A mesma seleção nativa autoriza as passagens deste trabalho. O acompanhamento posterior usa concessões independentes para as raízes
+registradas, conforme o contrato de monitoramento. Links internos, sobreposição de catálogo/cache e alterações físicas
 continuam sujeitos aos bloqueios do backend.
 
 Os limites existentes permanecem: até 2.000 entradas por preparação, limites de recursos do
@@ -51,10 +52,9 @@ Uma resposta perdida na aplicação é tratada como resultado desconhecido, sem 
 estiver ativa se conecta ao mesmo trabalho e não abre outro diálogo. Trocas de biblioteca ficam
 bloqueadas durante a carga; encerramento/falha da sessão invalida respostas antigas.
 
-Ainda não há watcher, varredura agendada, atualização incremental ao inserir arquivos depois,
-reconciliação automática de mudanças ou suporte universal a codecs. Adicionar a pasta novamente
-é a ação explícita para carregar imagens novas dentro dos limites. O acompanhamento persistente
-fica para outro incremento, conforme a avaliação de biblioteca gerenciada.
+Há checagem periódica de novas imagens nas pastas registradas, inclusive ao reabrir a biblioteca.
+Ainda não há reconciliação automática de arquivos alterados, removidos ou movidos, nem suporte
+universal a codecs. Consulte o contrato de monitoramento para limites e falhas.
 
 ## Validação e teste manual
 

@@ -1,3 +1,4 @@
+import { IndexCoordinator } from "./index-coordinator.js";
 import { ImageEdits } from "./image-edits.js";
 import { MediaActions, type MediaAction } from "./media-actions.js";
 import { FolderImportController } from "./folder-import.js";
@@ -24,6 +25,7 @@ let libraries: LibraryController;
 let recovering = false;
 let folderImports: FolderImportController;
 let imageEdits: ImageEdits;
+let indexer:IndexCoordinator|undefined;
 const ingestionLab = process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB === "1";
 const demo = process.env.PLAYMEMORIES_DESKTOP_DEMO === "1";
 const managedSmoke=process.env.PLAYMEMORIES_DESKTOP_MANAGED_SMOKE === "1";
@@ -94,7 +96,8 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const result = handler(...args);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
   };
@@ -107,6 +110,8 @@ app.whenReady().then(async () => {
     return demo ? backend.request(method, params) : libraries.query(method, id, params);
   };
   const demoState = () => ({state: "demo", session: null, reopen: false});
+  register("index:status",0,()=>indexer?.current()??{state:"disabled",busy:false,revision:0,added_count:0,error:null,last_check:null});
+  register("index:refresh",0,()=>indexer?.refresh());
   register("library:state", 0, () => demo ? demoState() : libraries.current());
   register("library:create", 0, () => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.choose(true));
   register("library:open", 0, () => demo ? demoState() : (folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.choose(false));
@@ -117,11 +122,12 @@ app.whenReady().then(async () => {
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
-    return query("gallery.list", sessionId, {page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+    if (p.rootId !== undefined && (typeof p.rootId !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(p.rootId))) throw new Error("invalid_request");
+    return query("gallery.list", sessionId, {include_roots:!p.after, ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
   });
   imageEdits=new ImageEdits(libraries,async(source,angle)=>{
     if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return join(dirname(source),basename(source,extname(source))+"-rotacionada"+extname(source));
@@ -239,7 +245,7 @@ app.whenReady().then(async () => {
   folderImports=new FolderImportController(backend,libraries,windowId,async()=>{
     if(folderSelections)return folderSelections.shift()??null;
     if(!mainWindow)return null;
-    const result=await dialog.showOpenDialog(mainWindow,{title:"Adicionar pasta e subpastas à biblioteca",message:"As imagens serão adicionadas ao catálogo. Os originais permanecem inalterados.",properties:["openDirectory"]});
+    const result=await dialog.showOpenDialog(mainWindow,{title:"Adicionar pasta e subpastas à biblioteca",message:"A pasta será acompanhada para carregar imagens novas automaticamente. Os originais permanecem inalterados.",properties:["openDirectory"]});
     return result.canceled||result.filePaths.length!==1?null:nativePath(result.filePaths[0]);
   });
   register("folder:add",1,(id)=>{if(imageEdits.busy)throw new Error("busy");if(!managedMode)throw new Error("unavailable");return folderImports.start(id);});
@@ -256,7 +262,7 @@ app.whenReady().then(async () => {
   register("backend:retry", 0, async () => {
     if (recovering || libraries.isBusy) throw new Error("busy");
     if (!demo && libraries.current().state === "active") {
-      try { return await libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24}); }
+      try { return await libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24, include_roots: true}); }
       catch (error) { if ((error as {code?: string}).code) throw error; }
     }
     if (libraries.isBusy) throw new Error("busy");
@@ -266,16 +272,21 @@ app.whenReady().then(async () => {
       await backend.restart();
       if (!demo) await libraries.initialize();
       mainWindow?.webContents.send("backend:reset");
-      return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24});
+      return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24, include_roots: true});
     } finally { recovering = false; }
   });
-  if(managedMode)process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB="1";
+  if(managedMode){
+    process.env.PLAYMEMORIES_DESKTOP_INGESTION_LAB="1";
+    process.env.PLAYMEMORIES_DESKTOP_INDEX_STATE=join(app.getPath("userData"),"library-state","index-roots.json");
+  }
   process.env.PLAYMEMORIES_DESKTOP_PROTECTED_PATHS = JSON.stringify([app.getPath("userData"), join(app.getPath("sessionData"), "Cache")]);
   if(managedSmoke && smokeDirectory)await preference.write({version:1,reopen:true,last:{path:join(smokeDirectory,"deleted-test.sqlite3"),handle:randomUUID()}});
   try { await backend.start(); if (!demo) await libraries.initialize(); }
   catch { libraries.invalidate(); }
   const window = createWindow();
   mainWindow = window;
+  if(managedMode){indexer=new IndexCoordinator(backend,libraries,()=>!!folderImports?.busy||!!imageEdits?.busy,()=>window.webContents.send("gallery:changed"));indexer.start();}
+
   if (process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1") {
     const watchdog = setTimeout(() => {
       console.error("SMOKE FAIL: timeout");
@@ -302,5 +313,6 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  indexer?.dispose();
   void backend.stop().then(() => { if (smokeDirectory) rmSync(smokeDirectory, {recursive: true, force: true}); if (ingestionSmokeRoot) rmSync(ingestionSmokeRoot, {recursive: true, force: true}); app.exit(Number(process.exitCode ?? 0)); }).catch(() => { quitting = false; console.error("backend cleanup pending"); });
 });

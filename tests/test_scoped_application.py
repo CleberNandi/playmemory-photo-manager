@@ -151,10 +151,10 @@ def test_physical_preflight_is_outside_the_single_write_transaction(batch, monke
     media_calls = []
     snapshots = []
 
-    def checked_file(*args):
+    def checked_file(*args, **kwargs):
         assert not connection.in_transaction
         media_calls.append(1)
-        return verify(*args)
+        return verify(*args, **kwargs)
 
     def checked_snapshot(*args):
         assert connection.in_transaction

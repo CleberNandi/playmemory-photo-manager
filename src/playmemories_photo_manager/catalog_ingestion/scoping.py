@@ -34,6 +34,7 @@ class ScopedIngestionProposal:
     exclusions: tuple[MediaEligibility, ...]
     eligible_candidates: tuple[CandidateReference, ...]
     scope_fingerprint: str
+    additions_only: bool = False
 
 
 def _require(condition):
@@ -54,11 +55,11 @@ def _default(value):
     raise TypeError("unsupported canonical value")
 
 
-def _fingerprint(original, eligibilities, exclusions, eligible):
+def _fingerprint(original, eligibilities, exclusions, eligible, additions_only):
     encoder = json.JSONEncoder(
         ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=_default
     )
-    digest = hashlib.sha256()
+    digest = hashlib.sha256(b"additions_only\n" if additions_only else b"")
     size = 512  # Conservative envelope/digest/list overhead for the complete projection.
     # Include the entire private original and every eligibility, not just selected paths.
     for value in (original, *eligibilities, *exclusions, *eligible):
@@ -75,12 +76,14 @@ def _fingerprint(original, eligibilities, exclusions, eligible):
     return digest.hexdigest()
 
 
-def _validate_eligibility(item, original):
+def _validate_eligibility(item, original, decode_paths):
     _require(isinstance(item, MediaEligibility))
     _require(_valid_identifier(item.candidate_id))
-    _require(item.profile in (PROFILE, IMAGE_PROFILE) and item.decoding == "not_checked")
+    _require(item.profile in (PROFILE, IMAGE_PROFILE))
     _require(isinstance(item.candidate, CandidateReference))
     _require(isinstance(item.observation, EntryObservation))
+    decoded = item.observation.relative_path in decode_paths and item.state == "eligible"
+    _require(item.decoding == ("verified" if decoded else "not_checked"))
     _require(item.candidate.run_id == original.scan_result.run_id)
     _require(item.candidate.library_root_id == original.plan.library_root_id)
     _require(item.candidate.relative_path == item.observation.relative_path)
@@ -127,10 +130,14 @@ def _validate_eligibility(item, original):
 
 
 def scope_catalogable_proposal(
-    original: IngestionProposal, eligibilities: tuple[MediaEligibility, ...]
+    original: IngestionProposal,
+    eligibilities: tuple[MediaEligibility, ...],
+    *,
+    additions_only=False,
 ) -> ScopedIngestionProposal:
     """Validate trusted backend evidence; this is not an authorization or renderer API."""
-    _require(_proposal_evidence_error(original) is None)
+    _require(type(additions_only) is bool)
+    _require(_proposal_evidence_error(original, additions_only=additions_only) is None)
     assessment, plan, scan = original.assessment, original.plan, original.scan_result
     _require(
         scan.status is ScanStatus.COMPLETE
@@ -163,8 +170,13 @@ def scope_catalogable_proposal(
     by_path = {}
     identifiers = set()
     observations = {item.relative_path: item for item in scan.entries}
+    decode_paths = {
+        change.relative_path
+        for change in plan.changes
+        if additions_only and change.classification is ChangeClassification.NEW_FILE_CANDIDATE
+    }
     for item in eligibilities:
-        _validate_eligibility(item, original)
+        _validate_eligibility(item, original, decode_paths)
         path = item.candidate.relative_path
         _require(path not in by_path and item.candidate_id not in identifiers)
         _require(observations.get(path) == item.observation)
@@ -197,5 +209,6 @@ def scope_catalogable_proposal(
         ordered,
         exclusions,
         eligible,
-        _fingerprint(original, ordered, exclusions, eligible),
+        _fingerprint(original, ordered, exclusions, eligible, additions_only),
+        additions_only,
     )

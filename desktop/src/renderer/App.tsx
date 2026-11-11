@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {FolderMonitor} from "./FolderMonitor";
 import { FolderImportPanel } from "./FolderImportPanel";
 import { FavoriteButton } from "./FavoriteButton";
 import { CaptureCalendar } from "./CaptureCalendar";
@@ -15,11 +16,11 @@ import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import type { GalleryPage } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
-async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false): Promise<GalleryPage> {
+async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string): Promise<GalleryPage> {
   const bridge = window.photoManager;
   if (!bridge) throw new Error("Desktop bridge unavailable");
-  if (retry) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly)return page;}
-  return bridge.listGallery({pageSize:24,...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
+  if (retry) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly&&!rootId)return page;}
+  return bridge.listGallery({pageSize:24,...(rootId?{rootId}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
 }
 
 type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
@@ -42,6 +43,8 @@ function GalleryApp() {
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);
+  const [roots, setRoots] = useState<GalleryPage["roots"]>(undefined);
+  const rootId = roots?.find(root => root.id === folder)?.id;
   const [thumbnailSize, setThumbnailSize] = useState(150);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [leftWidth, setLeftWidth] = useState(210);
@@ -71,30 +74,43 @@ function GalleryApp() {
     setPaging(true);
     setPageError(false);
     try {
-      const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor, ...(captureFilter?{capturePeriod:captureFilter}:{}),...(favorites?{favoritesOnly:true}:{}) });
+      const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor, ...(rootId ? {rootId} : {}), ...(captureFilter?{capturePeriod:captureFilter}:{}),...(favorites?{favoritesOnly:true}:{}) });
       if (epoch === galleryEpoch.current) setState({ kind: "ready", page: { ...page, items: [...state.page.items, ...page.items] } });
     } catch { if (epoch === galleryEpoch.current) setPageError(true); }
     finally { if (epoch === galleryEpoch.current) {inFlight.current = false; setPaging(false);} }
   };
+  useEffect(()=>window.photoManager?.onGalleryChanged?.(()=>{
+    galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setGalleryRevision(value=>value+1);
+  }),[]);
   const load = () => {
     setSelected(null);
     setPageError(false);
     setState({ kind: "loading" });
     const epoch = galleryEpoch.current;
-    void requestGallery(true,captureFilter,favorites).then((page) => {if (epoch === galleryEpoch.current) setState({ kind: "ready", page });}).catch(() => {if (epoch === galleryEpoch.current) setState({ kind: "error" });});
+    void requestGallery(true, captureFilter, favorites, rootId)
+      .then((page) => {
+        if (epoch !== galleryEpoch.current) return;
+        setState({kind: "ready", page});
+        if (page.roots) setRoots(page.roots);
+      })
+      .catch(() => {if (epoch === galleryEpoch.current) setState({kind: "error"});});
   };
   useEffect(() => {
     let active = true;
-    void requestGallery(false,captureFilter,favorites)
-      .then((page) => { if (active) setState({ kind: "ready", page }); })
+    void requestGallery(false,captureFilter,favorites,rootId)
+      .then((page) => {
+        if (!active) return;
+        setState({kind: "ready", page});
+        if (page.roots) setRoots(page.roots);
+      })
       .catch(() => { if (active) setState({ kind: "error" }); });
     return () => { active = false; };
-  }, [galleryRevision,captureFilter,favorites]);
+  }, [galleryRevision,captureFilter,favorites,rootId]);
 
   const items = state.kind === "ready" ? state.page.items : [];
-  // Scope and filters apply only to the loaded page; cursors remain backend-owned.
-  const folders = [...new Set(items.map((item) => item.representative_location?.root_display_name).filter((name): name is string => !!name))];
-  const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  // Text search applies to loaded items. Desktop folder pages arrive scoped by root ID.
+  const folders = roots ?? [...new Set(items.map((item) => item.representative_location?.root_display_name).filter((name): name is string => !!name))].map(name => ({id:name,name}));
+  const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || rootId || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
   const openAsset=(id:string)=>{
     const button=[...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find(candidate=>candidate.dataset.assetId===id);
@@ -134,9 +150,22 @@ function GalleryApp() {
           <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
         </DesktopMenu>
         <DesktopMenu label="Ferramentas">{session?.catalogingEnabled && <button onClick={()=>{setCalendar(false);setPreparing(true);}}>Preparação avançada</button>}<button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
-        <DesktopMenu label="Ajuda"><p>Operação local. Imagens só são alteradas ao salvar. Favoritos e período consultam todo o catálogo; pastas e pesquisa de texto filtram os itens carregados.</p></DesktopMenu>
+        <DesktopMenu label="Ajuda"><p>Operação local. Imagens só são alteradas ao salvar. Favoritos, período e pastas consultam o catálogo. A busca por texto filtra os itens carregados.</p></DesktopMenu>
       </nav>
-    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled} preparing={preparing} onPrepare={() => {setCalendar(false);if(session?.folderImportEnabled){setPreparing(false);setImportSequence(value=>value+1);}else setPreparing(true);}} onSource={(name, favorite) => {if(calendar||captureFilter)browsePeriod(null);setFolder(name); changeFavorites(favorite); setView("gallery"); resetSelection();}} onNavigate={(next) => { setSelected(null); setView(next); }} />
+    <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled} preparing={preparing} onPrepare={() => {setCalendar(false);if(session?.folderImportEnabled){setPreparing(false);setImportSequence(value=>value+1);}else setPreparing(true);}} onSource={(sourceId, favorite) => {
+      if (calendar || captureFilter) browsePeriod(null);
+      if (sourceId !== folder && roots) {
+        galleryEpoch.current++;
+        inFlight.current = false;
+        setPaging(false);
+        setPageError(false);
+        setState({kind: "loading"});
+      }
+      setFolder(sourceId);
+      changeFavorites(favorite);
+      setView("gallery");
+      resetSelection();
+    }} onNavigate={(next) => { setSelected(null); setView(next); }} />
     <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />
     <main className="workspace">
       <header className="view-toolbar">
@@ -147,6 +176,7 @@ function GalleryApp() {
         <label>Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>
         <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
       </header>
+      {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor/>}
       {actionError&&<p role="alert">Não foi possível executar a ação. Confira se a imagem e a biblioteca continuam disponíveis.</p>}
       {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onApplied={()=>{
         galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setQuery("");setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);
@@ -162,7 +192,7 @@ function GalleryApp() {
       {view === "gallery" && !calendar && <div className="gallery-filters">
         <label>Pesquisar nos itens carregados <input type="search" value={query} onChange={(event) => {setQuery(event.target.value); resetSelection();}} /></label>
         <label><input type="checkbox" checked={favorites} onChange={(event) => {changeFavorites(event.target.checked); resetSelection();}} /> Favoritos</label>
-        <span>{captureFilter ? captureFilter === "undated" ? "Sem data de captura" : `Captura: ${captureFilter}` : folder ?? "Todos os itens carregados"}</span>{captureFilter&&<button onClick={()=>browsePeriod(null)}>Limpar período</button>}
+        <span>{captureFilter ? captureFilter === "undated" ? "Sem data de captura" : `Captura: ${captureFilter}` : folders.find(source => source.id === folder)?.name ?? "Todos os itens carregados"}</span>{captureFilter&&<button onClick={()=>browsePeriod(null)}>Limpar período</button>}
       </div>}
       {view === "gallery" && calendar && <CaptureCalendar key={galleryRevision} period={calendarPeriod} onPeriod={setCalendarPeriod} onBrowse={browsePeriod} />}
       <div hidden={view !== "gallery" || calendar} className="content" aria-busy={state.kind === "loading" || paging}>
@@ -192,7 +222,7 @@ function GalleryApp() {
   </div>;
 }
 
-export function Sidebar({view = "gallery", onNavigate, folders = [], folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource}: {view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void; folders?: string[]; folder?: string | null; favorites?: boolean; canPrepare?: boolean; preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void}) {
+export function Sidebar({view = "gallery", onNavigate, folders = [], folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource}: {view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void; folders?: {id: string; name: string}[]; folder?: string | null; favorites?: boolean; canPrepare?: boolean; preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void}) {
   return <aside className="sidebar">
     <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span className="brand-name">PlayMemories<span className="sr-only"> Photo Manager</span></span></div>
     <section className="source-section"><h2>Notificações</h2><p>{preparing ? "Consulte o andamento no painel central" : "Consulte tarefas em Adicionar pastas"}</p></section>
@@ -200,7 +230,7 @@ export function Sidebar({view = "gallery", onNavigate, folders = [], folder = nu
     <nav className="primary-nav" aria-label="Principal">
       <NavItem icon="library" label="Biblioteca" active={view === "gallery" && !folder && !favorites} onClick={() => {onNavigate?.("gallery"); onSource?.(null, false);}} />
       <button className="nav-item" aria-pressed={favorites} onClick={() => onSource?.(null, true)}>☆ Favoritos</button>
-      <section className="source-section"><h2>Pastas do catálogo</h2><p>Raízes dos itens carregados</p>{folders.map((name) => <button key={name} className={`nav-item${folder === name ? " is-active" : ""}`} aria-pressed={folder === name} onClick={() => onSource?.(name, false)}>{name}</button>)}{!folders.length && <p>Nenhuma raiz carregada.</p>}</section>
+      <section className="source-section"><h2>Pastas do catálogo</h2>{folders.map(({id,name}) => <button key={id} className={`nav-item${folder === id ? " is-active" : ""}`} aria-pressed={folder === id} onClick={() => onSource?.(id, false)}>{name}</button>)}{!folders.length && <p>Nenhuma pasta cadastrada.</p>}</section>
       <p className="nav-label">Ferramentas</p><NavItem icon="album" label="Duplicatas exatas" active={view === "duplicates"} onClick={() => onNavigate?.("duplicates")} /><NavItem icon="album" label="Álbuns" disabled />
     </nav>
     <div className="sidebar-footer"><button className="nav-item" disabled={!canPrepare} onClick={onPrepare} title={canPrepare ? "Adicionar pasta à biblioteca" : "Disponível no laboratório de ingestão"}>+ Adicionar pastas</button><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Imagens só são alteradas ao salvar.</span></p></div>

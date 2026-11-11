@@ -7,6 +7,8 @@ from uuid import UUID
 from ..imaging.rotation import RotationService
 from ..imaging.service import ImageService
 from ..library import LibraryError, LibraryLifecycle
+from .index_state import IndexState
+from .indexer import FolderIndexer
 
 
 def _uuid(value: object) -> str:
@@ -23,7 +25,9 @@ def _uuid(value: object) -> str:
 class LibraryDispatcher:
     """Only the authenticated main process can supply a native selection path."""
 
-    def __init__(self, *, ingestion_enabled=False, protected_paths=()):
+    def __init__(self, *, ingestion_enabled=False, protected_paths=(), index_state=None):
+        self.index_state = IndexState(index_state) if index_state else None
+        self.indexer = None
         self.ingestion_enabled = ingestion_enabled
         self.protected_paths = protected_paths
         self.ingestion = None
@@ -54,6 +58,37 @@ class LibraryDispatcher:
             raise LibraryError("invalid_request")
         if method == "library.state" and not params:
             return self.state()
+        if method in ("index.pulse", "index.refresh"):
+            active = self.require_session(params.get("session_id"))
+            expected = {"session_id", "allow"} if method == "index.pulse" else {"session_id"}
+            if self.index_state is None or set(params) != expected:
+                raise LibraryError("invalid_request")
+            if self.indexer is None:
+                self.indexer = FolderIndexer(active, self.index_state, self.protected_paths)
+            if method == "index.refresh":
+                return self.indexer.refresh()
+            if type(params["allow"]) is not bool:
+                raise LibraryError("invalid_request")
+            idle = not self.edits.busy and not (
+                self.ingestion is not None
+                and (self.ingestion.preparation.busy or self.ingestion.commands.busy)
+            )
+            return self.indexer.pulse(params["allow"] and idle)
+        if (
+            self.indexer is not None
+            and self.indexer.busy
+            and method
+            not in (
+                "library.state",
+                "asset.details",
+                "gallery.list",
+                "thumbnail.get",
+                "preview.get",
+                "calendar.summary",
+                "asset.reveal",
+            )
+        ):
+            raise LibraryError("busy")
         if method in ("image.save", "image.save_status"):
             active = self.require_session(params.get("session_id"))
             if self.ingestion is not None and (
@@ -102,6 +137,9 @@ class LibraryDispatcher:
             self.images = ImageService()
             action = self.owner.create if method == "library.create" else self.owner.open
             action(Path(raw_path))
+            if self.indexer is not None:
+                self.indexer.shutdown()
+            self.indexer = None
             self.ingestion = None
             self.edits = RotationService()
             self.images = ImageService()
@@ -113,6 +151,9 @@ class LibraryDispatcher:
             self.require_session(params["session_id"])
             if not self.images.shutdown():
                 raise LibraryError("busy")
+            if self.indexer is not None:
+                self.indexer.shutdown()
+            self.indexer = None
             self.owner.close()
             self.ingestion = None
             self.handle = None
@@ -232,7 +273,12 @@ class LibraryDispatcher:
             if window != service.window_id:
                 raise LibraryError("stale_session")
             if method == "ingestion.select_root":
-                return service.select(params)
+                result = service.select(params)
+                if self.index_state is not None:
+                    self.index_state.remember(
+                        active, result["root_id"], service.binding(result["root_id"])
+                    )
+                return result
             if method == "ingestion.prepare":
                 return service.prepare(params)
             if method == "ingestion.apply":
@@ -261,12 +307,16 @@ class LibraryDispatcher:
             raise LibraryError(error.code) from None
 
     def tick(self):
+        if self.indexer is not None:
+            self.indexer.tick()
         self.edits.tick()
         self.images.tick()
         if self.ingestion is not None:
             self.ingestion.tick()
 
     def shutdown(self, timeout=2.5):
+        if self.indexer is not None and not self.indexer.shutdown():
+            return False
         if not self.edits.shutdown():
             return False
         if self.ingestion is not None and not self.ingestion.close(timeout=timeout):

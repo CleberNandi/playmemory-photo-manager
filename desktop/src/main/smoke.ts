@@ -1,6 +1,6 @@
 import { BrowserWindow } from "electron";
-import { readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile, unlink, utimes, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import type { PythonBackend } from "./backend.js";
 
 // Exercises the production preload and renderer. Never supplies a substitute bridge.
@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,openManagedLibrary,prepareCataloging,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -281,6 +281,11 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   window.webContents.sendInputEvent({type:"keyDown",keyCode:"Right"});
   await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2")');
   console.log("SMOKE VIEWER NAVIGATION PASS: quarter-turn fits; next/previous arrows; temporary rotation resets; close restores latest thumbnail");
+  window.setContentSize(760,520);await new Promise(resolve=>setTimeout(resolve,120));
+  const layout=await evaluate<{overflow:boolean;hint:number;image:number}>('(()=>{const header=document.querySelector(".viewer-toolbar"),hint=document.querySelector(".viewer-hint"),image=document.querySelector(".viewer-image");return {overflow:header.scrollWidth>header.clientWidth+1,hint:hint.getBoundingClientRect().height,image:image.getBoundingClientRect().height};})()');
+  if(layout.overflow||layout.hint>50||layout.image<100)throw new Error("viewer toolbar layout regressed");
+  await writeFile("/tmp/playmemories-viewer-760.png",(await window.webContents.capturePage()).toPNG());
+  window.setContentSize(1180,760);await new Promise(resolve=>setTimeout(resolve,80));
   await writeFile("/tmp/playmemories-image-viewer.png", (await window.webContents.capturePage()).toPNG());
   await click("Fechar imagem");
   await waitFor('!!document.querySelector(".asset-details dl") && document.activeElement?.classList.contains("card-select")');
@@ -349,5 +354,15 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("0 imagem(ns)")');
  if(location.path!==join(root,"image-000.jpg")&&!Buffer.from(await readFile(join(root,"image-000.jpg"))).equals(bytes))throw new Error("managed import changed unrelated original");
  await writeFile("/tmp/playmemories-managed-library.png",(await window.webContents.capturePage()).toPNG());
+ await click(basename(root));
+ await wait('document.querySelector(".source-section button[aria-pressed=true]") && document.querySelectorAll(".media-card").length === 24');
+ await utimes(location.path, new Date(), new Date("2020-01-01T00:00:00Z"));
+ await unlink(join(root, location.path.endsWith("image-001.jpg") ? "image-002.jpg" : "image-001.jpg"));
+ await writeFile(join(root,"auto-added.jpg"),bytes);
+ await wait(`Array.from(document.querySelectorAll(".media-card")).some(card =>
+   card.querySelector("h3")?.title === "auto-added.jpg" &&
+   card.querySelector("img")?.naturalWidth > 0)`);
+ await writeFile("/tmp/playmemories-monitor.png",(await window.webContents.capturePage()).toPNG());
+ console.log("SMOKE FOLDER MONITOR PASS: decoded thumbnail in the open folder after unrelated mtime change and deletion");
  console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; unrelated originals unchanged; explicit fixture rotation saved; native dialogs NOT TESTED");
 }

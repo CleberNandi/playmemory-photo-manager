@@ -138,7 +138,7 @@ class _Directories:
         self.fds.clear()
 
 
-def _verify_file(root_fd, mount, observation, checkpoint, capture=None):
+def _verify_file(root_fd, mount, observation, checkpoint, capture=None, *, decode=False):
     parents = _Directories()
     reason, detected, fingerprint = "read_failed", None, None
     try:
@@ -172,6 +172,12 @@ def _verify_file(root_fd, mount, observation, checkpoint, capture=None):
                 else:
                     result = inspect_image(source, info.st_size, checkpoint=checkpoint)
                 reason, detected = result.reason, result.detected_format
+                if decode and reason in ("eligible_jpeg", "eligible_image"):
+                    decoded = inspect_image(
+                        source, info.st_size, checkpoint=checkpoint, decode=True
+                    )
+                    if decoded.reason != "eligible_image":
+                        reason, detected = decoded.reason, decoded.detected_format
                 if capture is not None and reason in ("eligible_jpeg", "eligible_image"):
                     from .capture import extract_capture
 
@@ -243,6 +249,7 @@ def classify_media(
     root_id: str,
     *,
     cancellation_requested: Callable[[], bool] | None = None,
+    decode_paths: frozenset[str] = frozenset(),
 ) -> tuple[MediaEligibility, ...]:
     """Classify a complete bounded scan, without claiming a current filesystem snapshot.
 
@@ -301,7 +308,11 @@ def classify_media(
                 reason, detected, fingerprint = "entry_changed_during_verification", None, None
             else:
                 reason, detected, fingerprint = _verify_file(
-                    root_fd, mount, observation, checkpoint
+                    root_fd,
+                    mount,
+                    observation,
+                    checkpoint,
+                    decode=observation.relative_path in decode_paths,
                 )
             directories.check()
             if _identity(os.fstat(root_fd)) != scan_result.root.physical_identity:
@@ -323,6 +334,10 @@ def classify_media(
                     if reason in ("eligible_image", "invalid_image")
                     or detected not in (None, "jpeg")
                     else PROFILE,
+                    decoding="verified"
+                    if observation.relative_path in decode_paths
+                    and reason in ("eligible_jpeg", "eligible_image")
+                    else "not_checked",
                 )
             )
         directories.check()

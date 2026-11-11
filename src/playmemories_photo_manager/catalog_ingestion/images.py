@@ -27,7 +27,7 @@ class ImageInspection:
     detected_format: str | None
 
 
-def inspect_image(source, size, *, checkpoint):
+def inspect_image(source, size, *, checkpoint, decode=False):
     from PIL import Image, UnidentifiedImageError
 
     checkpoint()
@@ -45,7 +45,10 @@ def inspect_image(source, size, *, checkpoint):
                 width, height = image.size
                 if not 0 < width <= 16384 or not 0 < height <= 16384 or width * height > MAX_PIXELS:
                     return ImageInspection("dimension_limit_exceeded", detected)
-                image.verify()
+                if decode:
+                    image.load()
+                else:
+                    image.verify()
             checkpoint()
             return ImageInspection("eligible_image", detected)
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):

@@ -117,9 +117,9 @@ def test_unselected_files_are_not_reopened(batch, monkeypatch):
     verify = scoped_preflight._verify_file
     seen = []
 
-    def record(fd, binding, observation, checkpoint, capture=None):
+    def record(fd, binding, observation, checkpoint, capture=None, **kwargs):
         seen.append(observation.relative_path)
-        return verify(fd, binding, observation, checkpoint, capture)
+        return verify(fd, binding, observation, checkpoint, capture, **kwargs)
 
     monkeypatch.setattr(scoped_preflight, "_verify_file", record)
     with preflight_scoped_ingestion(scoped, auth, expected_root_mount=mount):
@@ -217,7 +217,7 @@ def test_io_errors_are_sanitized_and_release_root(batch, monkeypatch):
     scoped, auth, mount, _, _ = batch
     before = set(os.listdir("/proc/self/fd"))
 
-    def deny(*_args):
+    def deny(*_args, **_kwargs):
         raise PermissionError("private-path-do-not-publish")
 
     monkeypatch.setattr(scoped_preflight, "_verify_file", deny)

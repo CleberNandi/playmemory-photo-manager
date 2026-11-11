@@ -404,7 +404,7 @@ def _proposal_error(proposal: IngestionProposal) -> str | None:
     return None
 
 
-def _proposal_evidence_error(proposal: IngestionProposal) -> str | None:
+def _proposal_evidence_error(proposal: IngestionProposal, *, additions_only=False) -> str | None:
     """Shared evidence checks, separate from the unchanged legacy applicability gate."""
     if not isinstance(proposal, IngestionProposal):
         return "proposal must be IngestionProposal"
@@ -438,6 +438,9 @@ def _proposal_evidence_error(proposal: IngestionProposal) -> str | None:
         location = locations_by_id.get(change.location_id)
         if location is None:
             return "known plan location is absent from the catalog snapshot"
+        if additions_only:
+            # Known paths never become selections in a monitored addition.
+            continue
         observed_identity = _physical_identity_text(change.observation.physical_identity)
         if location.filesystem_id is not None and (
             not location.filesystem_id.startswith("scanner:")

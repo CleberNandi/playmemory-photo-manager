@@ -48,6 +48,7 @@ class GalleryQuery:
     availability: AssetAvailability | None = None
     capture_period: str | None = None
     favorites_only: bool = False
+    newest_first: bool = False
 
 
 @dataclass(frozen=True, slots=True)
