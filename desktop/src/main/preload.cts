@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("photoManager", {
   listFilterOptions: (facet: string, keyword: string, offset: number) => scoped("gallery:facets", {facet, keyword, offset}),
   listAlbums: (offset: number) => scoped("album:action", {action:"list", offset}),
   createAlbum: (name: string) => scoped("album:action", {action:"create", name}),
+  deleteAlbum: (albumId: string) => scoped("album:action", {action:"delete", album_id:albumId}),
   changeAlbumMembership: (albumId: string, assetId: string, action: "add" | "remove") =>
     scoped("album:action", {action, album_id:albumId, asset_id:assetId}),
   listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; albumId?: string; filters?: Record<string, string | number> } = {}) =>

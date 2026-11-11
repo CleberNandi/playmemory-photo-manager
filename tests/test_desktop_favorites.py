@@ -248,3 +248,34 @@ def test_album_membership_scopes_pages_and_survives_reopening(library):
     scoped = dispatcher.request("gallery.list", {"session_id": session, "album_id": album_id})
     assert [item["asset_id"] for item in scoped["items"]] == [assets[-1]]
     assert dispatcher.request("asset.details", {"session_id": session, "asset_id": assets[0]})
+
+
+def test_deleting_album_preserves_original_and_other_membership(library, tmp_path):
+    dispatcher, path, session, assets = library
+    asset_id = assets[0]
+    original = tmp_path / "photo.jpg"
+    original.write_bytes(b"synthetic original")
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        root = catalog.register_root("Synthetic", str(tmp_path))
+        location = catalog.register_location(
+            asset_id, root.id, original.name, last_seen_at="2026-11-11T00:00:00Z"
+        )
+        removed = catalog.create_album("Remove")
+        retained = catalog.create_album("Keep")
+        for album in (removed, retained):
+            catalog.add_asset_to_album(album.id, asset_id)
+
+    params = {"session_id": session, "action": "delete", "album_id": removed.id}
+    with pytest.raises(LibraryError, match="invalid_request"):
+        dispatcher.request("album.action", {**params, "asset_id": asset_id})
+    assert dispatcher.request("album.action", params) == {"changed": True}
+    assert dispatcher.request("album.action", params) == {"changed": False}
+    dispatcher.request("library.close", {"session_id": session})
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        assert catalog.list_albums() == [retained]
+        assert [asset.id for asset in catalog.list_album_assets(retained.id)] == [asset_id]
+        assert catalog.get_asset_locations(asset_id) == [location]
+        assert connection.execute("SELECT count(*) FROM album_asset").fetchone()[0] == 1
+    assert original.read_bytes() == b"synthetic original"

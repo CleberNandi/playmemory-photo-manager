@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -352,13 +352,20 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await evaluate('document.querySelector(".card-select").click()');
  await click("Remover item deste álbum");
  await wait('document.querySelector(".content")?.textContent.includes("Este álbum está vazio")');
+ await click("Excluir álbum");
+ await wait('document.querySelector(".album-panel legend")?.textContent.includes("Seleção de teste")');
+ await click("Cancelar");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Seleção de teste"');
+ await click("Excluir álbum");
+ await click("Confirmar exclusão");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Biblioteca" && !Array.from(document.querySelectorAll(".album-panel option")).some(option=>option.textContent==="Seleção de teste")');
  if (!(await readFile(location.path)).equals(originalBytes)) throw new Error("album changed original");
  await click("Biblioteca");
  await wait('document.querySelectorAll(".media-card").length===24');
  await click("Álbuns");
  await evaluate('document.querySelector(".card-select").click()');
  await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
- console.log("SMOKE ALBUMS PASS: create, add, browse, remove, and original bytes unchanged");
+ console.log("SMOKE ALBUMS PASS: create, add, browse, remove, cancel/confirm delete, and original bytes unchanged");
  await evaluate('Array.from(document.querySelectorAll(".property-section > summary")).find(node=>node.textContent==="Informações adicionadas pelo usuário").click()');
  await evaluate('document.querySelector(`[aria-label="4 estrelas"]`).click()');
  await wait('document.querySelector(`[aria-label="4 estrelas"]`)?.getAttribute("aria-pressed")==="true"');

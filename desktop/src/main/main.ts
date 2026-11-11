@@ -142,6 +142,8 @@ app.whenReady().then(async () => {
     if (input.action === "create" && keys === "action,name" && typeof input.name === "string" &&
         input.name.trim() && input.name.length <= 120 && !input.name.includes("\0"))
       return libraries.query("album.action", sessionId, input);
+    if (input.action === "delete" && keys === "action,album_id" && canonicalId(input.album_id))
+      return libraries.query("album.action", sessionId, input);
     if ((input.action === "add" || input.action === "remove") && keys === "action,album_id,asset_id" &&
         canonicalId(input.album_id) && canonicalId(input.asset_id))
       return libraries.query("album.action", sessionId, input);

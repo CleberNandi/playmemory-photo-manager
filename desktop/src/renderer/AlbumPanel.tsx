@@ -1,16 +1,18 @@
 import {useEffect, useRef, useState} from "react";
 import type {Album} from "./types";
 
-export function AlbumPanel({active, selected, onOpen, onMembershipChanged}: {
+export function AlbumPanel({active, selected, onOpen, onDelete, onMembershipChanged}: {
   active: Album | null;
   selected: string | null;
   onOpen: (album: Album) => void;
+  onDelete: (albumId: string) => void;
   onMembershipChanged: (albumId: string, assetId: string, action: "add" | "remove") => void;
 }) {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [offset, setOffset] = useState<number | null>(0);
   const [target, setTarget] = useState("");
   const [name, setName] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<Album | null>(null);
   const [busy, setBusy] = useState(true);
   const [feedback, setFeedback] = useState<{text: string; error?: boolean}>();
   const pending = useRef(false);
@@ -42,6 +44,17 @@ export function AlbumPanel({active, selected, onOpen, onMembershipChanged}: {
   }
 
   const chosen = albums.find(album => album.id === target);
+  const deletionTarget = chosen ?? active;
+  async function deleteAlbum(album: Album) {
+    await bridge.deleteAlbum!(album.id);
+    setAlbums(previous => previous.filter(item => item.id !== album.id));
+    setTarget(current => current === album.id ? "" : current);
+    if (offset !== null) setOffset(0);
+    setConfirmDelete(null);
+    onDelete(album.id);
+    setFeedback({text:"Álbum excluído."});
+  }
+
   async function membership(album: Album, assetId: string, action: "add" | "remove") {
     const {changed} = await bridge.changeAlbumMembership!(album.id, assetId, action);
     if (changed) onMembershipChanged(album.id, assetId, action);
@@ -75,6 +88,14 @@ export function AlbumPanel({active, selected, onOpen, onMembershipChanged}: {
     {active && <button disabled={busy || !selected} onClick={() => {
       if (selected) void run(() => membership(active, selected, "remove"));
     }}>Remover item deste álbum</button>}
+    {bridge.deleteAlbum && (confirmDelete ? <fieldset disabled={busy}>
+      <legend>Excluir o álbum “{confirmDelete.name}”?</legend>
+      <p>As fotos e os vínculos com outros álbuns serão preservados.</p>
+      <button onClick={() => void run(() => deleteAlbum(confirmDelete))}>Confirmar exclusão</button>
+      <button onClick={() => setConfirmDelete(null)}>Cancelar</button>
+    </fieldset> : <button disabled={busy || !deletionTarget} onClick={() => setConfirmDelete(deletionTarget)}>
+      Excluir álbum
+    </button>)}
     {offset !== null && <button disabled={busy} onClick={() => void run(async () => {
       const page = await bridge.listAlbums!(offset);
       setAlbums(previous => [...new Map([...previous, ...page.albums].map(album => [album.id, album])).values()]);

@@ -228,6 +228,9 @@ function GalleryApp() {
       open:albumsOpen, toggle:()=>setAlbumsOpen(open=>!open),
       panel:<AlbumPanel active={album} selected={view==="gallery"&&!calendar?selected:null} onOpen={next=>{
         changeAlbum(next);setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendar(false);setView("gallery");
+      }} onDelete={id=>{
+        if (id !== albumScope.current) return;
+        changeAlbum(null);setCaptureFilter(null);setFilters({});setCalendar(false);setPreparing(false);setView("gallery");
       }} onMembershipChanged={(id,assetId,action)=>{
         if (id !== albumScope.current) return;
         galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);

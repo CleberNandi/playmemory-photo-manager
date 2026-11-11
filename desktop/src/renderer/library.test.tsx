@@ -55,3 +55,33 @@ it("shows preparation on demand and removes it on session close", async () => {
   expect(host.querySelector('[aria-label="Preparar catalogação"]')).not.toBeNull();
   await click("Fechar biblioteca"); expect(host.querySelector('[aria-label="Preparar catalogação"]')).toBeNull();
 });
+
+it("confirms the named album before deleting it and returns to the library", async () => {
+  const album = {id: "album-a", name: "Viagem"};
+  const listGallery = vi.fn().mockResolvedValue({items: [], next_cursor: null, has_more: false});
+  const deleteAlbum = vi.fn().mockResolvedValue({changed: true});
+  window.photoManager = {
+    listGallery, retryGallery: vi.fn(), getLibraryState: vi.fn().mockResolvedValue(first),
+    listAlbums: vi.fn().mockResolvedValue({albums: [album], next_offset: null}),
+    createAlbum: vi.fn(), changeAlbumMembership: vi.fn(), deleteAlbum,
+  };
+  await act(async () => root.render(<App />));
+  await click("Álbuns");
+  await act(async () => {
+    const select = host.querySelector("select")!;
+    select.value = album.id;
+    select.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+  await click("Abrir álbum");
+  expect(host.querySelector("h1")?.textContent).toBe("Viagem");
+  await click("Excluir álbum");
+  expect(host.querySelector("legend")?.textContent).toBe("Excluir o álbum “Viagem”?");
+  await click("Cancelar");
+  expect(deleteAlbum).not.toHaveBeenCalled();
+  await click("Excluir álbum");
+  await click("Confirmar exclusão");
+  expect(deleteAlbum).toHaveBeenCalledExactlyOnceWith(album.id);
+  expect(host.querySelector("h1")?.textContent).toBe("Biblioteca");
+  expect(host.querySelector('option[value="album-a"]')).toBeNull();
+  expect(listGallery).toHaveBeenLastCalledWith({pageSize: 24});
+});

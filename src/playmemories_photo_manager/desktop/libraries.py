@@ -50,6 +50,10 @@ def _album_action(active, params):
             with active.command_connection() as connection:
                 album = Catalog(connection).create_album(name.strip())
             return {"id": album.id, "name": album.name}
+        if action == "delete" and fields == {"action", "album_id"}:
+            album_id = _uuid(params["album_id"])
+            with active.command_connection() as connection:
+                return {"changed": Catalog(connection).delete_album(album_id)}
         if action in ("add", "remove") and fields == {"action", "album_id", "asset_id"}:
             album_id, asset_id = _uuid(params["album_id"]), _uuid(params["asset_id"])
             with active.command_connection() as connection:

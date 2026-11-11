@@ -65,6 +65,7 @@ declare global {
       listFilterOptions?(facet: Facet, keyword: string, offset: number): Promise<FilterOptionsPage>;
       listAlbums?(offset: number): Promise<{albums: Album[]; next_offset: number | null}>;
       createAlbum?(name: string): Promise<Album>;
+      deleteAlbum?(albumId: string): Promise<{changed: boolean}>;
       changeAlbumMembership?(albumId: string, assetId: string, action: "add" | "remove"): Promise<{changed: boolean}>;
       listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; albumId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
       saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;

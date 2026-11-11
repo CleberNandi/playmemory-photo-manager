@@ -364,3 +364,5 @@ button:disabled { opacity: .52; }
 .album-panel form, .album-panel label { display: grid; gap: 4px; min-width: 0; }
 .album-panel input, .album-panel select { width: 100%; min-width: 0; box-sizing: border-box; }
 .album-panel p { margin: 4px 0; }
+.album-panel fieldset { min-width: 0; margin: 0; }
+.album-panel legend { max-width: 100%; overflow-wrap: anywhere; }

@@ -174,6 +174,11 @@ class CatalogRepository:
         )
         return [_album(row) for row in rows]
 
+    def delete_album(self, identifier: str) -> bool:
+        return (
+            self.connection.execute("DELETE FROM album WHERE id = ?", (identifier,)).rowcount == 1
+        )
+
     def add_album_asset(self, album_id: str, asset_id: str) -> bool:
         cursor = self.connection.execute(
             "INSERT OR IGNORE INTO album_asset(album_id, asset_id) VALUES (?, ?)",
