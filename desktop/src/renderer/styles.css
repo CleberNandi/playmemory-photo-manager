@@ -359,3 +359,8 @@ button:disabled { opacity: .52; }
 .facet-options li { min-width: 0; }
 .facet-options li button { overflow-wrap: anywhere; text-align: left; }
 .facet-options p { margin: 4px 0; }
+
+.album-panel { display: grid; gap: 6px; padding: 8px 0; }
+.album-panel form, .album-panel label { display: grid; gap: 4px; min-width: 0; }
+.album-panel input, .album-panel select { width: 100%; min-width: 0; box-sizing: border-box; }
+.album-panel p { margin: 4px 0; }

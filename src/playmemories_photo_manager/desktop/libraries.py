@@ -22,6 +22,53 @@ def _uuid(value: object) -> str:
     return value
 
 
+def _album_action(active, params):
+    from ..catalog import Catalog
+    from ..catalog.errors import (
+        CatalogError,
+        InvalidInputError,
+        InvalidReferenceError,
+        NotFoundError,
+    )
+
+    fields = set(params) - {"session_id"}
+    action = params.get("action")
+    try:
+        if action == "list" and fields == {"action", "offset"}:
+            offset = params["offset"]
+            if type(offset) is not int or not 0 <= offset <= 2**53 - 51:
+                raise LibraryError("invalid_request")
+            albums = Catalog(active.query_connection).list_albums(limit=51, offset=offset)
+            return {
+                "albums": [{"id": album.id, "name": album.name} for album in albums[:50]],
+                "next_offset": offset + 50 if len(albums) > 50 else None,
+            }
+        if action == "create" and fields == {"action", "name"}:
+            name = params["name"]
+            if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120 or "\0" in name:
+                raise LibraryError("invalid_request")
+            with active.command_connection() as connection:
+                album = Catalog(connection).create_album(name.strip())
+            return {"id": album.id, "name": album.name}
+        if action in ("add", "remove") and fields == {"action", "album_id", "asset_id"}:
+            album_id, asset_id = _uuid(params["album_id"]), _uuid(params["asset_id"])
+            with active.command_connection() as connection:
+                catalog = Catalog(connection)
+                change = (
+                    catalog.add_asset_to_album
+                    if action == "add"
+                    else catalog.remove_asset_from_album
+                )
+                return {"changed": change(album_id, asset_id)}
+        raise LibraryError("invalid_request")
+    except InvalidInputError:
+        raise LibraryError("invalid_request") from None
+    except (InvalidReferenceError, NotFoundError):
+        raise LibraryError("not_found") from None
+    except CatalogError:
+        raise LibraryError("outcome_unknown") from None
+
+
 class LibraryDispatcher:
     """Only the authenticated main process can supply a native selection path."""
 
@@ -164,6 +211,7 @@ class LibraryDispatcher:
             "asset.reveal",
             "annotation.favorite",
             "annotation.edit",
+            "album.action",
             "gallery.list",
             "gallery.facets",
             "calendar.summary",
@@ -187,6 +235,8 @@ class LibraryDispatcher:
             if set(params) != {"session_id", "asset_id"}:
                 raise LibraryError("invalid_request")
             return reveal_location(active.query_connection, _uuid(params["asset_id"]))
+        if method == "album.action":
+            return _album_action(active, params)
         if method == "annotation.edit":
             from ..catalog import Catalog
             from ..catalog.errors import (

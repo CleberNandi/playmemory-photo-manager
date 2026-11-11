@@ -80,3 +80,15 @@ bibliotecas, migrações ou alterações de dependências.
 - Revalidação: 554 testes Python, Ruff, formatação, typecheck, 104 testes desktop
   (17 arquivos), ESLint e build. Chromium headless verificou exclusividade,
   clique externo, ação, Escape/foco e layout nos tamanhos anteriores.
+
+## Álbuns virtuais no catálogo real
+
+Abra **Álbuns** na barra lateral, dê um nome e clique em **Criar álbum**. Com um item
+selecionado na galeria, escolha o álbum e use **Adicionar item selecionado**. **Abrir
+álbum** mostra a coleção na mesma galeria, com paginação, filtros e visualizador.
+Dentro da coleção, **Remover item deste álbum** desfaz apenas a associação. O item
+continua na biblioteca.
+
+A criação e a associação usam os comandos de catálogo existentes. Adicionar o
+mesmo item novamente é idempotente. As associações persistem ao reabrir o catálogo
+e respeitam a sessão ativa. O demo mantém a opção desabilitada.

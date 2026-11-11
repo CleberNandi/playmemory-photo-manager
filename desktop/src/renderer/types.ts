@@ -63,7 +63,10 @@ declare global {
       setReopenLibrary?(value: boolean): Promise<LibraryState>;
       forgetLibrary?(): Promise<LibraryState>;
       listFilterOptions?(facet: Facet, keyword: string, offset: number): Promise<FilterOptionsPage>;
-      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
+      listAlbums?(offset: number): Promise<{albums: Album[]; next_offset: number | null}>;
+      createAlbum?(name: string): Promise<Album>;
+      changeAlbumMembership?(albumId: string, assetId: string, action: "add" | "remove"): Promise<{changed: boolean}>;
+      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; albumId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
       saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;
       getImageSaveStatus?(jobId:string):Promise<ImageSaveJob>;
       showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|null>;
@@ -137,3 +140,5 @@ export interface DuplicateListParams {pageSize?: number; after?: string | null}
 export interface DuplicateGroupParams extends DuplicateListParams {snapshotId: string; groupKey: string}
 
 export interface ImageSaveJob {job_id:string;asset_id:string;state:string;result_asset_id:string|null;error:string|null}
+
+export type Album = {id: string; name: string};

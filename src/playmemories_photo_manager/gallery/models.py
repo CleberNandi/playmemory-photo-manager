@@ -55,6 +55,7 @@ class GalleryQuery:
     media_type: str | None = None
     camera: str | None = None
     lens: str | None = None
+    album_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

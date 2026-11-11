@@ -108,6 +108,8 @@ class GalleryQueries:
                       SELECT 1 FROM file_location fl
                       WHERE fl.asset_id = a.id AND fl.library_root_id = ?
                   ))
+                  AND (? IS NULL OR EXISTS (SELECT 1 FROM album_asset aa
+                    WHERE aa.asset_id=a.id AND aa.album_id=?))
                   AND (? IS NULL OR a.media_type = ?)
                   AND (? IS NULL OR EXISTS (SELECT 1 FROM user_annotation ua
                     WHERE ua.asset_id = a.id AND ua.rating = ?))
@@ -145,6 +147,7 @@ class GalleryQueries:
             *([filters["capture_period"]] * 5),
             filters["root_id"],
             filters["root_id"],
+            *([filters.get("album_id")] * 2),
             *([filters.get("media_type")] * 2),
             *([filters.get("rating")] * 2),
             *([filters.get("tag_id")] * 2),
@@ -349,6 +352,7 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         query.media_type,
         query.camera,
         query.lens,
+        _canonical_uuid(query.album_id, "album_id") if query.album_id is not None else None,
     )
 
 
@@ -356,7 +360,7 @@ def _filter_values(query: GalleryQuery) -> dict[str, str | int | bool | None]:
     return {
         **{
             field: getattr(query, field)
-            for field in ("keyword", "tag_id", "rating", "media_type", "camera", "lens")
+            for field in ("keyword", "tag_id", "rating", "media_type", "camera", "lens", "album_id")
             if getattr(query, field) is not None
         },
         **({"newest_first": True} if query.newest_first else {}),

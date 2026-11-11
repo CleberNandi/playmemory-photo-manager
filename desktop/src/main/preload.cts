@@ -17,7 +17,11 @@ contextBridge.exposeInMainWorld("photoManager", {
   refreshFolders:()=>ipcRenderer.invoke("index:refresh"),
   onGalleryChanged:(listener:()=>void)=>{const notify=()=>listener();ipcRenderer.on("gallery:changed",notify);return ()=>ipcRenderer.removeListener("gallery:changed",notify);},
   listFilterOptions: (facet: string, keyword: string, offset: number) => scoped("gallery:facets", {facet, keyword, offset}),
-  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; filters?: Record<string, string | number> } = {}) =>
+  listAlbums: (offset: number) => scoped("album:action", {action:"list", offset}),
+  createAlbum: (name: string) => scoped("album:action", {action:"create", name}),
+  changeAlbumMembership: (albumId: string, assetId: string, action: "add" | "remove") =>
+    scoped("album:action", {action, album_id:albumId, asset_id:assetId}),
+  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; albumId?: string; filters?: Record<string, string | number> } = {}) =>
     scoped("gallery:list", params),
   saveRotation:(assetId:string,angle:number,mode:"replace"|"copy")=>scoped("image:save",{assetId,angle,mode}),
   getImageSaveStatus:(jobId:string)=>scoped("image:save-status",jobId),

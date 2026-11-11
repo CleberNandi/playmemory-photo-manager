@@ -204,3 +204,47 @@ def test_annotation_edits_persist_and_reuse_normalized_tags(library):
     assert not dispatcher.request("asset.details", {"session_id": session, "asset_id": other})[
         "tags"
     ]
+
+
+def test_album_membership_scopes_pages_and_survives_reopening(library):
+    dispatcher, path, session, assets = library
+
+    def action(operation, **params):
+        return dispatcher.request(
+            "album.action", {"session_id": session, "action": operation, **params}
+        )
+
+    album = action("create", name=" Viagem ")
+    album_id = album["id"]
+    assert album["name"] == "Viagem"
+    assert action("list", offset=0) == {"albums": [album], "next_offset": None}
+    assert action("add", album_id=album_id, asset_id=assets[0]) == {"changed": True}
+    assert action("add", album_id=album_id, asset_id=assets[0]) == {"changed": False}
+    assert action("add", album_id=album_id, asset_id=assets[-1]) == {"changed": True}
+    with pytest.raises(LibraryError, match="not_found"):
+        action("add", album_id=album_id, asset_id=str(uuid4()))
+    with pytest.raises(LibraryError, match="invalid_request"):
+        action("list", offset=True)
+    with pytest.raises(LibraryError, match="invalid_request"):
+        action("create", name="  ")
+    with connect(path) as connection:
+        queries = GalleryQueries(connection)
+        first = queries.list_assets(GalleryQuery(album_id=album_id, page_size=1))
+        second = queries.list_assets(GalleryQuery(album_id=album_id, after=first.next_cursor))
+        assert {item.asset_id for item in (*first.items, *second.items)} == {assets[0], assets[-1]}
+        with pytest.raises(InvalidCursorError):
+            queries.list_assets(GalleryQuery(after=first.next_cursor))
+    old_session = session
+    dispatcher.request("library.close", {"session_id": session})
+    session = dispatcher.request(
+        "library.open", {"path": str(path), "library_handle": str(uuid4())}
+    )["session"]["session_id"]
+    assert action("list", offset=0)["albums"] == [album]
+    with pytest.raises(LibraryError, match="stale_session"):
+        dispatcher.request(
+            "album.action", {"session_id": old_session, "action": "list", "offset": 0}
+        )
+    assert action("remove", album_id=album_id, asset_id=assets[0]) == {"changed": True}
+    scoped = dispatcher.request("gallery.list", {"session_id": session, "album_id": album_id})
+    assert [item["asset_id"] for item in scoped["items"]] == [assets[-1]]
+    assert dispatcher.request("asset.details", {"session_id": session, "asset_id": assets[0]})

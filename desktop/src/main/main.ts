@@ -96,7 +96,7 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
       const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
@@ -130,14 +130,32 @@ app.whenReady().then(async () => {
         offset > Number.MAX_SAFE_INTEGER - 24) throw new Error("invalid_request");
     return query("gallery.facets", sessionId, {facet, keyword, offset});
   });
+  register("album:action", 1, (raw) => {
+    const {sessionId, params} = envelope(raw);
+    if (demo || !params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
+    const input = params as Record<string, unknown>;
+    const keys = Object.keys(input).sort().join();
+    if (input.action === "list" && keys === "action,offset" &&
+        typeof input.offset === "number" && Number.isSafeInteger(input.offset) &&
+        input.offset >= 0 && input.offset <= Number.MAX_SAFE_INTEGER - 50)
+      return libraries.query("album.action", sessionId, input);
+    if (input.action === "create" && keys === "action,name" && typeof input.name === "string" &&
+        input.name.trim() && input.name.length <= 120 && !input.name.includes("\0"))
+      return libraries.query("album.action", sessionId, input);
+    if ((input.action === "add" || input.action === "remove") && keys === "action,album_id,asset_id" &&
+        canonicalId(input.album_id) && canonicalId(input.asset_id))
+      return libraries.query("album.action", sessionId, input);
+    throw new Error("invalid_request");
+  });
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; filters?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "filters"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; albumId?: unknown; filters?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "albumId", "filters"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
     if (p.rootId !== undefined && (typeof p.rootId !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(p.rootId))) throw new Error("invalid_request");
+    if (p.albumId !== undefined && !canonicalId(p.albumId)) throw new Error("invalid_request");
     const filters: Record<string, unknown> = {};
     if (p.filters !== undefined) {
       if (!p.filters || typeof p.filters !== "object" || Array.isArray(p.filters)) throw new Error("invalid_request");
@@ -151,7 +169,7 @@ app.whenReady().then(async () => {
         filters[key] = value;
       }
     }
-    return query("gallery.list", sessionId, {...filters, include_facets:!p.after, include_roots:!p.after, ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+    return query("gallery.list", sessionId, {...filters, ...(p.albumId ? {album_id:p.albumId} : {}), include_facets:!p.after, include_roots:!p.after, ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
   });
   imageEdits=new ImageEdits(libraries,async(source,angle)=>{
     if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return join(dirname(source),basename(source,extname(source))+"-rotacionada"+extname(source));
