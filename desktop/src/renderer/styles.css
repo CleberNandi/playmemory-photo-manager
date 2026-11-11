@@ -366,3 +366,4 @@ button:disabled { opacity: .52; }
 .album-panel p { margin: 4px 0; }
 .album-panel fieldset { min-width: 0; margin: 0; }
 .album-panel legend { max-width: 100%; overflow-wrap: anywhere; }
+.duplicate-thumbnail { display: block; width: 128px; max-width: 100%; height: auto; }

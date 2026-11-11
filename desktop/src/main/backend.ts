@@ -92,7 +92,7 @@ export class PythonBackend extends EventEmitter {
     await this.start(this.repositoryRoot || undefined);
   }
 
-  async request(method: "album.action" | "index.pulse" | "index.refresh" | "annotation.favorite" | "annotation.edit" | "ingestion.apply" | "ingestion.application_status" | "ingestion.select_root" | "ingestion.prepare" | "ingestion.status" | "ingestion.cancel" | "ingestion.page" | "library.state" | "library.create" | "library.open" | "library.close" | "gallery.list" | "gallery.facets" | "calendar.summary" | "preview.get" | "thumbnail.get" | "image.save" | "image.save_status" | "asset.reveal" | "asset.details" | "duplicates.list" | "duplicates.group", params: Record<string, unknown> = {}): Promise<unknown> {
+  async request(method: "album.action" | "index.pulse" | "index.refresh" | "annotation.favorite" | "annotation.edit" | "ingestion.apply" | "ingestion.application_status" | "ingestion.select_root" | "ingestion.prepare" | "ingestion.status" | "ingestion.cancel" | "ingestion.page" | "library.state" | "library.create" | "library.open" | "library.close" | "gallery.list" | "gallery.facets" | "calendar.summary" | "preview.get" | "thumbnail.get" | "image.save" | "image.save_status" | "asset.reveal" | "asset.details" | "duplicates.start" | "duplicates.list" | "duplicates.group", params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.child || !this.readyPromise || (this.state === "stopped" || this.state === "stopping")) throw new Error("backend is not running");
     await this.readyPromise;
     return this.send(method, params, this.requestTimeoutMs);

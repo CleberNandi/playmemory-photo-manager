@@ -32,6 +32,7 @@ class _CatalogLocation:
     location_id: str
     root_id: str
     root_path: str
+    root_display_name: str
     root_availability: str
     relative_path: str
     entry_type: str
@@ -60,7 +61,11 @@ class _Candidate:
 
 def find_exact_duplicates(connection: sqlite3.Connection) -> ExactDuplicateResult:
     """Hash eligible catalog locations without mutating the catalog or media tree."""
-    rows = _catalog_locations(connection)
+    return observe_exact_duplicates(read_exact_duplicate_inventory(connection))
+
+
+def observe_exact_duplicates(rows: tuple[_CatalogLocation, ...]) -> ExactDuplicateResult:
+    """Observe a catalog inventory after its database read has finished."""
     eligible_count = sum(
         row.root_availability == "available"
         and row.availability == "present"
@@ -242,12 +247,13 @@ def find_exact_duplicates(connection: sqlite3.Connection) -> ExactDuplicateResul
     )
 
 
-def _catalog_locations(connection: sqlite3.Connection) -> tuple[_CatalogLocation, ...]:
+def read_exact_duplicate_inventory(connection: sqlite3.Connection) -> tuple[_CatalogLocation, ...]:
     with _read_snapshot(connection):
         rows = connection.execute(
             """SELECT a.id AS asset_id, a.sha256 AS asset_sha256, a.hash_state,
                 fl.id AS location_id, fl.library_root_id AS root_id,
-                lr.normalized_path AS root_path, lr.availability AS root_availability,
+                lr.normalized_path AS root_path, lr.display_name AS root_display_name,
+                lr.availability AS root_availability,
                 fl.normalized_relative_path AS relative_path, fl.entry_type, fl.availability,
                 fl.observed_byte_size AS observed_size, fl.observed_mtime_ns, fl.filesystem_id
             FROM file_location AS fl

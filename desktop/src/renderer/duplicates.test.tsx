@@ -114,8 +114,33 @@ it("reopens a stale snapshot without mixing its pages", async () => {
   const b = bridge();
   b.listDuplicates = vi.fn().mockResolvedValueOnce({status: 'ready', page: {...list(), next_cursor: 'old'}}).mockResolvedValueOnce({status: 'stale_snapshot'}).mockResolvedValueOnce({status: 'ready', page: {...list([group('new')]), snapshot_id: 'new-session'}});
   await mount(); await navigate(); await click('.more-groups');
-  expect(host.textContent).toContain('A sessão de demonstração mudou');
+  expect(host.textContent).toContain('O resultado da busca mudou');
   await click('.duplicates-view [role=alert] button');
   expect(host.querySelectorAll('.group-select')).toHaveLength(1);
-  expect(host.textContent).not.toContain('A sessão de demonstração mudou');
+  expect(host.textContent).not.toContain('O resultado da busca mudou');
+});
+
+it("starts a real scan on demand and reviews the photo and its catalog location", async () => {
+  const b = bridge();
+  const observed = {source: "catalog_scan", observed_at: "2026-11-11T12:00:00Z", freshness: "point_in_time"} as const;
+  const detail = members();
+  b.listDuplicates = vi.fn().mockResolvedValueOnce({status: "analysis_not_available"})
+    .mockResolvedValueOnce({status: "scanning"})
+    .mockResolvedValue({status: "ready", page: {...list(), ...observed}});
+  b.startDuplicateScan = vi.fn().mockResolvedValue({status: "scanning"});
+  b.getDuplicateGroup = vi.fn().mockResolvedValue({status: "ready", page: {
+    ...detail, ...observed, members: detail.members.map(member => ({...member, location_source: "catalog", relative_path: "cópias/foto.jpg"})),
+  }});
+  b.getThumbnail = vi.fn().mockResolvedValue({media_type: "image/png", width: 256, height: 160, base64: "iVBORw0KGgo="});
+  await act(async () => root.render(<DuplicatesView canScan onAsset={vi.fn()} detailsOpen={false} onClearAsset={vi.fn()} />));
+  expect(b.startDuplicateScan).not.toHaveBeenCalled();
+  await click(".duplicate-start");
+  expect(host.textContent).toContain("Analisando os arquivos catalogados");
+  expect(b.startDuplicateScan).toHaveBeenCalledOnce();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  await click(".group-select");
+  expect(host.querySelector(".synthetic-banner")).toBeNull();
+  expect(host.querySelector(".duplicate-group")?.textContent).toContain("cópias/foto.jpg");
+  expect(host.querySelector(".duplicate-thumbnail")).not.toBeNull();
+  expect(b.getThumbnail).toHaveBeenCalledWith("first");
 });

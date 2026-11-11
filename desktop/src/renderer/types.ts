@@ -78,6 +78,7 @@ declare global {
       editAnnotation?(assetId: string, field: AnnotationField, value: string | number | null): Promise<unknown>;
       getPreview?(assetId: string, variant?: "dimensions" | "original", offset?: number): Promise<unknown>;
       getThumbnail?(assetId: string): Promise<unknown>;
+      startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
       getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;
       onBackendReset?(listener: () => void): () => void;
@@ -118,7 +119,7 @@ export type DetailsResult = {status: "ready"; details: AssetDetails} | {status: 
 export interface DuplicateMember {
   asset_id: string; location_id: string; library_root_id: string;
   root_display_name: string; relative_path: string;
-  location_source: "catalog_fixture" | "projection_fixture";
+  location_source: "catalog_fixture" | "projection_fixture" | "catalog";
   hardlinked: boolean; identity_conflict: boolean; protected: boolean | null; blocks: string[];
 }
 export interface DuplicateGroup {
@@ -128,15 +129,16 @@ export interface DuplicateGroup {
   review: {decision_id: string; status: "current" | "stale"; keep_location_id: string; reason: string} | null;
 }
 export interface DuplicatePage {
-  version: 1; snapshot_id: string; source: "synthetic_fixture"; observed_at: null; freshness: "synthetic";
+  version: 1; snapshot_id: string; source: "synthetic_fixture" | "catalog_scan"; observed_at: string | null; freshness: "synthetic" | "point_in_time";
   coverage: "complete" | "partial" | "unavailable";
   issues: {kind: string; asset_id: string; location_id: string; library_root_id: string; relative_path: string}[];
+  issue_count?: number;
   eligible_location_count: number; hashed_location_count: number;
   total_count: number; next_cursor: string | null;
 }
 export interface DuplicateListPage extends DuplicatePage {groups: DuplicateGroup[]}
 export interface DuplicateGroupPage extends DuplicatePage {group: DuplicateGroup; members: DuplicateMember[]}
-export type DuplicateResult<P> = {status: "ready"; page: P} | {status: "analysis_not_available" | "temporarily_unavailable" | "internal_error" | "invalid_request" | "stale_snapshot" | "not_found" | "response_too_large"};
+export type DuplicateResult<P> = {status: "ready"; page: P} | {status: "scanning" | "analysis_not_available" | "temporarily_unavailable" | "internal_error" | "invalid_request" | "stale_snapshot" | "not_found" | "response_too_large"};
 export interface DuplicateListParams {pageSize?: number; after?: string | null}
 export interface DuplicateGroupParams extends DuplicateListParams {snapshotId: string; groupKey: string}
 

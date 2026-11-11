@@ -267,3 +267,87 @@ def test_member_cursor_cannot_cross_groups_and_default_page_is_24(fixture):
     assert p.request("duplicates.list", {"after": page["next_cursor"]}) == {
         "status": "invalid_request"
     }
+
+
+def test_real_bridge_scans_catalogued_jpegs_and_pages_their_locations(tmp_path):
+    from hashlib import sha256
+    from time import monotonic, sleep
+    from uuid import uuid4
+
+    from jpeg_fixtures import jpeg
+    from test_desktop_ingestion import Client
+
+    from playmemories_photo_manager.catalog import Catalog, connect
+
+    catalog_path = tmp_path / "library.sqlite3"
+    media = tmp_path / "photos"
+    (media / "copies").mkdir(parents=True)
+    duplicate = jpeg()
+    other = jpeg(width=7)
+    assert len(duplicate) == len(other) and duplicate != other
+    files = {"photo.jpg": duplicate, "copies/photo.jpg": duplicate, "different.jpg": other}
+    for name, data in files.items():
+        (media / name).write_bytes(data)
+    (media / "uncatalogued.jpg").write_bytes(duplicate)
+
+    client = Client(enabled=False)
+    try:
+        selection = {"path": str(catalog_path), "library_handle": str(uuid4())}
+        session = client.request("library.create", selection)["result"]["session"]["session_id"]
+        with connect(catalog_path) as connection:
+            catalog = Catalog(connection)
+            root = catalog.register_root("Fotos de teste", str(media))
+            for name in (*files, "missing.jpg"):
+                asset = catalog.create_asset("photo")
+                catalog.register_location(
+                    asset.id, root.id, name, last_seen_at="2026-11-11T00:00:00Z"
+                )
+        catalog_bytes = catalog_path.read_bytes()
+
+        def call(method, **params):
+            return client.request(method, {"session_id": session, **params})["result"]
+
+        def completed():
+            deadline = monotonic() + 5
+            while monotonic() < deadline:
+                result = call("duplicates.list")
+                if result["status"] != "scanning":
+                    assert result["status"] == "ready"
+                    return result["page"]
+                sleep(0.02)
+            pytest.fail("duplicate scan timed out")
+
+        assert call("duplicates.list") == {"status": "analysis_not_available"}
+        assert call("duplicates.start", path=str(media)) == {"status": "invalid_request"}
+        assert call("duplicates.start") == {"status": "scanning"}
+        page = completed()
+        assert page["source"] == "catalog_scan" and page["observed_at"]
+        assert page["coverage"] == "partial"
+        assert page["issue_count"] == 1 and page["issues"][0]["relative_path"] == "missing.jpg"
+        assert page["eligible_location_count"] == 4 and page["hashed_location_count"] == 3
+        assert len(page["groups"]) == 1
+        group = page["groups"][0]
+        assert group["sha256"] == sha256(duplicate).hexdigest()
+        assert group["occurrence_count"] == group["physical_copy_count"] == 2
+        params = {
+            "snapshot_id": page["snapshot_id"],
+            "group_key": group["group_key"],
+            "page_size": 1,
+        }
+        first = call("duplicates.group", **params)["page"]
+        second = call("duplicates.group", **params, after=first["next_cursor"])["page"]
+        members = first["members"] + second["members"]
+        assert [member["relative_path"] for member in members] == ["copies/photo.jpg", "photo.jpg"]
+        assert {member["root_display_name"] for member in members} == {"Fotos de teste"}
+        assert str(media) not in json.dumps(members)
+        assert call("duplicates.start") == {"status": "scanning"}
+        assert completed()["snapshot_id"] != page["snapshot_id"]
+        assert call("duplicates.group", **params) == {"status": "stale_snapshot"}
+        assert catalog_path.read_bytes() == catalog_bytes
+        assert {name: (media / name).read_bytes() for name in files} == files
+
+        call("library.close")
+        session = client.request("library.open", selection)["result"]["session"]["session_id"]
+        assert call("duplicates.list") == {"status": "analysis_not_available"}
+    finally:
+        client.close()

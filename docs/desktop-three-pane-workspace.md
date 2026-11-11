@@ -92,3 +92,7 @@ continua na biblioteca.
 A criação e a associação usam os comandos de catálogo existentes. Adicionar o
 mesmo item novamente é idempotente. As associações persistem ao reabrir o catálogo
 e respeitam a sessão ativa. O demo mantém a opção desabilitada.
+
+Para excluir uma coleção, selecione-a e use **Excluir álbum**. A confirmação mostra seu
+nome. O catálogo remove a coleção e seus vínculos. Os itens, originais e vínculos com
+outros álbuns são preservados. Se a coleção estiver aberta, a galeria volta à Biblioteca.

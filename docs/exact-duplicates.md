@@ -55,8 +55,23 @@ leitura. Elas não criam snapshot atômico contra todo escritor concorrente; o r
 sendo evidência pontual read-only. A leitura pode atualizar atime ou causar efeitos próprios do
 filesystem, driver ou mídia remota.
 
+## Busca e revisão no desktop
+
+Em uma biblioteca aberta, **Ferramentas → Duplicatas exatas → Buscar duplicatas** inicia uma
+leitura em segundo plano das localizações já catalogadas. Abrir a tela consulta o resultado
+da sessão. Grupos e ocorrências têm paginação vinculada ao mesmo resultado. A interface
+mostra miniaturas do catálogo quando disponíveis, raiz, caminho relativo, SHA-256 e
+contagem de cópias físicas independentes. O resultado fica em memória e pode ser refeito
+com **Buscar novamente**. Ao fechar ou trocar de biblioteca, a interface descarta o resultado
+da sessão anterior. Cobertura parcial ou indisponível aparece no resultado, com contagem e
+amostra dos impedimentos. Os dados do modo demo permanecem identificados como sintéticos.
+
+O Duplicate Lab confirmou o pré-agrupamento por tamanho antes do hashing integral. O detector
+do Photo Manager já aplica essa estratégia e a adapta às identidades e ao confinamento do
+catálogo. Similaridade visual, critérios de retenção e quarentena do Lab ficam fora desta entrega.
+
 ## Fora de escopo
 
-Não há scanner ou CLI, persistência do hash no Asset, similaridade visual, quarentena, restauração,
-interface ou mutação física do acervo. Igualdade binária e escolha de preservação não alteram a
+Persistência do hash no Asset, similaridade visual, decisão de retenção pelo desktop,
+quarentena, restauração e mutação física do acervo. Igualdade binária e escolha de preservação não alteram a
 identidade lógica: Assets, anotações e todas as FileLocations são preservados.

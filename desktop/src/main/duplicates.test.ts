@@ -15,3 +15,11 @@ it.each([["backend_failure", "internal_error"], ["invalid_request", "invalid_req
   const backend = {request: vi.fn().mockRejectedValue(Object.assign(new Error("/private/token=secret"), {code}))};
   expect(await duplicatesRequest(backend, "duplicates.list", {})).toEqual({status});
 });
+
+it("starts scanning with an empty command and rejects renderer-provided paths", async () => {
+  const backend = {request: vi.fn().mockResolvedValue({status: "scanning"})};
+  expect(await duplicatesRequest(backend, "duplicates.start", {path: "/tmp"})).toEqual({status: "invalid_request"});
+  expect(backend.request).not.toHaveBeenCalled();
+  expect(await duplicatesRequest(backend, "duplicates.start", {})).toEqual({status: "scanning"});
+  expect(backend.request).toHaveBeenCalledExactlyOnceWith("duplicates.start", {});
+});

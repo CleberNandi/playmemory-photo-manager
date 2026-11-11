@@ -1,4 +1,4 @@
-"""Session-only synthetic presentation. No detector, planner, or filesystem access."""
+"""Paginated desktop projection for exact-duplicate observations and demo fixtures."""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ import binascii
 import copy
 import json
 import sqlite3
+from collections import defaultdict
+from dataclasses import asdict
+from datetime import UTC, datetime
 from uuid import UUID, uuid4, uuid5
 
 from playmemories_photo_manager.duplicates.models import (
@@ -24,6 +27,7 @@ from playmemories_photo_manager.duplicates.models import (
 from playmemories_photo_manager.duplicates.models import (
     DuplicatePlanState as Plan,
 )
+from playmemories_photo_manager.duplicates.models import ExactDuplicateResult
 
 ORDER = "sha256-size/root-name-relative-location-v1"
 MAX_RESPONSE_BYTES = 240 * 1024  # Leaves room for the authenticated response envelope.
@@ -151,6 +155,78 @@ def synthetic_groups(connection: sqlite3.Connection) -> tuple[list[dict], list[d
     return groups, issues
 
 
+def observed_presentation(
+    result: ExactDuplicateResult, root_names: dict[str, str]
+) -> DuplicatePresentation:
+    groups = []
+    for group in result.groups:
+        assets_by_identity: dict[tuple[int, int], set[str]] = defaultdict(set)
+        for member in group.members:
+            assets_by_identity[member.physical_identity].add(member.asset_id)
+        members = []
+        for member in group.members:
+            conflict = len(assets_by_identity[member.physical_identity]) > 1
+            blocks = []
+            if member.is_hardlinked:
+                blocks.append(Block.HARDLINK)
+            if conflict:
+                blocks.append(Block.IDENTITY_CONFLICT)
+            members.append(
+                dict(
+                    location_id=member.location_id,
+                    asset_id=member.asset_id,
+                    library_root_id=member.library_root_id,
+                    root_display_name=root_names[member.library_root_id],
+                    relative_path=member.relative_path,
+                    location_source="catalog",
+                    hardlinked=member.is_hardlinked,
+                    identity_conflict=conflict,
+                    protected=None,
+                    blocks=blocks,
+                )
+            )
+        members.sort(key=lambda m: (m["root_display_name"], m["relative_path"], m["location_id"]))
+        blocks = {block for member in members for block in member["blocks"]}
+        if result.coverage != Coverage.COMPLETE:
+            blocks.add(Block.INCOMPLETE_COVERAGE)
+        groups.append(
+            dict(
+                group_key=f"{group.sha256}:{group.byte_size}",
+                sha256=group.sha256,
+                byte_size=str(group.byte_size),
+                evidence_fingerprint=None,
+                occurrence_count=len(members),
+                physical_copy_count=group.physical_copy_count,
+                blocks=sorted(blocks),
+                plan_state=None,
+                review=None,
+                members=members,
+            )
+        )
+    # Keep diagnostic samples small so even libraries with many offline files can page groups.
+    issues = []
+    issue_bytes = 0
+    for issue in result.issues[:20]:
+        item = asdict(issue)
+        issue_bytes += len(_canonical(item))
+        if issue_bytes > 24 * 1024:
+            break
+        issues.append(item)
+    return DuplicatePresentation(
+        groups,
+        issues,
+        coverage=result.coverage,
+        observation=dict(
+            source="catalog_scan",
+            observed_at=datetime.now(UTC).isoformat(),
+            freshness="point_in_time",
+            eligible_location_count=result.eligible_location_count,
+            hashed_location_count=result.hashed_location_count,
+            issue_count=len(result.issues),
+        ),
+    )
+
+
 class DuplicatePresentation:
     """A read model bound to one bridge session, never a persisted analysis."""
 
@@ -161,11 +237,19 @@ class DuplicatePresentation:
         *,
         coverage: Coverage = Coverage.PARTIAL,
         snapshot_id: str | None = None,
+        observation: dict | None = None,
     ) -> None:
         self.groups = copy.deepcopy(groups)
         self.issues = copy.deepcopy(issues)
         self.coverage = coverage
         self.snapshot_id = snapshot_id or str(uuid4())
+        self.observation = observation or dict(
+            source="synthetic_fixture",
+            observed_at=None,
+            freshness="synthetic",
+            eligible_location_count=sum(g["occurrence_count"] for g in self.groups),
+            hashed_location_count=0,
+        )
 
     def request(self, method: str, params: object) -> dict:
         try:
@@ -213,13 +297,9 @@ class DuplicatePresentation:
         page = dict(
             version=1,
             snapshot_id=self.snapshot_id,
-            source="synthetic_fixture",
-            observed_at=None,
-            freshness="synthetic",
+            **self.observation,
             coverage=self.coverage,
             issues=self.issues,
-            eligible_location_count=sum(g["occurrence_count"] for g in self.groups),
-            hashed_location_count=0,
             total_count=len(items),
             next_cursor=_encode(
                 dict(v=1, snapshot=self.snapshot_id, order=ORDER, group=group_key, offset=end)
@@ -248,8 +328,17 @@ class DuplicatePresentation:
 
         check_numbers(page)
         result = {"status": "ready", "page": page}
-        if len(_canonical(result)) > MAX_RESPONSE_BYTES:
-            raise PresentationError("response_too_large")
+        while len(_canonical(result)) > MAX_RESPONSE_BYTES:
+            if self.observation["source"] != "catalog_scan" or end - offset <= 1:
+                raise PresentationError("response_too_large")
+            end = offset + (end - offset) // 2
+            if group is None:
+                page["groups"] = page["groups"][: end - offset]
+            else:
+                page["members"] = page["members"][: end - offset]
+            page["next_cursor"] = _encode(
+                dict(v=1, snapshot=self.snapshot_id, order=ORDER, group=group_key, offset=end)
+            )
         return result
 
 

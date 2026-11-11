@@ -301,7 +301,7 @@ function GalleryApp() {
           </div>
         </section>}
       </div>
-      {view === "duplicates" && <DuplicatesView key={generation} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={selectAsset} />}
+      {view === "duplicates" && <DuplicatesView key={generation} canScan={!!session} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={selectAsset} />}
     </main>
     {propertiesOpen && <>
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />

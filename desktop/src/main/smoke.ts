@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -366,6 +366,21 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await evaluate('document.querySelector(".card-select").click()');
  await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
  console.log("SMOKE ALBUMS PASS: create, add, browse, remove, cancel/confirm delete, and original bytes unchanged");
+ await click("Duplicatas exatas");
+ await wait('document.querySelector(".duplicates-view")?.textContent.includes("Nenhuma mídia foi analisada")');
+ await click("Buscar duplicatas");
+ await wait('document.querySelectorAll(".group-select").length===1');
+ await evaluate('document.querySelector(".group-select").click()');
+ await wait('document.querySelectorAll(".duplicate-members > li").length===24 && document.querySelector(".duplicate-thumbnail")?.naturalWidth===256');
+ if (!await evaluate<boolean>('document.querySelector(".duplicate-group").textContent.includes("125 cópias físicas independentes") && document.querySelector(".duplicate-members").textContent.includes("image-000.jpg")')) throw new Error("wrong duplicate review");
+ await click("Carregar mais membros");
+ await wait('document.querySelectorAll(".duplicate-members > li").length===48');
+ if (!(await readFile(location.path)).equals(originalBytes)) throw new Error("duplicate scan changed original");
+ await click("Biblioteca");
+ await wait('document.querySelectorAll(".media-card").length===24');
+ await evaluate('document.querySelector(".card-select").click()');
+ await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
+ console.log("SMOKE REAL DUPLICATES PASS: explicit scan, 125 exact copies, paginated locations, decoded thumbnail, and original bytes unchanged");
  await evaluate('Array.from(document.querySelectorAll(".property-section > summary")).find(node=>node.textContent==="Informações adicionadas pelo usuário").click()');
  await evaluate('document.querySelector(`[aria-label="4 estrelas"]`).click()');
  await wait('document.querySelector(`[aria-label="4 estrelas"]`)?.getAttribute("aria-pressed")==="true"');

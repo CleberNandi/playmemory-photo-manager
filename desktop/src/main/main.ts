@@ -96,7 +96,7 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","duplicates:start","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
       const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
@@ -292,11 +292,12 @@ app.whenReady().then(async () => {
     try { return await query("thumbnail.get", sessionId, {asset_id: assetId}); }
     finally { thumbnailRequests--; }
   });
-  for (const [channel, method] of [["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"]] as const) {
+  for (const [channel, method] of [["duplicates:start", "duplicates.start"], ["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"]] as const) {
     register(channel, 1, (raw) => {
       const {sessionId, params} = envelope(raw);
       const scoped = {request: (m: Parameters<PythonBackend["request"]>[0], p: Record<string, unknown> = {}) => {
-        if (m !== "duplicates.list" && m !== "duplicates.group") throw new Error("invalid_request");
+        if (m !== "duplicates.start" && m !== "duplicates.list" && m !== "duplicates.group") throw new Error("invalid_request");
+        if (demo && m === "duplicates.start") return Promise.resolve({status: "invalid_request"});
         return demo ? backend.request(m, p) : libraries.query(m, sessionId, p);
       }};
       return duplicatesRequest(scoped, method, params);

@@ -7,6 +7,7 @@ from uuid import UUID
 from ..imaging.rotation import RotationService
 from ..imaging.service import ImageService
 from ..library import LibraryError, LibraryLifecycle
+from .duplicate_scan import DuplicateScan
 from .index_state import IndexState
 from .indexer import FolderIndexer
 
@@ -84,6 +85,7 @@ class LibraryDispatcher:
         self.ingestion = None
         self.images = ImageService()
         self.edits = RotationService()
+        self.duplicate_scan = DuplicateScan()
         self.owner = LibraryLifecycle()
         self.handle: str | None = None
 
@@ -138,6 +140,8 @@ class LibraryDispatcher:
                 "preview.get",
                 "calendar.summary",
                 "asset.reveal",
+                "duplicates.list",
+                "duplicates.group",
             )
         ):
             raise LibraryError("busy")
@@ -169,6 +173,8 @@ class LibraryDispatcher:
             "thumbnail.get",
             "preview.get",
             "calendar.summary",
+            "duplicates.list",
+            "duplicates.group",
         ):
             raise LibraryError("busy")
         if method.startswith("ingestion."):
@@ -190,6 +196,7 @@ class LibraryDispatcher:
             self.images = ImageService()
             action = self.owner.create if method == "library.create" else self.owner.open
             action(Path(raw_path))
+            self.duplicate_scan.clear_session()
             if self.indexer is not None:
                 self.indexer.shutdown()
             self.indexer = None
@@ -208,6 +215,7 @@ class LibraryDispatcher:
                 self.indexer.shutdown()
             self.indexer = None
             self.owner.close()
+            self.duplicate_scan.clear_session()
             self.ingestion = None
             self.handle = None
             return self.state()
@@ -222,6 +230,7 @@ class LibraryDispatcher:
             "asset.details",
             "thumbnail.get",
             "preview.get",
+            "duplicates.start",
             "duplicates.list",
             "duplicates.group",
         ):
@@ -229,10 +238,18 @@ class LibraryDispatcher:
         if "session_id" not in params:
             raise LibraryError("stale_session")
         active = self.require_session(params["session_id"])
+        if method in ("duplicates.list", "duplicates.group"):
+            return self.duplicate_scan.request(
+                active, method, {key: value for key, value in params.items() if key != "session_id"}
+            )
         if self.ingestion is not None and (
             self.ingestion.preparation.busy or self.ingestion.commands.busy
         ):
             raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
+        if method == "duplicates.start":
+            return self.duplicate_scan.request(
+                active, method, {key: value for key, value in params.items() if key != "session_id"}
+            )
         if method == "asset.reveal":
             from .media_location import reveal_location
 
@@ -441,6 +458,7 @@ class LibraryDispatcher:
         if not self.images.shutdown():
             return False
         self.owner.close()
+        self.duplicate_scan.clear_session()
         self.ingestion = None
         self.handle = None
         return True
