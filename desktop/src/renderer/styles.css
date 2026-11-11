@@ -370,3 +370,7 @@ button:disabled { opacity: .52; }
 .media-devices { list-style: none; margin: 4px 0; padding: 0; overflow-wrap: anywhere; }
 .media-devices li { padding: 4px 0; }
 .media-devices li span { display: block; font-size: 0.85em; }
+.rename-preview { overflow-wrap: anywhere; }
+.rename-preview fieldset { display: grid; gap: 6px; min-width: 0; margin: 0; }
+.rename-preview label { display: grid; gap: 4px; min-width: 0; }
+.rename-preview input, .rename-preview select { width: 100%; min-width: 0; box-sizing: border-box; }

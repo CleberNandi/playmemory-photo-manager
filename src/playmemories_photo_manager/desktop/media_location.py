@@ -10,13 +10,14 @@ from ..library import LibraryError
 
 
 @contextmanager
-def held_location(connection, asset_id):
+def held_location(connection, asset_id, *, location_id=None):
     row = connection.execute(
         """SELECT fl.*,lr.normalized_path FROM file_location fl
         JOIN library_root lr ON lr.id=fl.library_root_id
         WHERE fl.asset_id=? AND fl.entry_type='file' AND fl.availability='present'
-        AND lr.availability='available' ORDER BY fl.id LIMIT 1""",
-        (asset_id,),
+        AND lr.availability='available' AND (? IS NULL OR fl.id=?)
+        ORDER BY fl.id LIMIT 1""",
+        (asset_id, location_id, location_id),
     ).fetchone()
     if row is None or not row["filesystem_id"]:
         raise LibraryError("not_found")

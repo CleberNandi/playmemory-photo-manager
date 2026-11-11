@@ -225,6 +225,7 @@ class LibraryDispatcher:
             "asset.reveal",
             "annotation.favorite",
             "annotation.edit",
+            "rename.preview",
             "album.action",
             "gallery.list",
             "gallery.facets",
@@ -265,6 +266,17 @@ class LibraryDispatcher:
             if set(params) != {"session_id", "asset_id"}:
                 raise LibraryError("invalid_request")
             return reveal_location(active.query_connection, _uuid(params["asset_id"]))
+        if method == "rename.preview":
+            from .rename_preview import preview_rename
+
+            if set(params) != {"session_id", "asset_id", "location_id", "stem"}:
+                raise LibraryError("invalid_request")
+            return preview_rename(
+                active.query_connection,
+                _uuid(params["asset_id"]),
+                _uuid(params["location_id"]),
+                params["stem"],
+            )
         if method == "album.action":
             return _album_action(active, params)
         if method == "annotation.edit":

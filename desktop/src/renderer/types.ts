@@ -78,6 +78,7 @@ declare global {
       editAnnotation?(assetId: string, field: AnnotationField, value: string | number | null): Promise<unknown>;
       getPreview?(assetId: string, variant?: "dimensions" | "original", offset?: number): Promise<unknown>;
       getThumbnail?(assetId: string): Promise<unknown>;
+      previewFileRename?(assetId: string, locationId: string, stem: string): Promise<RenamePreview>;
       listMediaDevices?(): Promise<MediaDevices>;
       startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
@@ -149,3 +150,6 @@ export type Album = {id: string; name: string};
 
 export type MediaDevices = {status: "ready"; devices: {id: string; name: string; kind: "imaging" | "storage"}[]; total_count: number}
   | {status: "unsupported" | "unavailable"};
+
+export type RenamePreview = {status: "ready"; current_relative_path: string; proposed_relative_path: string}
+  | {status: "invalid_name" | "same_name" | "name_taken" | "source_unavailable"};

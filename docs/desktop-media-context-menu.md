@@ -75,3 +75,15 @@ pnpm --dir desktop start
 5. Consultar Localização completa nas propriedades e comparar com a pasta escolhida.
 6. Focar o nome e usar Shift+F10; fechar o visualizador e conferir seleção/propriedades preservadas.
 7. Com uma fixture removida/alterada externamente, conferir erro seguro sem abrir outro destino.
+
+## Prévia de renomeação
+
+Em **Propriedades → Resumo → Origem do arquivo**, abra **Prévia de renomeação**,
+escolha a ocorrência e informe o nome sem extensão. A prévia verifica a identidade
+física da origem, preserva a extensão e consulta colisões no mesmo diretório e no
+catálogo. O resultado é pontual e a prévia não reserva o destino.
+
+Para implementar a aplicação, o comando precisará revalidar a origem e o destino
+na confirmação, usar uma operação que recuse sobrescrita e preservar os UUIDs de
+Asset e FileLocation. A recuperação após interrupção entre a atualização física
+e a do SQLite precisa ser testada antes de habilitar a mudança física.

@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,listMediaDevices,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,listMediaDevices,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,previewFileRename,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -338,6 +338,21 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await wait('document.querySelector(".asset-details")?.textContent.includes("80 × 40 px")');
  console.log("SMOKE MEDIA ORIGIN PASS: catalog occurrence resolved, origin shown; native popup and file manager NOT TESTED");
  const originalBytes = await readFile(location.path);
+ await evaluate('document.querySelector(".rename-preview summary").click()');
+ const previewName = (stem: string) => evaluate(`(() => {
+   const field = document.querySelector(".rename-preview input");
+   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, ${JSON.stringify(stem)});
+   field.dispatchEvent(new Event("input", {bubbles:true}));
+ })()`);
+ await previewName("revisada");
+ await click("Verificar nome");
+ await wait('document.querySelector(".rename-preview")?.textContent.includes("Proposto: revisada.jpg")');
+ await previewName(basename(location.path) === "image-000.jpg" ? "image-001" : "image-000");
+ await click("Verificar nome");
+ await wait('document.querySelector(".rename-preview")?.textContent.includes("Já existe um arquivo")');
+ if (!(await readFile(location.path)).equals(originalBytes)) throw new Error("rename preview changed original");
+ await evaluate('document.querySelector(".rename-preview summary").click()');
+ console.log("SMOKE RENAME PREVIEW PASS: selected location, preserved extension, refused collision, original bytes unchanged");
  await click("Álbuns");
  await evaluate(`(() => {
    const field = document.querySelector(".album-panel input");

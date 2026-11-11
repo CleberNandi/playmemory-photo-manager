@@ -122,7 +122,7 @@ export class LibraryController {
     if (epoch !== this.epoch) throw Object.assign(new Error(), {code: "stale_session"});
     return result;
   }
-  async query(method: "album.action" | "annotation.edit" | "gallery.list" | "gallery.facets" | "calendar.summary" | "preview.get" | "image.save" | "image.save_status" | "asset.reveal" | "asset.details" | "thumbnail.get" | "devices.list" | "duplicates.start" | "duplicates.list" | "duplicates.group", sessionId: unknown, params: Record<string, unknown>): Promise<unknown> {
+  async query(method: "album.action" | "annotation.edit" | "gallery.list" | "gallery.facets" | "calendar.summary" | "preview.get" | "image.save" | "image.save_status" | "asset.reveal" | "asset.details" | "thumbnail.get" | "rename.preview" | "devices.list" | "duplicates.start" | "duplicates.list" | "duplicates.group", sessionId: unknown, params: Record<string, unknown>): Promise<unknown> {
     if (this.busy) throw Object.assign(new Error(), {code: "busy"});
     this.requireSession(sessionId);
     const epoch = this.epoch;
