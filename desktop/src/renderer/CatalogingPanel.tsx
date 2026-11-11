@@ -23,6 +23,7 @@ const errors: Record<string, string> = {
   not_found: "A pasta selecionada não foi encontrada (not_found).",
   stale_grant: "A seleção expirou ou já foi usada. Selecione a pasta novamente.",
   stale_session: "A sessão mudou. Reabra a biblioteca.", busy: "Há uma operação em andamento. Aguarde o encerramento.",
+  covered_subfolder: "Esta subpasta já pertence a uma pasta do catálogo. Atualize a pasta principal para localizar as imagens.",
   unsafe_location: "A pasta se sobrepõe ao catálogo, a uma raiz ou a um destino protegido.",
   root_changed: "A pasta mudou. Selecione-a novamente.", permission_denied: "Sem permissão para ler a pasta.",
   resource_limit: "O limite desta preparação foi atingido.", unavailable: "O backend está indisponível. Reabra a biblioteca antes de continuar.",

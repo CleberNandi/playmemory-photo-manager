@@ -103,7 +103,7 @@ export class FolderImportController {
       return failure("resource_limit");
     }catch(error){
       const code=(error as {code?:string}).code;
-      const allowed=["busy","root_changed","unsafe_location","permission_denied","resource_limit","stale_session","not_found","catalog_changed","outcome_unknown"];
+      const allowed=["busy","root_changed","unsafe_location","covered_subfolder","permission_denied","resource_limit","stale_session","not_found","catalog_changed","outcome_unknown"];
       job.error=code&&allowed.includes(code)?code:applying?"outcome_unknown":"unavailable";
       job.state=job.error==="outcome_unknown"?"outcome_unknown":"failed";
     }

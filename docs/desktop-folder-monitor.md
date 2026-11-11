@@ -3,7 +3,9 @@
 Status: implementado no desktop normal. Adicionar pastas registra a raiz para acompanhamento.
 A biblioteca verifica essas raízes ao abrir. No Linux, notificações inotify disparam uma nova
 verificação após agrupar eventos por 500 ms. Uma checagem a cada dez segundos recupera
-mudanças sem notificação. Não pesquisa outros diretórios do computador.
+mudanças sem notificação. Não pesquisa outros diretórios do computador. Ao selecionar uma
+subpasta de uma raiz disponível já cadastrada, o desktop orienta atualizar a pasta principal.
+Os cartões mostram o nome da raiz e a subpasta de cada ocorrência.
 
 O indicador mostra andamento, novas imagens e falhas. **Atualizar pastas agora** antecipa a
 próxima checagem. A galeria é atualizada preservando a seleção e o visualizador aberto.

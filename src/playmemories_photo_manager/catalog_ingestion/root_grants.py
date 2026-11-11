@@ -242,7 +242,7 @@ class RootGrantService:
                 connection.rollback()
         return tuple(roots)
 
-    def _validate_overlap(self, held, roots):
+    def _validate_overlap(self, held, roots, *, selecting=False):
         protected = (
             self._catalog,
             *(Path(str(self._catalog) + suffix) for suffix in ("-journal", "-wal", "-shm")),
@@ -284,7 +284,11 @@ class RootGrantService:
             if path == held.path:
                 same = root
                 continue
-            if path.is_relative_to(held.path) or held.path.is_relative_to(path):
+            if held.path.is_relative_to(path):
+                if selecting and root.availability == "available":
+                    raise PreparationError("covered_subfolder")
+                raise PreparationError("unsafe_location")
+            if path.is_relative_to(held.path):
                 raise PreparationError("unsafe_location")
             try:
                 other = _HeldRoot(path)
@@ -393,7 +397,7 @@ class RootGrantService:
                 if expected is not None and (str(path), held.identity, held.mount) != expected:
                     raise PreparationError("root_changed")
                 roots = self._roots()
-                existing = self._validate_overlap(held, roots)
+                existing = self._validate_overlap(held, roots, selecting=not monitored)
                 if existing is None and len(roots) == MAX_ROOTS:
                     raise PreparationError("resource_limit")
                 diagnostics = ()

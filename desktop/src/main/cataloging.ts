@@ -3,7 +3,7 @@ import type { PythonBackend } from "./backend.js";
 import type { LibraryController } from "./libraries.js";
 import { canonicalId, validPath } from "./library-preferences.js";
 
-const known = new Set(["invalid_request", "stale_session", "stale_grant", "unsafe_location", "root_changed", "permission_denied", "resource_limit", "busy", "unavailable", "not_found", "outcome_unknown"]);
+const known = new Set(["invalid_request", "stale_session", "stale_grant", "unsafe_location", "covered_subfolder", "root_changed", "permission_denied", "resource_limit", "busy", "unavailable", "not_found", "outcome_unknown"]);
 const reject = (code: string): never => { throw Object.assign(new Error(code), {code}); };
 
 export class CatalogingController {

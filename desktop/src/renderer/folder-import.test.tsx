@@ -21,3 +21,13 @@ it("does not repeat admission after transport failure",async()=>{
 it("rejects late results belonging to another session",async()=>{
  window.photoManager!.addMediaFolder=vi.fn().mockResolvedValue({...job("completed",1),session_id:"old"});const refresh=vi.fn();await act(async()=>root.render(<FolderImportPanel sessionId="session" onApplied={refresh}/>));expect(refresh).not.toHaveBeenCalled();expect(host.querySelector('[role="alert"]')).not.toBeNull();
 });
+
+it("explains that a covered subfolder belongs to the monitored parent", async () => {
+  window.photoManager!.addMediaFolder = vi.fn().mockResolvedValue({...job("failed"), error: "covered_subfolder"});
+  const refresh = vi.fn();
+  await act(async () => root.render(<FolderImportPanel sessionId="session" onApplied={refresh} />));
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("Subpasta de uma pasta já cadastrada");
+  expect(host.textContent).toContain("Atualizar pastas agora");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(refresh).not.toHaveBeenCalled();
+});

@@ -31,12 +31,14 @@ export function FolderImportPanel({sessionId,onApplied}: {sessionId:string;onApp
    // A single non-overlapping polling loop owns this job.
    // eslint-disable-next-line react-hooks/exhaustive-deps
  },[sessionId,job?.job_id]);
- const label=job?.state==="choosing"?"Escolha uma pasta de imagens…":job?.state==="scanning"?"Examinando a pasta…":job?.state==="adding"?"Adicionando imagens…":job?.state==="completed"?"Pasta carregada":job?.state==="cancelled"?"Seleção cancelada":job?.state==="stopped"?"Carga interrompida":job?.state==="outcome_unknown"?"Resultado a conferir":job?.state==="failed"?"Não foi possível concluir a carga":"Abrindo seletor de pasta…";
+ const covered=job?.error==="covered_subfolder";
+ const label=covered?"Subpasta de uma pasta já cadastrada":job?.state==="choosing"?"Escolha uma pasta de imagens…":job?.state==="scanning"?"Examinando a pasta…":job?.state==="adding"?"Adicionando imagens…":job?.state==="completed"?"Pasta carregada":job?.state==="cancelled"?"Seleção cancelada":job?.state==="stopped"?"Carga interrompida":job?.state==="outcome_unknown"?"Resultado a conferir":job?.state==="failed"?"Não foi possível concluir a carga":"Abrindo seletor de pasta…";
  return <section className="folder-import-panel" aria-label="Adicionar pasta" aria-busy={!job||running(job)}>
    <strong role="status">{label}</strong>
-   {job&&<p>{job.added_count} imagem(ns) adicionada(s) · {job.excluded_count} entrada(s) fora do suporte. Os originais permanecem inalterados.</p>}
+   {covered&&<p>A pasta principal já é acompanhada com suas subpastas. Use Atualizar pastas agora para verificar as imagens.</p>}
+   {job&&!covered&&<p>{job.added_count} imagem(ns) adicionada(s) · {job.excluded_count} entrada(s) fora do suporte. Os originais permanecem inalterados.</p>}
    {job?.state==="completed"&&job.added_count===0&&<p>As imagens aceitas já podem estar na biblioteca; arquivos sem suporte não são adicionados.</p>}
-   {(error||job?.error)&&<p role="alert">{job?.error?messages[job.error]??"A carga foi interrompida. Selecione a pasta novamente para conferir os itens restantes.":"A conexão foi interrompida. Reabra a biblioteca para conferir os itens adicionados."}</p>}
+   {(error||(job?.error&&!covered))&&<p role="alert">{job?.error?messages[job.error]??"A carga foi interrompida. Selecione a pasta novamente para conferir os itens restantes.":"A conexão foi interrompida. Reabra a biblioteca para conferir os itens adicionados."}</p>}
    {job&&running(job)&&job.state!=="choosing"&&<button disabled={stopping} onClick={()=>{setStopping(true);void window.photoManager!.stopFolderImport!(sessionId,job.job_id).catch(()=>setError(true));}}>{stopping?"Parando após o lote atual…":"Parar carga"}</button>}
  </section>;
 }

@@ -17,3 +17,12 @@ describe("renderer visual components", () => {
    expect(renderToStaticMarkup(<MediaCard item={{...item, annotation: {...item.annotation, title}}} />)).toContain("fixtures/retrato.jpg");
    expect(renderToStaticMarkup(<MediaCard item={{...item, annotation: {...item.annotation, title}, representative_location: {...item.representative_location!, relative_path: "   "}}} />)).toContain("Sem título");
  });
+
+it("distinguishes matching names in the root and a subfolder", () => {
+  const nested = renderToStaticMarkup(<MediaCard item={item} />);
+  const atRoot = renderToStaticMarkup(<MediaCard item={{
+    ...item, representative_location: {root_display_name: "Fixtures", relative_path: "retrato.jpg"},
+  }} />);
+  expect(nested).toContain(">Fixtures / fixtures</p>");
+  expect(atRoot).toContain(">Fixtures</p>");
+});
