@@ -163,3 +163,44 @@ def test_favorite_command_over_authenticated_pipe_and_rejects_paths(library):
         )
     finally:
         client.close()
+
+
+def test_annotation_edits_persist_and_reuse_normalized_tags(library):
+    dispatcher, path, session, assets = library
+    asset, other = assets[-1], assets[0]
+
+    def edit(target, field, value):
+        return dispatcher.request(
+            "annotation.edit",
+            {"session_id": session, "asset_id": target, "field": field, "value": value},
+        )
+
+    dispatcher.request("annotation.favorite", command(session, asset))
+    edit(asset, "rating", 5)
+    edit(asset, "title", "Novo título")
+    edit(asset, "description", "Descrição de teste")
+    edit(asset, "tag_add", "  Viagem de férias  ")
+    edit(asset, "tag_add", "VIAGEM DE FÉRIAS")
+    edit(other, "tag_add", "viagem de férias")
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        tags = catalog.list_asset_tags(asset)
+        assert len(tags) == 1
+        assert catalog.list_asset_tags(other) == tags
+    with pytest.raises(LibraryError) as failure:
+        edit(asset, "rating", True)
+    assert failure.value.code == "invalid_request"
+    edit(other, "tag_remove", tags[0].id)
+    dispatcher.request("library.close", {"session_id": session})
+    session = dispatcher.request(
+        "library.open", {"path": str(path), "library_handle": str(uuid4())}
+    )["session"]["session_id"]
+    details = dispatcher.request("asset.details", {"session_id": session, "asset_id": asset})
+    assert details["annotation"]["rating"] == 5
+    assert details["annotation"]["title"] == "Novo título"
+    assert details["annotation"]["description"] == "Descrição de teste"
+    assert details["annotation"]["favorite"] is True
+    assert [tag["display_name"] for tag in details["tags"]] == ["Viagem de férias"]
+    assert not dispatcher.request("asset.details", {"session_id": session, "asset_id": other})[
+        "tags"
+    ]

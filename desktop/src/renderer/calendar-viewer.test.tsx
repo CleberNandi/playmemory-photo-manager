@@ -91,6 +91,30 @@ it("keeps the last navigated thumbnail selected after closing the viewer",async(
  await act(async()=>root.render(<App/>));await click("Abrir imagem");expect(host.querySelector<HTMLButtonElement>('[aria-label="Imagem anterior"]')!.disabled).toBe(true);await click("Próxima");expect(host.querySelector(".viewer-caption")!.textContent).toContain("b.jpg · 2 de 2");expect(host.querySelector<HTMLButtonElement>('[aria-label="Próxima imagem"]')!.disabled).toBe(true);await click("Fechar imagem");expect(host.querySelector('[data-asset-id="b"]')?.getAttribute("aria-pressed")).toBe("true");expect(document.activeElement).toBe(host.querySelector('[data-asset-id="b"]'));
 });
 
+it("keeps viewer navigation available after the gallery refresh replaces its page", async () => {
+  const make = (id: string) => ({
+    asset_id: id, kind: "photo", media_type: "image/jpeg", created_at: "2026-01-01",
+    availability: "available", annotation: {favorite:false, rating:null, title:null},
+    representative_location: {relative_path:`${id}.jpg`, root_display_name:"Synthetic"},
+  });
+  let refresh: (() => void) | undefined;
+  const page = {has_more:false, next_cursor:null};
+  window.photoManager!.listGallery = vi.fn()
+    .mockResolvedValueOnce({...page, items:[make("a"),make("b")]})
+    .mockResolvedValue({...page, items:[make("c")]});
+  window.photoManager!.onGalleryChanged = listener => {refresh = listener; return () => {};};
+  window.photoManager!.getPreview = vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+  await act(async () => root.render(<App/>));
+  await click("Abrir imagem");
+  const dialog = host.querySelector("dialog");
+  await act(async () => refresh?.());
+  await click("Próxima");
+  expect(host.querySelector(".viewer-caption")?.textContent).toContain("b.jpg · 2 de 2");
+  await click("Anterior");
+  expect(host.querySelector(".viewer-caption")?.textContent).toContain("a.jpg · 1 de 2");
+  expect(host.querySelector("dialog")).toBe(dialog);
+});
+
 it("asks before leaving an unsaved rotation and offers discard or continuing",async()=>{
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});const close=vi.fn();await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));await click("Girar à direita");await click("Fechar imagem");expect(close).not.toHaveBeenCalled();expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();await click("Continuar editando");expect(host.querySelector('[role="alertdialog"]')).toBeNull();await click("Fechar imagem");await click("Descartar rotação");expect(close).toHaveBeenCalledOnce();
 });

@@ -161,6 +161,7 @@ class LibraryDispatcher:
         if method not in (
             "asset.reveal",
             "annotation.favorite",
+            "annotation.edit",
             "gallery.list",
             "calendar.summary",
             "asset.details",
@@ -183,6 +184,56 @@ class LibraryDispatcher:
             if set(params) != {"session_id", "asset_id"}:
                 raise LibraryError("invalid_request")
             return reveal_location(active.query_connection, _uuid(params["asset_id"]))
+        if method == "annotation.edit":
+            from ..catalog import Catalog
+            from ..catalog.errors import (
+                CatalogError,
+                InvalidInputError,
+                InvalidReferenceError,
+                NotFoundError,
+            )
+
+            if set(params) != {"session_id", "asset_id", "field", "value"}:
+                raise LibraryError("invalid_request")
+            asset_id = _uuid(params["asset_id"])
+            field, value = params["field"], params["value"]
+            if not isinstance(field, str) or field not in (
+                "rating",
+                "title",
+                "description",
+                "tag_add",
+                "tag_remove",
+            ):
+                raise LibraryError("invalid_request")
+            if field == "rating":
+                if value is not None and (type(value) is not int or not 1 <= value <= 5):
+                    raise LibraryError("invalid_request")
+            elif field == "tag_remove":
+                _uuid(value)
+            else:
+                limit = {"title": 200, "description": 2000, "tag_add": 100}[field]
+                if value is None and field != "tag_add":
+                    pass
+                elif not isinstance(value, str) or len(value) > limit or "\0" in value:
+                    raise LibraryError("invalid_request")
+            try:
+                with active.command_connection() as connection:
+                    catalog = Catalog(connection)
+                    edit = {
+                        "rating": catalog.set_rating,
+                        "title": catalog.set_title,
+                        "description": catalog.set_description,
+                        "tag_add": catalog.assign_tag,
+                        "tag_remove": catalog.remove_tag_from_asset,
+                    }
+                    edit[field](asset_id, value)
+                return {"asset_id": asset_id}
+            except InvalidInputError:
+                raise LibraryError("invalid_request") from None
+            except (InvalidReferenceError, NotFoundError):
+                raise LibraryError("not_found") from None
+            except CatalogError:
+                raise LibraryError("outcome_unknown") from None
         if method == "annotation.favorite":
             from ..catalog import Catalog
             from ..catalog.errors import CatalogError, InvalidReferenceError

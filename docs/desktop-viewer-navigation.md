@@ -5,7 +5,8 @@ Status: implementado. Continuação do menu contextual homologado pelo usuário 
 ## Comportamento
 
 O visualizador oferece Anterior/Próxima e setas esquerda/direita. A sequência inclui somente
-fotos carregadas e visíveis no filtro atual, na ordem da galeria; não busca o restante do catálogo
+fotos carregadas e visíveis ao abrir o visualizador, na ordem da galeria. Atualizações da galeria
+continuam em segundo plano, e a sequência aberta permanece estável. O visualizador não busca o restante do catálogo
 nem carrega páginas automaticamente. Vídeos não entram nessa sequência. Os extremos desabilitam
 a navegação correspondente, sem circular para o início. Nome e posição deixam essa cobertura
 explícita. Uma imagem sem prévia não impede avançar para a seguinte.
@@ -19,6 +20,9 @@ largura e altura gravadas no arquivo, antes da orientação EXIF.
 A renderização integral tem limite de 40 megapixels na decodificação e de 16 MiB na saída.
 A imagem passa pelo worker confinado e chega em blocos pelo IPC existente. Se a versão integral
 ficar indisponível, o visualizador informa a falha e mantém a prévia ajustada quando disponível.
+
+Maximizar ocupa a área do aplicativo, e Restaurar janela volta ao tamanho anterior.
+Os botões de gravação aparecem enquanto houver rotação pendente em um formato gravável.
 
 A rotação fica somente no visualizador. A continuação
 [desktop-save-rotation.md](desktop-save-rotation.md) oferece Salvar alterações e Salvar como cópia,

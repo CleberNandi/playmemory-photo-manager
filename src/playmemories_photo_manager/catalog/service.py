@@ -459,6 +459,26 @@ class Catalog:
                 raise UniquenessConflictError("normalized tag already exists") from error
         return self.get_tag(identifier)
 
+    def assign_tag(self, asset_id: str, display_name: str) -> None:
+        """Find or create a normalized tag and attach it in one transaction."""
+        _uuid(asset_id, "asset_id")
+        if not isinstance(display_name, str) or not 1 <= len(display_name.strip()) <= 100:
+            raise InvalidInputError("invalid tag name")
+        name = display_name.strip()
+        key = normalize_tag(name)
+        if not key:
+            raise InvalidInputError("invalid tag name")
+        with self._write():
+            if self._repository.get_asset(asset_id) is None:
+                raise InvalidReferenceError("asset does not exist")
+            tag = self._repository.find_tag_by_key(key)
+            if tag is None:
+                tag_id = str(uuid.uuid4())
+                self._repository.insert_tag(tag_id, name, key)
+            else:
+                tag_id = tag.id
+            self._repository.attach_tag_if_absent(asset_id, tag_id)
+
     def get_tag(self, tag_id: str) -> Tag:
         _uuid(tag_id, "tag_id")
         tag = self._read(self._repository.get_tag, tag_id)

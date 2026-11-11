@@ -13,7 +13,7 @@ import { LibraryWorkspace } from "./LibraryWorkspace";
 import { CatalogingPanel } from "./CatalogingPanel";
 import { useLibrarySession } from "./LibrarySession";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
-import type { GalleryPage } from "./types";
+import type { AnnotationField, GalleryItem, GalleryPage } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
 async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string): Promise<GalleryPage> {
@@ -40,6 +40,7 @@ function GalleryApp() {
   const [captureFilter,setCaptureFilter] = useState<string|null>(null);
   const [mediaRevision,setMediaRevision]=useState(0);
   const [viewer,setViewer] = useState<string|null>(null);
+  const [viewerItems,setViewerItems] = useState<GalleryItem[]>([]);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);
@@ -112,12 +113,28 @@ function GalleryApp() {
   const folders = roots ?? [...new Set(items.map((item) => item.representative_location?.root_display_name).filter((name): name is string => !!name))].map(name => ({id:name,name}));
   const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || rootId || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
-  const openAsset=(id:string)=>{
+  const showViewerAsset=(id:string)=>{
     const button=[...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find(candidate=>candidate.dataset.assetId===id);
     if(button)origin.current=button;
     setSelected(id);setPropertiesOpen(true);setViewer(id);
   };
-  const viewerItems=visible.filter(item=>item.kind==="photo");
+  const openAsset=(id:string)=>{
+    const sequence = visible.filter(item => item.kind === "photo");
+    if (!sequence.some(item => item.asset_id === id)) return;
+    setViewerItems(sequence);
+    showViewerAsset(id);
+  };
+  const annotationChanged=(id:string, field:AnnotationField, value:string|number|null)=>{
+    if (field !== "rating" && field !== "title") return;
+    const edited = field === "rating" ? {rating:value as number|null} : {title:value as string|null};
+    galleryEpoch.current++;
+    inFlight.current=false;
+    setPaging(false);
+    setState(previous => previous.kind === "ready" ? {kind:"ready", page:{
+      ...previous.page, items:previous.page.items.map(item => item.asset_id === id
+        ? {...item, annotation:{...item.annotation, ...edited}} : item),
+    }} : previous);
+  };
   const viewerIndex=viewerItems.findIndex(item=>item.asset_id===viewer);
   const viewerName=viewerItems[viewerIndex]?.representative_location?.relative_path.split("/").pop()??"Imagem selecionada";
   const resetSelection = () => setSelected(null);
@@ -141,7 +158,7 @@ function GalleryApp() {
   return <div className={`app-shell${propertiesOpen ? " with-properties" : ""}`} style={{"--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--thumbnail-size": `${thumbnailSize}px`} as CSSProperties}>
       <nav className="workspace-menu" aria-label="Menus da área de trabalho">
         {session?.fileMenu ?? <DesktopMenu label="Arquivo"><button disabled>Bibliotecas indisponíveis no demo</button></DesktopMenu>}
-        <DesktopMenu label="Editar"><button disabled>Alterar anotações — em breve</button></DesktopMenu>
+        <DesktopMenu label="Editar"><button disabled={!selected} onClick={()=>setPropertiesOpen(true)}>Anotações da foto</button></DesktopMenu>
         <DesktopMenu label="Exibir">
           <button onClick={() => changeDisplay("thumbnails")}>Miniaturas</button>
           <button onClick={() => changeDisplay("details")}>Detalhes</button>
@@ -215,9 +232,9 @@ function GalleryApp() {
     </main>
     {propertiesOpen && <>
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />
-      {selected ? <AssetDetailsPanel suspended={viewer!==null} assetId={selected} onClose={closeDetails} revision={detailsRevision} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(selected,value):undefined} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
+      {selected ? <AssetDetailsPanel suspended={viewer!==null} assetId={selected} onClose={closeDetails} revision={detailsRevision} onAnnotationChanged={session?(field,value)=>annotationChanged(selected,field,value):undefined} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(selected,value):undefined} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
     </>}
-    {viewer && <ImageViewer assetId={viewer} canSave={["image/png","image/jpeg"].includes(viewerItems[viewerIndex]?.media_type??"")} name={viewerName} position={viewerIndex>=0?`${viewerIndex+1} de ${viewerItems.length} imagens carregadas`:undefined} onPrevious={viewerIndex>0?()=>openAsset(viewerItems[viewerIndex-1].asset_id):undefined} onNext={viewerIndex>=0&&viewerIndex<viewerItems.length-1?()=>openAsset(viewerItems[viewerIndex+1].asset_id):undefined} onSaved={()=>{setMediaRevision(value=>value+1);setDetailsRevision(value=>value+1);setGalleryRevision(value=>value+1);}} restoreFocus={restoreViewerFocus} onClose={()=>setViewer(null)} />}
+    {viewer && <ImageViewer assetId={viewer} canSave={["image/png","image/jpeg"].includes(viewerItems[viewerIndex]?.media_type??"")} name={viewerName} position={viewerIndex>=0?`${viewerIndex+1} de ${viewerItems.length} imagens carregadas`:undefined} onPrevious={viewerIndex>0?()=>showViewerAsset(viewerItems[viewerIndex-1].asset_id):undefined} onNext={viewerIndex>=0&&viewerIndex<viewerItems.length-1?()=>showViewerAsset(viewerItems[viewerIndex+1].asset_id):undefined} onSaved={()=>{setMediaRevision(value=>value+1);setDetailsRevision(value=>value+1);setGalleryRevision(value=>value+1);}} restoreFocus={restoreViewerFocus} onClose={()=>setViewer(null)} />}
     <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : "Duplicatas exatas · Consulta somente leitura"} · {selected ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Edições somente ao salvar</span></footer>
   </div>;
 }
