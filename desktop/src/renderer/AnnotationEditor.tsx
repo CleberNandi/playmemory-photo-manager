@@ -35,7 +35,6 @@ export function AnnotationEditor({details, onUpdated}: {
   }
 
   return <section className="annotation-editor" aria-label="Organizar foto">
-    <h3>Organização</h3>
     <fieldset disabled={busy}>
       <legend>Classificação por estrelas</legend>
       <div className="rating-buttons">
@@ -47,8 +46,8 @@ export function AnnotationEditor({details, onUpdated}: {
       {rating !== null && <button onClick={() => void edit("rating", null)}>Limpar avaliação</button>}
     </fieldset>
     <form onSubmit={event => {event.preventDefault(); void edit("tag_add", tag.trim());}}>
-      <label>Tags <input value={tag} maxLength={100} onChange={event => setTag(event.target.value)} /></label>
-      <button disabled={busy || !tag.trim()}>Adicionar tag</button>
+      <label>Rótulos <input value={tag} maxLength={100} onChange={event => setTag(event.target.value)} /></label>
+      <button disabled={busy || !tag.trim()}>Adicionar rótulo</button>
     </form>
     {details.tags.length > 0 && <ul className="annotation-tags">{details.tags.map(item => <li key={item.id}>
       <span>{item.display_name}</span>

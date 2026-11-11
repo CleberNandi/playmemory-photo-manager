@@ -115,6 +115,37 @@ it("keeps viewer navigation available after the gallery refresh replaces its pag
   expect(host.querySelector("dialog")).toBe(dialog);
 });
 
+it("loads the next photo across pages, retries failures and keeps navigation history", async () => {
+  const make = (id: string, kind = "photo") => ({
+    asset_id: id, kind, media_type: "image/jpeg", created_at: "2026-01-01",
+    availability: "available", annotation: {favorite:false, rating:null, title:null},
+    representative_location: {relative_path:`${id}.jpg`, root_display_name:"Synthetic"},
+  });
+  const list = vi.fn()
+    .mockResolvedValueOnce({items:[make("a")], has_more:true, next_cursor:"one"})
+    .mockResolvedValueOnce({items:[make("video","video")], has_more:true, next_cursor:"two"})
+    .mockRejectedValueOnce(new Error("transient"))
+    .mockResolvedValueOnce({items:[make("b")], has_more:false, next_cursor:null});
+  window.photoManager!.listGallery = list;
+  window.photoManager!.getPreview = vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+  await act(async () => root.render(<App/>));
+  await click("Abrir imagem");
+  const dialog = host.querySelector("dialog");
+  await click("Próxima");
+  expect(dialog?.textContent).toContain("Falha ao carregar próximas imagens");
+  expect(dialog?.querySelector(".viewer-filename")?.textContent).toBe("a.jpg");
+  expect(list).toHaveBeenLastCalledWith({pageSize:24, after:"two"});
+  await click("Próxima");
+  expect(list).toHaveBeenLastCalledWith({pageSize:24, after:"two"});
+  expect(dialog?.querySelector(".viewer-filename")?.textContent).toBe("b.jpg");
+  await click("Anterior");
+  expect(dialog?.querySelector(".viewer-filename")?.textContent).toBe("a.jpg");
+  await click("Próxima");
+  expect(list).toHaveBeenCalledTimes(4);
+  await click("Fechar imagem");
+  expect(document.activeElement).toBe(host.querySelector('[data-asset-id="b"]'));
+});
+
 it("asks before leaving an unsaved rotation and offers discard or continuing",async()=>{
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});const close=vi.fn();await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));await click("Girar à direita");await click("Fechar imagem");expect(close).not.toHaveBeenCalled();expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();await click("Continuar editando");expect(host.querySelector('[role="alertdialog"]')).toBeNull();await click("Fechar imagem");await click("Descartar rotação");expect(close).toHaveBeenCalledOnce();
 });

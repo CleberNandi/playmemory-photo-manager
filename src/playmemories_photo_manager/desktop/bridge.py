@@ -32,6 +32,40 @@ def _json_default(value: object) -> object:
     raise TypeError(f"unsupported response value: {type(value).__name__}")
 
 
+_FACET_SOURCES = {
+    "tags": ("SELECT id, display_name AS name FROM tag", ()),
+    "types": ("SELECT DISTINCT media_type AS id, media_type AS name FROM asset", ()),
+    "cameras": (
+        "SELECT DISTINCT interpreted_value AS id, interpreted_value AS name FROM metadata "
+        "WHERE namespace='exif' AND metadata_key=?",
+        ("Model",),
+    ),
+    "lenses": (
+        "SELECT DISTINCT interpreted_value AS id, interpreted_value AS name FROM metadata "
+        "WHERE namespace='exif' AND metadata_key=?",
+        ("LensModel",),
+    ),
+}
+_FACET_PAGE_SIZE = 24
+
+
+def _facet_page(connection, facet, keyword="", offset=0):
+    source, arguments = _FACET_SOURCES[facet]
+    connection.create_function(
+        "fold_text", 1, lambda value: (value or "").casefold(), deterministic=True
+    )
+    rows = connection.execute(
+        f"""SELECT id, name FROM ({source})
+        WHERE length(name) BETWEEN 1 AND 200 AND instr(fold_text(name), ?) > 0
+        ORDER BY fold_text(name), id LIMIT ? OFFSET ?""",
+        (*arguments, keyword.casefold(), _FACET_PAGE_SIZE + 1, offset),
+    ).fetchall()
+    return {
+        "options": [{"id": row[0], "name": row[1]} for row in rows[:_FACET_PAGE_SIZE]],
+        "next_offset": offset + _FACET_PAGE_SIZE if len(rows) > _FACET_PAGE_SIZE else None,
+    }
+
+
 def _dispatch(
     connection: sqlite3.Connection,
     method: str,
@@ -93,6 +127,21 @@ def _dispatch(
             return summary(connection, params.get("period"))
         except ValueError:
             raise BridgeRequestError("invalid calendar period") from None
+    if method == "gallery.facets":
+        if not isinstance(params, dict) or set(params) != {"facet", "keyword", "offset"}:
+            raise BridgeRequestError("invalid facet parameters")
+        facet, keyword, offset = params["facet"], params["keyword"], params["offset"]
+        if (
+            not isinstance(facet, str)
+            or facet not in _FACET_SOURCES
+            or not isinstance(keyword, str)
+            or len(keyword) > 200
+            or "\0" in keyword
+            or type(offset) is not int
+            or not 0 <= offset <= 2**53 - 1 - _FACET_PAGE_SIZE
+        ):
+            raise BridgeRequestError("invalid facet parameters")
+        return _facet_page(connection, facet, keyword.strip(), offset)
     if method == "gallery.list":
         if not isinstance(params, dict):
             raise BridgeRequestError("params must be an object")
@@ -103,6 +152,13 @@ def _dispatch(
             "favorites_only",
             "root_id",
             "include_roots",
+            "include_facets",
+            "keyword",
+            "tag_id",
+            "rating",
+            "media_type",
+            "camera",
+            "lens",
         }
         if unknown:
             raise BridgeRequestError("unsupported gallery parameters")
@@ -128,6 +184,12 @@ def _dispatch(
                     favorites_only=params.get("favorites_only", False),
                     root_id=root_id,
                     newest_first=root_id is not None,
+                    keyword=params.get("keyword"),
+                    tag_id=params.get("tag_id"),
+                    rating=params.get("rating"),
+                    media_type=params.get("media_type"),
+                    camera=params.get("camera"),
+                    lens=params.get("lens"),
                 )
             )
         )
@@ -137,6 +199,19 @@ def _dispatch(
                 for row in connection.execute(
                     "SELECT id, display_name FROM library_root ORDER BY display_name, id LIMIT 2000"
                 )
+            ]
+        if type(params.get("include_facets", False)) is not bool:
+            raise BridgeRequestError("include_facets must be boolean")
+        if params.get("include_facets"):
+            facets = {key: _facet_page(connection, key) for key in _FACET_SOURCES}
+            page["facets"] = {
+                key: result["options"]
+                if key == "tags"
+                else [item["id"] for item in result["options"]]
+                for key, result in facets.items()
+            }
+            page["facets"]["more"] = [
+                key for key, result in facets.items() if result["next_offset"] is not None
             ]
         return page
     if method == "shutdown":

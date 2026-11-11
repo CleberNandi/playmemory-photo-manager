@@ -105,7 +105,7 @@ app.whenReady().then(async () => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).sort().join() !== "params,sessionId") throw new Error("invalid_request");
     return raw as {sessionId: unknown; params: unknown};
   };
-  const query = async (method: "gallery.list" | "calendar.summary" | "preview.get" | "asset.details" | "thumbnail.get", id: unknown, params: Record<string, unknown>) => {
+  const query = async (method: "gallery.list" | "gallery.facets" | "calendar.summary" | "preview.get" | "asset.details" | "thumbnail.get", id: unknown, params: Record<string, unknown>) => {
     if (recovering || libraries.isBusy) throw new Error("busy");
     return demo ? backend.request(method, params) : libraries.query(method, id, params);
   };
@@ -119,15 +119,39 @@ app.whenReady().then(async () => {
   register("library:default",0,()=>demo?demoState():(folderImports?.busy||imageEdits?.busy)?{...libraries.current(),error:"busy"}:libraries.openManaged());
   register("library:reopen", 1, (value) => demo ? demoState() : libraries.setReopen(value));
   register("library:forget", 0, () => demo ? demoState() : libraries.forget());
+  register("gallery:facets", 1, (raw) => {
+    const {sessionId, params} = envelope(raw);
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
+    const {facet, keyword, offset} = params as Record<string, unknown>;
+    if (Object.keys(params).length !== 3 || typeof facet !== "string" ||
+        !["tags", "types", "cameras", "lenses"].includes(facet) ||
+        typeof keyword !== "string" || keyword.length > 200 || keyword.includes("\0") ||
+        typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0 ||
+        offset > Number.MAX_SAFE_INTEGER - 24) throw new Error("invalid_request");
+    return query("gallery.facets", sessionId, {facet, keyword, offset});
+  });
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; filters?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "filters"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
     if (p.rootId !== undefined && (typeof p.rootId !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(p.rootId))) throw new Error("invalid_request");
-    return query("gallery.list", sessionId, {include_roots:!p.after, ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+    const filters: Record<string, unknown> = {};
+    if (p.filters !== undefined) {
+      if (!p.filters || typeof p.filters !== "object" || Array.isArray(p.filters)) throw new Error("invalid_request");
+      for (const [key, value] of Object.entries(p.filters)) {
+        if (key === "rating") {
+          if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 5) throw new Error("invalid_request");
+        } else if (key === "tag_id") {
+          if (!canonicalId(value)) throw new Error("invalid_request");
+        } else if (!["keyword", "media_type", "camera", "lens"].includes(key)
+          || typeof value !== "string" || value.length > 200 || value.includes("\0")) throw new Error("invalid_request");
+        filters[key] = value;
+      }
+    }
+    return query("gallery.list", sessionId, {...filters, include_facets:!p.after, include_roots:!p.after, ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
   });
   imageEdits=new ImageEdits(libraries,async(source,angle)=>{
     if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return join(dirname(source),basename(source,extname(source))+"-rotacionada"+extname(source));

@@ -10,7 +10,27 @@ export interface GalleryItem {
   representative_location: { relative_path: string; root_display_name: string } | null;
 }
 
+export type PhotoFilters = {
+  keyword?: string;
+  tag_id?: string;
+  rating?: number;
+  media_type?: string;
+  camera?: string;
+  lens?: string;
+};
+export type Facet = "tags" | "types" | "cameras" | "lenses";
+export type FilterOption = {id:string; name:string};
+export type FilterOptionsPage = {options:FilterOption[]; next_offset:number|null};
+export type PhotoFacets = {
+  more?: Facet[];
+  tags: {id:string; name:string}[];
+  types: string[];
+  cameras: string[];
+  lenses: string[];
+};
+
 export interface GalleryPage {
+  facets?: PhotoFacets;
   roots?: {id: string; name: string}[];
   items: GalleryItem[];
   next_cursor: string | null;
@@ -42,7 +62,8 @@ declare global {
       closeLibrary?(sessionId: string): Promise<LibraryState>;
       setReopenLibrary?(value: boolean): Promise<LibraryState>;
       forgetLibrary?(): Promise<LibraryState>;
-      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string }): Promise<GalleryPage>;
+      listFilterOptions?(facet: Facet, keyword: string, offset: number): Promise<FilterOptionsPage>;
+      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
       saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;
       getImageSaveStatus?(jobId:string):Promise<ImageSaveJob>;
       showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|null>;

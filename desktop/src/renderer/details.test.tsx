@@ -35,8 +35,8 @@ it("ignores a previous delayed response and a response after close", async () =>
   await select(1);
   await act(async () => pending.second({status: "ready", details: details("second")}));
   await act(async () => pending.first({status: "ready", details: details("first")}));
-  expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
-  expect(host.querySelector(".asset-details dl")?.textContent).not.toContain("first");
+  expect(host.querySelector(".technical-properties dl")?.textContent).toContain("second");
+  expect(host.querySelector(".technical-properties dl")?.textContent).not.toContain("first");
   await act(async () => host.querySelector<HTMLButtonElement>(".asset-details button")!.click());
   expect(host.querySelector(".asset-details")).toBeNull();
 });
@@ -69,8 +69,8 @@ it("discards pending details after closing and reopening a different asset", asy
   await act(async () => host.querySelector<HTMLButtonElement>(".asset-details button")!.click());
   await select(1);
   await act(async () => finish({status: "ready", details: details("first")}));
-  expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
-  expect(host.querySelector(".asset-details dl")?.textContent).not.toContain("first");
+  expect(host.querySelector(".technical-properties dl")?.textContent).toContain("second");
+  expect(host.querySelector(".technical-properties dl")?.textContent).not.toContain("first");
 });
 
 it.each(["button","escape"])("keeps the opened asset selected and restores its card after viewer close via %s",async(mode)=>{
@@ -82,14 +82,14 @@ it.each(["button","escape"])("keeps the opened asset selected and restores its c
  await act(async()=>host.querySelectorAll<HTMLButtonElement>(".open-image")[1].click());
  expect(host.querySelector('.card-select[aria-pressed="true"]')?.getAttribute("data-asset-id")).toBe("second");
  const dialog=host.querySelector("dialog")!;
- expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
+ expect(host.querySelector(".technical-properties dl")?.textContent).toContain("second");
  if(mode==="escape"){
    await act(async()=>dialog.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
    expect(host.querySelector(".asset-details")).not.toBeNull();
    await act(async()=>dialog.dispatchEvent(new Event("cancel",{cancelable:true})));
  }else await act(async()=>[...dialog.querySelectorAll("button")].find(button=>button.textContent==="Fechar imagem")!.click());
  expect(host.querySelector("dialog")).toBeNull();
- expect(host.querySelector(".asset-details dl")?.textContent).toContain("second");
+ expect(host.querySelector(".technical-properties dl")?.textContent).toContain("second");
  expect(document.activeElement).toBe(host.querySelector('[data-asset-id="second"]'));
  await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
  expect(host.querySelector(".asset-details")).toBeNull();

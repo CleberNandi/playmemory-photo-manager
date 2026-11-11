@@ -6,6 +6,19 @@ import { readDimensions } from "./image-data";
 import { requestThumbnail } from "./thumbnails";
 import type { AnnotationField, AssetDetails, DetailsResult } from "./types";
 
+function formatFileSize(bytes: number | null) {
+  if (bytes === null) return null;
+  const [scale, unit] = bytes >= 1024 ** 2 ? [1024 ** 2, "MiB"] as const
+    : bytes >= 1024 ? [1024, "KiB"] as const : [1, "B"] as const;
+  return `${(bytes / scale).toLocaleString("pt-BR", {maximumFractionDigits: 2})} ${unit}`;
+}
+
+function formatModified(value?: string | null) {
+  if (value == null) return null;
+  const date = new Date(Number(value) / 1e6);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString("pt-BR");
+}
+
 export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, onAnnotationChanged, suspended=false}: {assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void; onAnnotationChanged?:(field:AnnotationField, value:string|number|null)=>void}) {
   const [result, setResult] = useState<{id: string; value: DetailsResult} | null>(null);
   const [locationError,setLocationError]=useState(false);
@@ -44,38 +57,59 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
   }, [assetId, revision, photo]);
   const size = dimensions?.id === assetId && dimensions.revision === revision ? dimensions : null;
   return <aside className="asset-details" aria-labelledby="details-heading">
-    <header><h2 id="details-heading">Propriedades</h2><button ref={close} className="primary-button" onClick={onClose}>Fechar detalhes</button></header>
-    <p className="section-kicker">{onFavoriteChanged?"Favoritos ficam no catálogo. Edições da imagem exigem salvar.":"Somente leitura"}</p>
+    <header><h2 id="details-heading">Propriedades</h2><button ref={close} className="primary-button" onClick={onClose} data-icon="×" aria-label="Fechar detalhes" title="Fechar detalhes"><span className="sr-only">Fechar detalhes</span></button></header>
     {!value && <p role="status">Carregando detalhes…</p>}
     {value?.status === "not_found" && <p role="status">Asset não encontrado no catálogo.</p>}
     {value && value.status !== "ready" && value.status !== "not_found" && <div role="alert"><p>{value.status === "internal_error" ? "Não foi possível interpretar os detalhes." : "Detalhes temporariamente indisponíveis."}</p><button className="primary-button" onClick={() => { setResult(null); void (async () => { try { if (value.status === "temporarily_unavailable") await window.photoManager?.retryGallery(); } catch { /* The details request presents the sanitized failure. */ } setAttempt((n) => n + 1); })(); }}>Tentar detalhes novamente</button><p>Tentar novamente reconecta o backend local quando necessário.</p></div>}
     {value?.status === "ready" && <>
+      <details className="property-section" open>
+        <summary>Resumo</summary>
       <section className="asset-origin" aria-label="Origem do arquivo">
-        <h3>Origem do arquivo</h3>
-        {value.details.locations.length?value.details.locations.map(location=><div key={location.id}><strong>{location.relative_path.split("/").pop()}</strong><p>Pasta: {location.root_display_name}</p><p className="preserve-text">{location.relative_path}</p></div>):<p>Sem localização conhecida.</p>}
+        {value.details.locations.length?value.details.locations.slice(0,1).map(location=><div key={location.id}><strong>{location.relative_path.split("/").pop()}</strong><p>Pasta: {location.root_display_name}</p>{location.relative_path.includes("/") && <p className="preserve-text">{location.relative_path}</p>}</div>):<p>Sem localização conhecida.</p>}
         {window.photoManager?.locateMedia&&<><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Abrir pasta que contém o arquivo</button><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId,true).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Localização completa…</button></>}
         {locationError&&<p role="alert">Não foi possível localizar o arquivo. Ele pode estar offline, ter mudado ou não estar mais disponível.</p>}
       </section>
+      <Fields values={{
+        "Formato": value.details.asset.media_type?.split("/").at(-1)?.toUpperCase() ?? null,
+        "Tamanho": formatFileSize(value.details.asset.byte_size),
+        "Modificado em": formatModified(value.details.locations[0]?.observed_mtime_ns),
+        ...(photo ? {"Dimensões originais":size ? `${size.width} × ${size.height} px` : null} : {}),
+        "Data da captura": value.details.capture?.local_value.replace("T"," ") ?? null,
+        "Câmera": value.details.metadata.find(m=>m.namespace==="exif"&&m.key==="Model")?.interpreted_value ?? null,
+        "Lente": value.details.metadata.find(m=>m.namespace==="exif"&&m.key==="LensModel")?.interpreted_value ?? null,
+      }} />
+      <AvailabilityIndicator availability={value.details.availability} />
+      </details>
+      <details className="property-section">
+        <summary>Informações adicionadas pelo usuário</summary>
       {onFavoriteChanged && <FavoriteButton key={assetId} assetId={assetId} favorite={value.details.annotation?.favorite??false} onChanged={onFavoriteChanged} />}
       {onAnnotationChanged && window.photoManager?.editAnnotation &&
         <AnnotationEditor key={assetId} details={value.details} onUpdated={(field, edited) => {
           setAttempt(value => value + 1);
           onAnnotationChanged(field, edited);
         }} />}
+      {(!onAnnotationChanged || !window.photoManager?.editAnnotation) && <>
+        <Fields values={{"Título":value.details.annotation?.title ?? null,
+          "Descrição":value.details.annotation?.description ?? null,
+          "Classificação":value.details.annotation?.rating ?? null}} />
+        <p>{value.details.tags.map(tag=>tag.display_name).join(" · ") || "Sem rótulos"}</p>
+      </>}
+      </details>
+      <details className="property-section technical-properties">
+        <summary>Detalhes técnicos</summary>
       {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Miniatura da imagem" onError={() => setThumbnail(null)} /><figcaption>Miniatura</figcaption></figure>}
-      <DetailsContent details={value.details} dimensions={size} />
+      <DetailsContent details={value.details} />
+      </details>
     </>}
   </aside>;
 }
 function Fields({values}: {values: Record<string, string | number | boolean | null>}) {
   return <dl>{Object.entries(values).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value === null ? "Não informado" : typeof value === "boolean" ? value ? "Sim" : "Não" : String(value)}</dd></div>)}</dl>;
 }
-export function DetailsContent({details: d, dimensions}: {details: AssetDetails; dimensions?: {width:number; height:number}|null}) {
+export function DetailsContent({details: d}: {details: AssetDetails}) {
   return <>
-    <h3>{d.annotation?.title ?? "Sem título"}</h3>
-    <AvailabilityIndicator availability={d.availability} /><p>Disponibilidade registrada no catálogo; sem verificação física atual.</p>
-    <Fields values={{"Asset ID": d.asset.id, "Tipo": d.asset.kind, "Media type": d.asset.media_type, "Tamanho conhecido (bytes)": d.asset.byte_size, ...(d.asset.kind === "photo" ? {"Dimensões originais": dimensions ? `${dimensions.width} × ${dimensions.height} px` : null} : {}), "Favorito": d.annotation?.favorite ?? null, "Rating (1–5)": d.annotation?.rating ?? null}} />
-    <h3>Descrição e tags</h3><p className="preserve-text">{d.annotation?.description ?? "Sem descrição"}</p><p>{d.tags.length ? d.tags.map((tag) => tag.display_name).join(" · ") : "Sem tags"}</p>
+    <Fields values={{"Asset ID": d.asset.id, "Tipo": d.asset.kind,
+      "MIME": d.asset.media_type, "Tamanho conhecido (bytes)": d.asset.byte_size}} />
     <h3>Informações temporais</h3><Fields values={{"Catalogado em (não é captura)": d.asset.created_at}} />
     {d.capture ? <Fields values={{"Captura local": d.capture.local_value, "Precisão": d.capture.precision, "Estado de timezone": d.capture.timezone_state, "Offset (minutos)": d.capture.offset_minutes, "Zona": d.capture.timezone_name, "Fonte": d.capture.source_kind, "Metadata selecionada": d.capture.metadata_id, "Motivo da seleção": d.capture.selection_reason}} /> : <p>Sem data de captura selecionada.</p>}
     <h3>Localizações conhecidas</h3>

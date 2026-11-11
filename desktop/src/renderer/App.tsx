@@ -8,19 +8,20 @@ import { DesktopMenu } from "./DesktopMenu";
 import { AssetDetailsPanel } from "./AssetDetailsPanel";
 import { DuplicatesView } from "./DuplicatesView";
 import {mediaMenu} from "./media-menu";
+import { PhotoFilterBar } from "./PhotoFilterBar";
 import { MediaCard } from "./MediaCard";
 import { LibraryWorkspace } from "./LibraryWorkspace";
 import { CatalogingPanel } from "./CatalogingPanel";
 import { useLibrarySession } from "./LibrarySession";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
-import type { AnnotationField, GalleryItem, GalleryPage } from "./types";
+import type { AnnotationField, GalleryItem, GalleryPage, PhotoFacets, PhotoFilters } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
-async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string): Promise<GalleryPage> {
+async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string, filters:PhotoFilters={}): Promise<GalleryPage> {
   const bridge = window.photoManager;
   if (!bridge) throw new Error("Desktop bridge unavailable");
-  if (retry) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly&&!rootId)return page;}
-  return bridge.listGallery({pageSize:24,...(rootId?{rootId}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
+  if (retry) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly&&!rootId&&!Object.keys(filters).length)return page;}
+  return bridge.listGallery({pageSize:24,...(Object.keys(filters).length?{filters}:{}),...(rootId?{rootId}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
 }
 
 type IconName = "library" | "album" | "tools" | "settings" | "photo" | "shield";
@@ -41,7 +42,8 @@ function GalleryApp() {
   const [mediaRevision,setMediaRevision]=useState(0);
   const [viewer,setViewer] = useState<string|null>(null);
   const [viewerItems,setViewerItems] = useState<GalleryItem[]>([]);
-  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<PhotoFilters>({});
+  const [facets, setFacets] = useState<PhotoFacets>();
   const [favorites, setFavorites] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);
   const [roots, setRoots] = useState<GalleryPage["roots"]>(undefined);
@@ -68,15 +70,39 @@ function GalleryApp() {
   const [paging, setPaging] = useState(false);
   const [pageError, setPageError] = useState(false);
   const inFlight = useRef(false);
-  const more = async () => {
+  const viewerNavigation = useRef(0);
+  const more = async (forViewer = false) => {
     if (inFlight.current || state.kind !== "ready" || !state.page.next_cursor) return;
     const epoch = galleryEpoch.current;
+    const navigation = viewerNavigation.current;
+    const seen = new Set(viewerItems.map(item => item.asset_id));
+    const loaded = new Map(state.page.items.map(item => [item.asset_id, item]));
+    let page = state.page;
     inFlight.current = true;
     setPaging(true);
     setPageError(false);
     try {
-      const page = await window.photoManager!.listGallery({ pageSize: 24, after: state.page.next_cursor, ...(rootId ? {rootId} : {}), ...(captureFilter?{capturePeriod:captureFilter}:{}),...(favorites?{favoritesOnly:true}:{}) });
-      if (epoch === galleryEpoch.current) setState({ kind: "ready", page: { ...page, items: [...state.page.items, ...page.items] } });
+      do {
+        const after = page.next_cursor;
+        page = await window.photoManager!.listGallery({
+          pageSize: 24, after,
+          ...(Object.keys(filters).length ? {filters} : {}),
+          ...(rootId ? {rootId} : {}),
+          ...(captureFilter ? {capturePeriod:captureFilter} : {}),
+          ...(favorites ? {favoritesOnly:true} : {}),
+        });
+        if (epoch !== galleryEpoch.current) return;
+        if (after === page.next_cursor) throw new Error("Gallery cursor did not advance");
+        for (const item of page.items) loaded.set(item.asset_id, item);
+        setState({kind:"ready", page:{...page, items:[...loaded.values()]}});
+        if (!forViewer || navigation !== viewerNavigation.current) return;
+        const photos = page.items.filter(item => isVisible(item) && item.kind === "photo" && !seen.has(item.asset_id));
+        if (photos.length) {
+          setViewerItems([...viewerItems, ...photos]);
+          showViewerAsset(photos[0].asset_id);
+          return;
+        }
+      } while (page.next_cursor);
     } catch { if (epoch === galleryEpoch.current) setPageError(true); }
     finally { if (epoch === galleryEpoch.current) {inFlight.current = false; setPaging(false);} }
   };
@@ -88,32 +114,43 @@ function GalleryApp() {
     setPageError(false);
     setState({ kind: "loading" });
     const epoch = galleryEpoch.current;
-    void requestGallery(true, captureFilter, favorites, rootId)
+    void requestGallery(true, captureFilter, favorites, rootId, filters)
       .then((page) => {
         if (epoch !== galleryEpoch.current) return;
         setState({kind: "ready", page});
         if (page.roots) setRoots(page.roots);
+        if (page.facets) setFacets(page.facets);
       })
       .catch(() => {if (epoch === galleryEpoch.current) setState({kind: "error"});});
   };
   useEffect(() => {
     let active = true;
-    void requestGallery(false,captureFilter,favorites,rootId)
+    void requestGallery(false,captureFilter,favorites,rootId,filters)
       .then((page) => {
         if (!active) return;
         setState({kind: "ready", page});
         if (page.roots) setRoots(page.roots);
+        if (page.facets) setFacets(page.facets);
       })
       .catch(() => { if (active) setState({ kind: "error" }); });
     return () => { active = false; };
-  }, [galleryRevision,captureFilter,favorites,rootId]);
+  }, [galleryRevision,captureFilter,favorites,rootId,filters]);
 
   const items = state.kind === "ready" ? state.page.items : [];
-  // Text search applies to loaded items. Desktop folder pages arrive scoped by root ID.
+  // Desktop folder pages arrive scoped by root ID.
   const folders = roots ?? [...new Set(items.map((item) => item.representative_location?.root_display_name).filter((name): name is string => !!name))].map(name => ({id:name,name}));
-  const visible = items.filter((item) => (!favorites || item.annotation.favorite) && (!folder || rootId || item.representative_location?.root_display_name === folder) && `${item.annotation.title ?? ""} ${item.representative_location?.relative_path ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const isVisible = (item: GalleryItem) => (!favorites || item.annotation.favorite) &&
+    (!folder || !!rootId || item.representative_location?.root_display_name === folder);
+  const visible = items.filter(isVisible);
+  useEffect(() => {
+    if (viewer === null) return;
+    const button = [...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")]
+      .find(candidate => candidate.dataset.assetId === viewer);
+    if (button) origin.current = button;
+  }, [viewer, state]);
   const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
   const showViewerAsset=(id:string)=>{
+    viewerNavigation.current++;
     const button=[...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find(candidate=>candidate.dataset.assetId===id);
     if(button)origin.current=button;
     setSelected(id);setPropertiesOpen(true);setViewer(id);
@@ -125,6 +162,7 @@ function GalleryApp() {
     showViewerAsset(id);
   };
   const annotationChanged=(id:string, field:AnnotationField, value:string|number|null)=>{
+    if (field === "tag_add" || field === "tag_remove" || Object.keys(filters).length) setGalleryRevision(value=>value+1);
     if (field !== "rating" && field !== "title") return;
     const edited = field === "rating" ? {rating:value as number|null} : {title:value as string|null};
     galleryEpoch.current++;
@@ -167,7 +205,7 @@ function GalleryApp() {
           <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
         </DesktopMenu>
         <DesktopMenu label="Ferramentas">{session?.catalogingEnabled && <button onClick={()=>{setCalendar(false);setPreparing(true);}}>Preparação avançada</button>}<button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
-        <DesktopMenu label="Ajuda"><p>Operação local. Imagens só são alteradas ao salvar. Favoritos, período e pastas consultam o catálogo. A busca por texto filtra os itens carregados.</p></DesktopMenu>
+        <DesktopMenu label="Ajuda"><p>Operação local. Imagens só são alteradas ao salvar. Favoritos, período e pastas consultam o catálogo. A busca e os filtros consultam a biblioteca inteira.</p></DesktopMenu>
       </nav>
     <Sidebar view={view} folders={folders} folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled} preparing={preparing} onPrepare={() => {setCalendar(false);if(session?.folderImportEnabled){setPreparing(false);setImportSequence(value=>value+1);}else setPreparing(true);}} onSource={(sourceId, favorite) => {
       if (calendar || captureFilter) browsePeriod(null);
@@ -196,26 +234,30 @@ function GalleryApp() {
       {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor/>}
       {actionError&&<p role="alert">Não foi possível executar a ação. Confira se a imagem e a biblioteca continuam disponíveis.</p>}
       {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onApplied={()=>{
-        galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setQuery("");setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);
+        galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setFilters({});setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);
       }} />}
       {session?.catalogingEnabled && <section className="preparation-workflow" hidden={!preparing} aria-label="Adicionar pastas">
         <button className="workflow-close" onClick={() => setPreparing(false)}>Recolher preparação</button>
         <CatalogingPanel sessionId={session.sessionId} onShowLibrary={() => setPreparing(false)} onApplied={() => {
           galleryEpoch.current++; inFlight.current = false; setPaging(false); setPageError(false);
-          setSelected(null); setQuery(""); setCaptureFilter(null); setCalendar(false); setFolder(null); setFavorites(false); setView("gallery");
+          setSelected(null); setFilters({}); setCaptureFilter(null); setCalendar(false); setFolder(null); setFavorites(false); setView("gallery");
           setState({kind: "loading"}); setGalleryRevision((value) => value + 1);
         }} />
       </section>}
-      {view === "gallery" && !calendar && <div className="gallery-filters">
-        <label>Pesquisar nos itens carregados <input type="search" value={query} onChange={(event) => {setQuery(event.target.value); resetSelection();}} /></label>
-        <label><input type="checkbox" checked={favorites} onChange={(event) => {changeFavorites(event.target.checked); resetSelection();}} /> Favoritos</label>
-        <span>{captureFilter ? captureFilter === "undated" ? "Sem data de captura" : `Captura: ${captureFilter}` : folders.find(source => source.id === folder)?.name ?? "Todos os itens carregados"}</span>{captureFilter&&<button onClick={()=>browsePeriod(null)}>Limpar período</button>}
-      </div>}
+      {view === "gallery" && !calendar && <PhotoFilterBar
+        filters={filters} facets={facets} favorites={favorites}
+        onFavorites={value=>{changeFavorites(value);resetSelection();}}
+        onChange={next=>{
+          galleryEpoch.current++; inFlight.current=false; setPaging(false);
+          setPageError(false); resetSelection(); setState({kind:"loading"}); setFilters(next);
+        }}
+        period={captureFilter} onClearPeriod={()=>browsePeriod(null)}
+      />}
       {view === "gallery" && calendar && <CaptureCalendar key={galleryRevision} period={calendarPeriod} onPeriod={setCalendarPeriod} onBrowse={browsePeriod} />}
       <div hidden={view !== "gallery" || calendar} className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
-        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title={favorites?"Nenhum favorito encontrado":captureFilter?"Nenhuma imagem neste período":"Sua biblioteca está vazia"} body={favorites?"Marque fotos como favoritas na biblioteca. Este filtro consulta todo o catálogo, respeitando o período selecionado.":"O catálogo local está aberto e pronto. Use Adicionar pastas para escolher um diretório e carregar suas imagens."} note="Nada foi importado ou alterado nos seus arquivos." />}
+        {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title={Object.keys(filters).length?"Nenhuma foto corresponde aos filtros":favorites?"Nenhum favorito encontrado":captureFilter?"Nenhuma imagem neste período":"Sua biblioteca está vazia"} body={Object.keys(filters).length?"Altere ou limpe os filtros para ver mais fotos.":favorites?"Marque fotos como favoritas na biblioteca. Este filtro consulta todo o catálogo, respeitando o período selecionado.":"O catálogo local está aberto e pronto. Use Adicionar pastas para escolher um diretório e carregar suas imagens."} note="Nada foi importado ou alterado nos seus arquivos." />}
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
           {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
@@ -234,7 +276,13 @@ function GalleryApp() {
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />
       {selected ? <AssetDetailsPanel suspended={viewer!==null} assetId={selected} onClose={closeDetails} revision={detailsRevision} onAnnotationChanged={session?(field,value)=>annotationChanged(selected,field,value):undefined} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(selected,value):undefined} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
     </>}
-    {viewer && <ImageViewer assetId={viewer} canSave={["image/png","image/jpeg"].includes(viewerItems[viewerIndex]?.media_type??"")} name={viewerName} position={viewerIndex>=0?`${viewerIndex+1} de ${viewerItems.length} imagens carregadas`:undefined} onPrevious={viewerIndex>0?()=>showViewerAsset(viewerItems[viewerIndex-1].asset_id):undefined} onNext={viewerIndex>=0&&viewerIndex<viewerItems.length-1?()=>showViewerAsset(viewerItems[viewerIndex+1].asset_id):undefined} onSaved={()=>{setMediaRevision(value=>value+1);setDetailsRevision(value=>value+1);setGalleryRevision(value=>value+1);}} restoreFocus={restoreViewerFocus} onClose={()=>setViewer(null)} />}
+    {viewer && <ImageViewer assetId={viewer}
+      frames={viewerItems.map(item=>({id:item.asset_id,
+        name:item.representative_location?.relative_path.split("/").pop()??"Foto"}))}
+      onFrame={showViewerAsset} canSave={["image/png","image/jpeg"].includes(viewerItems[viewerIndex]?.media_type??"")} name={viewerName} position={viewerIndex>=0?`${viewerIndex+1} de ${viewerItems.length} imagens carregadas`:undefined} onPrevious={viewerIndex>0?()=>showViewerAsset(viewerItems[viewerIndex-1].asset_id):undefined} onNext={viewerIndex<0 ? undefined : viewerIndex<viewerItems.length-1
+        ? ()=>showViewerAsset(viewerItems[viewerIndex+1].asset_id)
+        : state.kind==="ready" && state.page.next_cursor ? ()=>void more(true) : undefined}
+      loadingNext={paging} nextError={pageError && viewerIndex===viewerItems.length-1} onSaved={()=>{setMediaRevision(value=>value+1);setDetailsRevision(value=>value+1);setGalleryRevision(value=>value+1);}} restoreFocus={restoreViewerFocus} onClose={()=>{viewerNavigation.current++;setViewer(null);}} />}
     <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : "Duplicatas exatas · Consulta somente leitura"} · {selected ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Edições somente ao salvar</span></footer>
   </div>;
 }

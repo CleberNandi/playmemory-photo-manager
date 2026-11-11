@@ -46,9 +46,37 @@ def extract_capture(source):
                         offset = None
                     # Invalid offsets are preserved separately; do not invent one.
                 result.append((name, raw, local, offset, offset_raw, error))
+            for tag, name in ((272, "Model"), (42036, "LensModel")):
+                raw = values.get(tag)
+                if isinstance(raw, str):
+                    value = raw.strip(" \t\r\n\0")
+                    if value and len(value) <= 200 and value.isprintable():
+                        result.append((name, value, None, None, None, None))
             return tuple(result)
     except (OSError, ValueError, SyntaxError, KeyError, TypeError):
         return ()
+
+
+def persist_equipment(connection, asset_id, observations):
+    """Add missing equipment observations without replacing existing metadata."""
+    inserted = 0
+    for name, raw, *_ in observations:
+        if name not in ("Model", "LensModel"):
+            continue
+        cursor = connection.execute(
+            """INSERT INTO metadata(id, asset_id, namespace, metadata_key, source,
+            source_key, raw_value, interpreted_value, value_type, extractor_version,
+            extracted_at)
+            SELECT ?, ?, 'exif', ?, 'embedded-exif', ?, ?, ?, 'text',
+            'pillow-capture/1', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE NOT EXISTS (
+                SELECT 1 FROM metadata WHERE asset_id=? AND namespace='exif'
+                AND metadata_key=? AND interpreted_value IS NOT NULL
+            )""",
+            (str(uuid4()), asset_id, name, name, raw, raw, asset_id, name),
+        )
+        inserted += cursor.rowcount
+    return inserted
 
 
 def persist_capture(connection, registrations, captures):
@@ -58,8 +86,11 @@ def persist_capture(connection, registrations, captures):
             continue
         asset_id = registration.asset.id
         observations = captures.get(registration.location.normalized_relative_path, ())
+        persist_equipment(connection, asset_id, observations)
         selected = False
         for name, raw, local, offset, offset_raw, error in observations:
+            if name in ("Model", "LensModel"):
+                continue
             identifier = str(uuid4())
             connection.execute(
                 """INSERT INTO metadata(id, asset_id, namespace, metadata_key, source, source_key,

@@ -33,9 +33,12 @@ it("clears selection when filtering and supports keyboard-compatible pane ranges
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "no match");
     input.dispatchEvent(new Event("input", {bubbles: true}));
   });
+  vi.mocked(window.photoManager!.listGallery).mockResolvedValueOnce({items: [], next_cursor: null, has_more: false});
+  await click("Buscar");
+  expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,filters:{keyword:"no match"}});
   expect(host.querySelector(".asset-details")).toBeNull();
   expect(host.querySelectorAll(".media-card")).toHaveLength(0);
-  expect(host.textContent).toContain("Nenhum item carregado corresponde");
+  expect(host.textContent).toContain("Nenhuma foto corresponde aos filtros");
   await act(async () => {
     const input = host.querySelector<HTMLInputElement>('[aria-label="Largura da navegação"]')!;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "270");
@@ -101,4 +104,33 @@ it("reloads new catalog additions without clearing the selected image",async()=>
  await act(async()=>root.render(<App/>));await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="first"]')!.click());
  window.photoManager!.listGallery=vi.fn().mockResolvedValue({items:[item("first","Natureza",true),item("second","Viagens",false),item("new","Natureza",false)],next_cursor:null,has_more:false});
  await act(async()=>changed());expect(host.querySelectorAll(".media-card")).toHaveLength(3);expect(host.querySelector('[data-asset-id="first"]')?.getAttribute("aria-pressed")).toBe("true");
+});
+
+it("selects a label beyond the initial filter options and keeps its name visible", async () => {
+  const facets = {tags:[{id:"initial",name:"Primeiro"}], types:[], cameras:[], lenses:[], more:["tags" as const]};
+  const page = {items:[], next_cursor:null, has_more:false, facets};
+  const list = vi.fn().mockResolvedValue(page);
+  const options = vi.fn().mockRejectedValueOnce(new Error("temporary"))
+    .mockResolvedValueOnce({options:[{id:"later",name:"Viagem"}], next_offset:null});
+  Object.assign(window.photoManager!, {listGallery:list, listFilterOptions:options});
+  await act(async()=>root.render(<App/>));
+  const select = host.querySelector<HTMLSelectElement>('[aria-label="Rótulos"]')!;
+  await act(async()=>{
+    select.value = "Mais opções…";
+    select.dispatchEvent(new Event("change",{bubbles:true}));
+  });
+  const input = host.querySelector<HTMLInputElement>('[aria-label="Buscar opções de Rótulos"]')!;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"viag");
+    input.dispatchEvent(new Event("input",{bubbles:true}));
+  });
+  await click("Buscar opções");
+  expect(host.querySelector(".facet-options [role=alert]")?.textContent).toContain("Falha");
+  await click("Buscar opções");
+  expect(options).toHaveBeenLastCalledWith("tags","viag",0);
+  await click("Viagem");
+  expect(list).toHaveBeenLastCalledWith({pageSize:24,filters:{tag_id:"later"}});
+  expect(select.selectedOptions[0].textContent).toBe("Viagem");
+  expect(host.querySelector(".facet-options")).toBeNull();
+  expect(document.activeElement).toBe(select);
 });

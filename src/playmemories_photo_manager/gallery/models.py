@@ -49,6 +49,12 @@ class GalleryQuery:
     capture_period: str | None = None
     favorites_only: bool = False
     newest_first: bool = False
+    keyword: str | None = None
+    tag_id: str | None = None
+    rating: int | None = None
+    media_type: str | None = None
+    camera: str | None = None
+    lens: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

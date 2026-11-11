@@ -63,6 +63,9 @@ class GalleryQueries:
     ) -> None:
         self._connection = connection
         connection.create_function("capture_bucket", 2, capture_key, deterministic=True)
+        connection.create_function(
+            "fold_text", 1, lambda value: (value or "").casefold(), deterministic=True
+        )
         self._thumbnail_store = thumbnail_store
 
     def list_assets(self, query: GalleryQuery | None = None) -> GalleryPage:
@@ -105,6 +108,28 @@ class GalleryQueries:
                       SELECT 1 FROM file_location fl
                       WHERE fl.asset_id = a.id AND fl.library_root_id = ?
                   ))
+                  AND (? IS NULL OR a.media_type = ?)
+                  AND (? IS NULL OR EXISTS (SELECT 1 FROM user_annotation ua
+                    WHERE ua.asset_id = a.id AND ua.rating = ?))
+                  AND (? IS NULL OR EXISTS (SELECT 1 FROM asset_tag at
+                    WHERE at.asset_id = a.id AND at.tag_id = ?))
+                  AND (? IS NULL OR EXISTS (SELECT 1 FROM metadata m
+                    WHERE m.asset_id = a.id AND m.namespace = 'exif'
+                    AND m.metadata_key = 'Model' AND m.interpreted_value = ?))
+                  AND (? IS NULL OR EXISTS (SELECT 1 FROM metadata m
+                    WHERE m.asset_id = a.id AND m.namespace = 'exif'
+                    AND m.metadata_key = 'LensModel' AND m.interpreted_value = ?))
+                  AND (? IS NULL OR EXISTS (
+                      SELECT 1 FROM file_location fl WHERE fl.asset_id = a.id
+                      AND instr(fold_text(fl.normalized_relative_path), ?) > 0
+                    ) OR EXISTS (
+                      SELECT 1 FROM user_annotation ua WHERE ua.asset_id = a.id
+                      AND instr(fold_text(coalesce(ua.title, '') || ' ' ||
+                          coalesce(ua.description, '')), ?) > 0
+                    ) OR EXISTS (
+                      SELECT 1 FROM asset_tag at JOIN tag t ON t.id = at.tag_id
+                      WHERE at.asset_id = a.id AND instr(fold_text(t.display_name), ?) > 0
+                    ))
             )
             SELECT * FROM candidates
             WHERE (? IS NULL OR projected_availability = ?)
@@ -120,6 +145,12 @@ class GalleryQueries:
             *([filters["capture_period"]] * 5),
             filters["root_id"],
             filters["root_id"],
+            *([filters.get("media_type")] * 2),
+            *([filters.get("rating")] * 2),
+            *([filters.get("tag_id")] * 2),
+            *([filters.get("camera")] * 2),
+            *([filters.get("lens")] * 2),
+            *([filters.get("keyword")] * 4),
             filters["availability"],
             filters["availability"],
             after_created,
@@ -296,6 +327,13 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         period = validate_period(query.capture_period)
     except ValueError as error:
         raise InvalidGalleryQueryError("invalid capture period") from error
+    for field in ("keyword", "media_type", "camera", "lens"):
+        value = getattr(query, field)
+        if value is not None and (not isinstance(value, str) or len(value) > 200 or "\0" in value):
+            raise InvalidGalleryQueryError("invalid text filter")
+    if query.rating is not None and (type(query.rating) is not int or not 1 <= query.rating <= 5):
+        raise InvalidGalleryQueryError("invalid rating")
+    tag_id = _canonical_uuid(query.tag_id, "tag_id") if query.tag_id is not None else None
     return GalleryQuery(
         query.page_size,
         query.after,
@@ -305,11 +343,22 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         period,
         query.favorites_only,
         query.newest_first,
+        query.keyword.strip().casefold() if query.keyword and query.keyword.strip() else None,
+        tag_id,
+        query.rating,
+        query.media_type,
+        query.camera,
+        query.lens,
     )
 
 
-def _filter_values(query: GalleryQuery) -> dict[str, str | bool | None]:
+def _filter_values(query: GalleryQuery) -> dict[str, str | int | bool | None]:
     return {
+        **{
+            field: getattr(query, field)
+            for field in ("keyword", "tag_id", "rating", "media_type", "camera", "lens")
+            if getattr(query, field) is not None
+        },
         **({"newest_first": True} if query.newest_first else {}),
         "kind": query.kind.value if query.kind else None,
         "capture_period": query.capture_period,
@@ -319,12 +368,14 @@ def _filter_values(query: GalleryQuery) -> dict[str, str | bool | None]:
     }
 
 
-def _filter_fingerprint(filters: dict[str, str | bool | None]) -> str:
+def _filter_fingerprint(filters: dict[str, str | int | bool | None]) -> str:
     encoded = json.dumps(filters, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _encode_cursor(created_at: str, asset_id: str, filters: dict[str, str | bool | None]) -> str:
+def _encode_cursor(
+    created_at: str, asset_id: str, filters: dict[str, str | int | bool | None]
+) -> str:
     payload = {
         "v": _CURSOR_VERSION,
         "c": created_at,
@@ -337,7 +388,7 @@ def _encode_cursor(created_at: str, asset_id: str, filters: dict[str, str | bool
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def _decode_cursor(cursor: str, filters: dict[str, str | bool | None]) -> tuple[str, str]:
+def _decode_cursor(cursor: str, filters: dict[str, str | int | bool | None]) -> tuple[str, str]:
     if not cursor or len(cursor) > _MAX_CURSOR_LENGTH or not cursor.isascii():
         raise InvalidCursorError("invalid cursor")
     try:

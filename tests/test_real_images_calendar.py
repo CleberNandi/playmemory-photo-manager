@@ -15,11 +15,13 @@ from playmemories_photo_manager.catalog_ingestion import (
     authorize_scoped_ingestion,
 )
 from playmemories_photo_manager.catalog_ingestion.media import _mount_id
+from playmemories_photo_manager.desktop.backfill_equipment import backfill_equipment
 from playmemories_photo_manager.desktop.bridge import BridgeRequestError, _dispatch
 from playmemories_photo_manager.gallery import GalleryQueries, GalleryQuery
 from playmemories_photo_manager.gallery.calendar import capture_key, summary
 from playmemories_photo_manager.gallery.errors import InvalidCursorError
 from playmemories_photo_manager.imaging.service import ImageService
+from playmemories_photo_manager.library import LibrarySession
 
 
 def raster(path, format="JPEG", **options):
@@ -367,3 +369,125 @@ def test_original_dimensions_and_chunked_view_preserve_full_resolution(library):
         assert source.read_bytes() == before
     finally:
         close_images(service)
+
+
+def test_gallery_filters_use_catalog_metadata_before_pagination(library):
+    root, path, connection, root_id = library
+    exif = Image.Exif()
+    exif[272] = "ILCE-7M4"
+    exif[34665] = {42036: "FE 35mm F1.8"}
+    raster(root / "portrait.jpg", exif=exif)
+    raster(root / "other.png", "PNG")
+    apply(root, path, connection, root_id)
+    queries = GalleryQueries(connection)
+    portrait = queries.list_assets(GalleryQuery(media_type="image/jpeg")).items[0]
+    catalog = Catalog(connection)
+    catalog.set_description(portrait.asset_id, "Retrato em FLORESTÁ")
+    catalog.set_rating(portrait.asset_id, 5)
+    catalog.assign_tag(portrait.asset_id, "Viagens")
+    tag_id = connection.execute("SELECT id FROM tag").fetchone()[0]
+
+    page = queries.list_assets(
+        GalleryQuery(
+            page_size=1,
+            keyword="florestá",
+            tag_id=tag_id,
+            rating=5,
+            media_type="image/jpeg",
+            camera="ILCE-7M4",
+            lens="FE 35mm F1.8",
+        )
+    )
+    assert [item.asset_id for item in page.items] == [portrait.asset_id]
+    assert not page.has_more
+
+    for facet, value in (("cameras", "ILCE-7M4"), ("lenses", "FE 35mm F1.8")):
+        options = _dispatch(
+            connection,
+            "gallery.facets",
+            {"facet": facet, "keyword": value.lower(), "offset": 0},
+        )
+        assert options == {"options": [{"id": value, "name": value}], "next_offset": None}
+
+    first = queries.list_assets(GalleryQuery(page_size=1))
+    assert first.next_cursor
+    with pytest.raises(InvalidCursorError):
+        queries.list_assets(GalleryQuery(page_size=1, after=first.next_cursor, rating=5))
+
+
+def test_facet_pages_and_search_reach_labels_beyond_the_initial_options(library):
+    _, _, connection, _ = library
+    catalog = Catalog(connection)
+    for index in range(25):
+        catalog.create_tag(f"Rótulo {index:02}")
+    distant = catalog.create_tag("Últimas férias")
+    facets = _dispatch(connection, "gallery.list", {"include_facets": True})["facets"]
+    assert len(facets["tags"]) == 24
+    assert facets["more"] == ["tags"]
+
+    def page(keyword="", offset=0):
+        return _dispatch(
+            connection, "gallery.facets", {"facet": "tags", "keyword": keyword, "offset": offset}
+        )
+
+    first = page()
+    assert first["options"] == facets["tags"]
+    assert first["next_offset"] == 24
+    second = page(offset=first["next_offset"])
+    assert [option["name"] for option in second["options"]] == ["Rótulo 24", "Últimas férias"]
+    assert second["next_offset"] is None
+    assert page(" FÉRIAS ") == {
+        "options": [{"id": distant.id, "name": "Últimas férias"}],
+        "next_offset": None,
+    }
+    assert page("ausente") == {"options": [], "next_offset": None}
+    for invalid in (-1, True, 2**53):
+        with pytest.raises(BridgeRequestError):
+            page(offset=invalid)
+
+
+def test_backfill_equipment_preserves_existing_annotations_and_skips_replaced_files(library):
+    root, path, connection, root_id = library
+    exif = Image.Exif()
+    exif[272] = "ILCE-7M4"
+    exif[34665] = {42036: "FE 35mm F1.8", 36867: "2024:02:29 23:30:00"}
+    original = root / "original.jpg"
+    replaced = root / "replaced.jpg"
+    raster(original, exif=exif)
+    raster(replaced, exif=exif)
+    apply(root, path, connection, root_id)
+    asset_ids = dict(
+        connection.execute("SELECT normalized_relative_path, asset_id FROM file_location")
+    )
+    original_id = asset_ids["original.jpg"]
+    capture = connection.execute(
+        "SELECT captured_metadata_id FROM asset WHERE id=?", (original_id,)
+    ).fetchone()[0]
+    # Reproduce a catalog written before equipment observations were extracted.
+    with connection:
+        connection.execute("DELETE FROM metadata WHERE metadata_key IN ('Model','LensModel')")
+    catalog = Catalog(connection)
+    catalog.set_rating(original_id, 4)
+    catalog.assign_tag(original_id, "Teste")
+    before = original.read_bytes(), original.stat().st_mtime_ns
+    replaced.unlink()
+    replaced.symlink_to(original)
+    with LibrarySession.open(path) as session:
+        assert backfill_equipment(session) == {
+            "verificadas": 2,
+            "atualizadas": 1,
+            "indisponiveis": 1,
+        }
+        assert backfill_equipment(session)["atualizadas"] == 0
+    assert (original.read_bytes(), original.stat().st_mtime_ns) == before
+    assert replaced.is_symlink()
+    assert (
+        connection.execute(
+            "SELECT captured_metadata_id FROM asset WHERE id=?", (original_id,)
+        ).fetchone()[0]
+        == capture
+    )
+    result = GalleryQueries(connection).list_assets(
+        GalleryQuery(camera="ILCE-7M4", lens="FE 35mm F1.8", rating=4, keyword="Teste")
+    )
+    assert [item.asset_id for item in result.items] == [original_id]

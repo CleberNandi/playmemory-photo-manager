@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -271,11 +271,11 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   if (!Buffer.from(await readFile(join(root, "synthetic-a.jpg"))).equals(jpeg) || !Buffer.from(await readFile(join(root, "synthetic-b.jpg"))).equals(jpeg)) throw new Error("synthetic originals changed");
   await waitFor('document.querySelectorAll(".synthetic-thumbnail").length === 2 && [...document.querySelectorAll(".synthetic-thumbnail")].every(img => img.complete && img.naturalWidth === 256)');
   await evaluate('document.querySelector(".open-image").click()');
-  await waitFor('document.querySelector(".image-viewer img")?.naturalWidth > 0');
+  await waitFor('document.querySelector(".viewer-image img")?.naturalWidth > 0');
   await click("Girar à direita");
-  await waitFor('document.querySelector(".image-viewer img")?.style.transform.includes("rotate(90deg)")');
-  if(!await evaluate<boolean>('(()=>{const image=document.querySelector(".image-viewer img").getBoundingClientRect(),canvas=document.querySelector(".viewer-image").getBoundingClientRect();return image.width<=canvas.width+1&&image.height<=canvas.height+1;})()'))throw new Error("rotated fit overflow");
-  await click("Próxima");await waitFor('!!document.querySelector(".viewer-unsaved")');await click("Descartar rotação");await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2") && document.querySelector(".image-viewer img")?.naturalWidth>0');
+  await waitFor('document.querySelector(".viewer-image img")?.style.transform.includes("rotate(90deg)")');
+  if(!await evaluate<boolean>('(()=>{const image=document.querySelector(".viewer-image img").getBoundingClientRect(),canvas=document.querySelector(".viewer-image").getBoundingClientRect();return image.width<=canvas.width+1&&image.height<=canvas.height+1;})()'))throw new Error("rotated fit overflow");
+  await click("Próxima");await waitFor('!!document.querySelector(".viewer-unsaved")');await click("Descartar rotação");await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2") && document.querySelector(".viewer-image img")?.naturalWidth>0');
   window.webContents.sendInputEvent({type:"keyDown",keyCode:"Left"});
   await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("1 de 2") && document.querySelector(".viewer-caption")?.textContent.includes("0°")');
   window.webContents.sendInputEvent({type:"keyDown",keyCode:"Right"});
@@ -290,7 +290,7 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await click("Fechar imagem");
   await waitFor('!!document.querySelector(".asset-details dl") && document.activeElement?.classList.contains("card-select")');
   await evaluate('document.querySelector(".open-image").click()');
-  await waitFor('document.querySelector(".image-viewer img")?.naturalWidth > 0');
+  await waitFor('document.querySelector(".viewer-image img")?.naturalWidth > 0');
   window.webContents.sendInputEvent({type:"keyDown",keyCode:"Escape"});
   window.webContents.sendInputEvent({type:"keyUp",keyCode:"Escape"});
   await waitFor('!document.querySelector(".image-viewer") && !!document.querySelector(".asset-details dl") && document.activeElement?.classList.contains("card-select")');
@@ -335,6 +335,7 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await evaluate('document.querySelector(".card-select").click()');await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
  await wait('document.querySelector(".asset-details")?.textContent.includes("80 × 40 px")');
  console.log("SMOKE MEDIA ORIGIN PASS: catalog occurrence resolved, origin shown; native popup and file manager NOT TESTED");
+ await evaluate('Array.from(document.querySelectorAll(".property-section > summary")).find(node=>node.textContent==="Informações adicionadas pelo usuário").click()');
  await evaluate('document.querySelector(`[aria-label="4 estrelas"]`).click()');
  await wait('document.querySelector(`[aria-label="4 estrelas"]`)?.getAttribute("aria-pressed")==="true"');
  await evaluate(`(() => {
@@ -342,26 +343,79 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, "Viagem");
    field.dispatchEvent(new Event("input", {bubbles:true}));
  })()`);
- await click("Adicionar tag");
+ await click("Adicionar rótulo");
  await wait('document.querySelector(".annotation-tags")?.textContent.includes("Viagem")');
+ window.setContentSize(1180,760);
+ await wait('window.innerWidth >= 1100');
+ for (const heading of ["Resumo", "Informações adicionadas pelo usuário", "Detalhes técnicos"]) {
+   const sectionToggles = await evaluate<boolean>(`(() => {
+     const summary = Array.from(document.querySelectorAll(".property-section > summary"))
+       .find(node => node.textContent === ${JSON.stringify(heading)});
+     if (!summary) return false;
+     const initial = summary.parentElement.open;
+     summary.click();
+     const toggled = summary.parentElement.open !== initial;
+     summary.click();
+     return toggled && summary.parentElement.open === initial;
+   })()`);
+   if (!sectionToggles) throw new Error(`properties section did not toggle: ${heading}`);
+ }
+ await writeFile("/tmp/playmemories-workspace-properties.png",(await window.webContents.capturePage()).toPNG());
  console.log("SMOKE ANNOTATIONS PASS: stars and tag saved through catalog UI");
+ await wait('Array.from(document.querySelectorAll(`select[aria-label="Rótulos"] option`)).some(option=>option.textContent==="Viagem")');
+ await evaluate(`(() => {
+   const labels = document.querySelector('select[aria-label="Rótulos"]');
+   labels.value = Array.from(labels.options).find(option=>option.textContent==="Viagem").value;
+   labels.dispatchEvent(new Event("change", {bubbles:true}));
+ })()`);
+ await wait('document.querySelectorAll(".media-card").length === 1');
+ await click("Limpar filtros");
+ await wait('document.querySelectorAll(".media-card").length === 24');
+ console.log("SMOKE GALLERY FILTER PASS: newly assigned label filters all catalog pages");
+ for(let index=0;index<25;index++){
+   await backend.request("annotation.edit",{session_id:initial.session.session_id,asset_id:first,
+     field:"tag_add",value:`Amostra ${String(index).padStart(2,"0")}`});
+ }
+ await click("☆ Favoritos");
+ await wait('!!document.querySelector(".gallery-filters option[data-more]")');
+ await click("Biblioteca");
+ await wait('document.querySelectorAll(".media-card").length === 24');
+ await evaluate(`(() => {
+   const labels = document.querySelector('select[aria-label="Rótulos"]');
+   labels.value = "Mais opções…";
+   labels.dispatchEvent(new Event("change", {bubbles:true}));
+ })()`);
+ await wait('!!document.querySelector(".facet-options")');
+ await click("Carregar mais opções");
+ await wait('Array.from(document.querySelectorAll(".facet-options button")).some(button=>button.textContent==="Viagem")');
+ await click("Viagem");
+ await wait('document.querySelectorAll(".media-card").length === 1');
+ await click("Limpar filtros");
+ await wait('document.querySelectorAll(".media-card").length === 24');
+ console.log("SMOKE FILTER OPTIONS PASS: selected a catalog label beyond the initial 24");
  const beforeEdit=Buffer.from(await readFile(location.path));
- await evaluate('document.querySelector(".open-image").click()');await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');
+ await evaluate('document.querySelector(".open-image").click()');await wait('document.querySelector(".viewer-image img")?.naturalWidth>0');
  if(await evaluate<boolean>('!!document.querySelector(".viewer-save-group")'))throw new Error("save controls visible for clean image");
- await click("Maximizar");
- await wait('document.querySelector(".image-viewer")?.classList.contains("viewer-maximized")');
- await click("Restaurar janela");
+ const fillsWindow = await evaluate<boolean>(`(() => {
+   const viewer = document.querySelector(".image-viewer");
+   const rect = viewer.getBoundingClientRect();
+   return rect.x === 0 && rect.y === 0 && rect.width === innerWidth && rect.height === innerHeight
+     && !viewer.querySelector('[aria-label="Maximizar"]')
+     && !!viewer.querySelector(".viewer-surface .viewer-edge-next");
+ })()`);
+ if (!fillsWindow) throw new Error("viewer does not fill the native window");
  await click("Próxima");
- await wait('document.querySelector(".viewer-caption")?.textContent.includes("2 de 24") && document.querySelector(".image-viewer img")?.naturalWidth>0');
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("2 de 24") && document.querySelector(".viewer-image img")?.naturalWidth>0');
  await click("Anterior");
- await wait('document.querySelector(".viewer-caption")?.textContent.includes("1 de 24") && document.querySelector(".image-viewer img")?.naturalWidth>0');
- console.log("SMOKE MANAGED VIEWER PASS: maximize, restore, next and previous with viewer open");
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("1 de 24") && document.querySelector(".viewer-image img")?.naturalWidth>0');
+ await writeFile("/tmp/playmemories-workspace-viewer.png",(await window.webContents.capturePage()).toPNG());
+ console.log("SMOKE MANAGED VIEWER PASS: full-window viewer, overlaid arrows, next and previous");
  await click("100%");await wait('document.querySelector(".viewer-caption")?.textContent.includes("80 × 40 px · 100%")');
  await click("Ajustar");
- await click("Girar à direita");await click("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');
+ await click("Girar à direita");await wait('!!document.querySelector(".viewer-save-group")');await click("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');
  if(!Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("save copy changed source");
- await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');
- await click("Girar à direita");await click("Salvar alterações");await wait('document.querySelector(".image-viewer")?.textContent.includes("Alterações salvas no arquivo original")');
+ await wait('document.querySelector(".viewer-image img")?.naturalWidth>0');
+ await click("Girar à direita");await wait('!!document.querySelector(".viewer-save-group")');await click("Salvar alterações");await wait('document.querySelector(".image-viewer")?.textContent.includes("Alterações salvas no arquivo original")');
  if(Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("replace did not change full original");
  const afterEdit=await backend.request("asset.reveal",{session_id:initial.session.session_id,asset_id:first}) as {path:string};
  if(afterEdit.path!==location.path)throw new Error("edited asset lost location");
@@ -386,5 +440,13 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
    card.querySelector("img")?.naturalWidth > 0)`);
  await writeFile("/tmp/playmemories-monitor.png",(await window.webContents.capturePage()).toPNG());
  console.log("SMOKE FOLDER MONITOR PASS: decoded thumbnail in the open folder after unrelated mtime change and deletion");
+ await evaluate('Array.from(document.querySelectorAll(".open-image")).at(-1).click()');
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("24 de 24")');
+ await click("Próxima");
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("25 de 48") && document.querySelector(".viewer-image img")?.naturalWidth>0');
+ await click("Anterior");
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("24 de 48")');
+ await click("Fechar imagem");
+ console.log("SMOKE VIEWER PAGINATION PASS: crossed the page boundary inside the selected folder and returned");
  console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; unrelated originals unchanged; explicit fixture rotation saved; native dialogs NOT TESTED");
 }
