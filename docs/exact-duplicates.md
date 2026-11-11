@@ -41,7 +41,9 @@ Não existe executor, autorização física, movimentação, exclusão, restaura
 
 Somente localizações `present`, de tipo `file`, em raízes `available` são elegíveis. Localizações
 offline, ausentes, symlinks, paths inválidos, arquivos não regulares, falhas de leitura e mudanças
-observáveis aparecem em `issues`; qualquer issue torna a cobertura `partial`. Se o host não
+observáveis aparecem em `issues`. Qualquer issue torna a cobertura `partial`. Um caminho ausente que
+representa a mesma ocorrência física observada em outro caminho do mesmo Asset e raiz é apenas
+histórico para fins de cobertura. Se o host não
 oferecer o confinamento POSIX exigido, a operação falha fechada com cobertura `unavailable`.
 
 No POSIX, a raiz absoluta é aberta componente por componente e cada diretório/arquivo é aberto

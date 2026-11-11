@@ -255,3 +255,126 @@ def test_indexer_waits_for_its_writer_before_rechecking_catalog_binding(library,
     result = settle(dispatcher, session)
     assert result["error"] is None, result
     assert result["added_count"] == 1
+
+
+def test_move_into_subfolder_keeps_asset_location_and_annotations(library):
+    from playmemories_photo_manager.duplicates import find_exact_duplicates
+
+    dispatcher, path, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    first = root / "first.jpg"
+    original = first.read_bytes()
+    (root / "copy.jpg").write_bytes(original)
+    assert settle(dispatcher, session)["error"] is None
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        root_id = catalog.list_roots()[0].id
+        original_location = next(
+            location
+            for location in catalog.list_root_locations(root_id)
+            if location.normalized_relative_path == first.name
+        )
+        catalog.set_favorite(original_location.asset_id, True)
+        album = catalog.create_album("Movimento")
+        catalog.add_asset_to_album(album.id, original_location.asset_id)
+    new_folder = root / "teste"
+    new_folder.mkdir()
+    first.rename(new_folder / first.name)
+
+    dispatcher.indexer.last_check = None
+    status = settle(dispatcher, session)
+    assert status["error"] is None, status
+    assert status["added_count"] == 1
+    assert status["revision"] == 2
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        locations = catalog.get_asset_locations(original_location.asset_id)
+        live = next(location for location in locations if location.id == original_location.id)
+        assert live.normalized_relative_path == "teste/first.jpg"
+        assert live.availability == "present"
+        history = next(location for location in locations if location.id != live.id)
+        assert history.normalized_relative_path == "first.jpg" and history.availability == "missing"
+        assert history.last_seen_at == original_location.last_seen_at
+        assert catalog.get_annotation(live.asset_id).favorite
+        assert [asset.id for asset in catalog.list_album_assets(album.id)] == [live.asset_id]
+        assert len(catalog.list_assets()) == 2
+        duplicate_result = find_exact_duplicates(connection)
+        assert duplicate_result.coverage == "complete"
+        assert {m.relative_path for m in duplicate_result.groups[0].members} == {
+            "copy.jpg",
+            "teste/first.jpg",
+        }
+    detail = dispatcher.request("asset.details", {"session_id": session, "asset_id": live.asset_id})
+    assert detail["locations"][0]["relative_path"] == "teste/first.jpg"
+    assert (new_folder / first.name).read_bytes() == original
+
+    dispatcher.indexer.last_check = None
+    assert settle(dispatcher, session)["revision"] == status["revision"]
+    with connect(path) as connection:
+        assert len(Catalog(connection).get_asset_locations(live.asset_id)) == 2
+
+
+def test_already_indexed_destination_preserves_both_assets(library):
+    from playmemories_photo_manager.duplicates import find_exact_duplicates
+
+    dispatcher, path, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        root_id = catalog.list_roots()[0].id
+        old = catalog.list_root_locations(root_id)[0]
+        other = catalog.create_asset("photo")
+        new = catalog.register_location(
+            other.id,
+            root_id,
+            "teste/first.jpg",
+            last_seen_at="2026-11-11T00:00:00Z",
+            filesystem_id=old.filesystem_id,
+            observed_byte_size=old.observed_byte_size,
+            observed_mtime_ns=old.observed_mtime_ns,
+        )
+    (root / "teste").mkdir()
+    (root / "first.jpg").rename(root / new.normalized_relative_path)
+
+    dispatcher.indexer.last_check = None
+    status = settle(dispatcher, session)
+    assert status["error"] is None, status
+    assert status["added_count"] == 0
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        assert len(catalog.list_assets()) == 2
+        assert catalog.get_asset_locations(old.asset_id)[0].availability == "missing"
+        assert catalog.get_asset_locations(other.id) == [new]
+        result = find_exact_duplicates(connection)
+        assert [(issue.kind, issue.relative_path) for issue in result.issues] == [
+            ("location_unavailable", "first.jpg"),
+        ]
+
+
+def test_returning_to_the_original_path_restores_an_absent_location(library):
+    dispatcher, path, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        root_id = catalog.list_roots()[0].id
+        original = catalog.list_root_locations(root_id)[0]
+
+    detached = root.with_name("detached.jpg")
+    (root / "first.jpg").rename(detached)
+    dispatcher.indexer.last_check = None
+    assert settle(dispatcher, session)["error"] is None
+    with connect(path) as connection:
+        assert (
+            Catalog(connection).get_asset_locations(original.asset_id)[0].availability == "missing"
+        )
+
+    detached.rename(root / "first.jpg")
+    dispatcher.indexer.last_check = None
+    status = settle(dispatcher, session)
+    assert status["error"] is None, status
+    assert status["added_count"] == 0
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        [location] = catalog.get_asset_locations(original.asset_id)
+        assert (location.id, location.availability) == (original.id, "present")
+        assert len(catalog.list_assets()) == 1

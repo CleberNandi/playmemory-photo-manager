@@ -34,9 +34,16 @@ checagem, inclusive quando não houve mudança no nome. Mudanças durante a pró
 adiar a conclusão da varredura até a próxima tentativa.
 
 Em raízes com âncora válida, alteração, exclusão ou substituição de um arquivo conhecido não
-impede novas adições. A raiz substituída continua rejeitada. O monitor ainda não reconcilia
-ocorrências antigas, nem preserva automaticamente a identidade num renomeio. Na vista de uma
-pasta, o catálogo filtra pelo UUID da raiz antes de paginar e mostra adições recentes primeiro.
+impede novas adições. A raiz substituída continua rejeitada. Com a raiz ancorada, o monitor reconcilia caminhos após uma observação completa e estável.
+Dentro da mesma raiz, um destino livre e inequívoco com a mesma identidade física, tamanho e
+mtime conserva o Asset e o ID da localização ativa. O caminho anterior fica no catálogo como
+observação ausente do mesmo Asset. Se o caminho desapareceu e o destino já tem outro registro
+ou a identidade é ambígua, o caminho antigo passa a ausente e os Assets continuam separados.
+Uma raiz indisponível ou uma varredura incompleta não altera a disponibilidade dos arquivos.
+O monitor não grava na mídia. O SQLite continua na mesma versão de esquema.
+
+Na vista de uma pasta, o catálogo filtra pelo UUID da raiz antes de paginar e mostra adições
+recentes primeiro.
 
 Testes usam árvores e imagens sintéticas: adição com sessão aberta, reinício, pasta vazia,
 subpastas inicialmente vazias, idempotência, raiz substituída, raiz indisponível, pausa antes de

@@ -118,6 +118,27 @@ class CatalogRepository:
             ),
         )
 
+    def reconcile_location(
+        self,
+        location: FileLocation,
+        relative_path: str,
+        availability: LocationAvailability,
+        observed_at: str,
+    ) -> None:
+        self.connection.execute(
+            """UPDATE file_location
+            SET normalized_relative_path=?, availability=?, last_seen_at=?
+            WHERE id=?""",
+            (
+                relative_path,
+                availability,
+                observed_at
+                if availability is LocationAvailability.PRESENT
+                else location.last_seen_at,
+                location.id,
+            ),
+        )
+
     def get_location(self, identifier: str) -> FileLocation | None:
         row = self.connection.execute(
             "SELECT * FROM file_location WHERE id = ?", (identifier,)

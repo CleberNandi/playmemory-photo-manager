@@ -83,11 +83,14 @@ def observe_exact_duplicates(rows: tuple[_CatalogLocation, ...]) -> ExactDuplica
         return ExactDuplicateResult(DuplicateCoverage.UNAVAILABLE, (), issues, eligible_count, 0)
 
     issues: list[DuplicateIssue] = []
+    missing: list[_CatalogLocation] = []
     candidates: list[_Candidate] = []
     by_root: dict[tuple[str, str], list[_CatalogLocation]] = defaultdict(list)
     for row in rows:
         if row.root_availability != "available":
             issues.append(_issue(DuplicateIssueKind.ROOT_OFFLINE, row))
+        elif row.availability == "missing":
+            missing.append(row)
         elif row.availability != "present":
             issues.append(_issue(DuplicateIssueKind.LOCATION_UNAVAILABLE, row))
         elif row.entry_type != "file":
@@ -203,6 +206,27 @@ def observe_exact_duplicates(rows: tuple[_CatalogLocation, ...]) -> ExactDuplica
     finally:
         for root_fd, _snapshot_value in root_descriptors.values():
             os.close(root_fd)
+
+    # A previous path of the same verified physical occurrence adds no gap.
+    def occurrence(row: _CatalogLocation) -> tuple:
+        return (
+            row.asset_id,
+            row.root_id,
+            row.filesystem_id,
+            row.observed_size,
+            row.observed_mtime_ns,
+        )
+
+    observed_occurrences = {
+        occurrence(candidate.catalog)
+        for candidate in candidates
+        if candidate.catalog.root_id not in invalid_roots and candidate.catalog.filesystem_id
+    }
+    issues.extend(
+        _issue(DuplicateIssueKind.LOCATION_UNAVAILABLE, row)
+        for row in missing
+        if row.entry_type != "file" or occurrence(row) not in observed_occurrences
+    )
 
     digest_groups: dict[tuple[str, int], list[DuplicateMember]] = defaultdict(list)
     for member in hashed:

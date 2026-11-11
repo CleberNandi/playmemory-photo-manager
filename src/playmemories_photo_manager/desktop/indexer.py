@@ -1,6 +1,7 @@
 """Bounded event-driven additions from registered folders, with independent finite workers."""
 
 import os
+import stat
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -9,6 +10,7 @@ from ..catalog_ingestion.media import _Directories
 from ..catalog_ingestion.root_grants import RootGrantService, _HeldRoot
 from ..library import LibraryError, LibrarySession
 from .directory_events import DirectoryEvents
+from .location_reconciliation import entry_state, reconcile_locations
 
 
 def directory_signature(path, anchor, events=None):
@@ -27,31 +29,27 @@ def directory_signature(path, anchor, events=None):
                 raise LibraryError("resource_limit")
             if events is not None:
                 events.add(fd)
-            info = os.fstat(fd)
-            result.append((relative, info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns))
+            before = entry_state(os.fstat(fd))
+            result.append((relative, before))
+            prefix = relative + "/" if relative else ""
             with os.scandir(fd) as entries:
                 children = []
                 for item in entries:
                     count += 1
                     if count > 2000:
                         raise LibraryError("resource_limit")
-                    children.append(item)
-                children.sort(key=lambda item: item.name)
-            for item in children:
-                if item.is_dir(follow_symlinks=False):
-                    child = directories.child(fd, item.name, held.mount)
-                    walk(child, relative + "/" + item.name, depth + 1)
-                elif item.is_file(follow_symlinks=False):
-                    info = item.stat(follow_symlinks=False)
-                    result.append(
-                        (
-                            relative + "/" + item.name,
-                            info.st_ino,
-                            info.st_size,
-                            info.st_mtime_ns,
-                            info.st_ctime_ns,
-                        )
-                    )
+                    children.append((item.name, entry_state(item.stat(follow_symlinks=False))))
+            for name, state in sorted(children):
+                child_path = prefix + name
+                if state.kind == stat.S_IFDIR:
+                    child = directories.child(fd, name, held.mount)
+                    if entry_state(os.fstat(child)) != state:
+                        raise LibraryError("root_changed")
+                    walk(child, child_path, depth + 1)
+                else:
+                    result.append((child_path, state))
+            if entry_state(os.fstat(fd)) != before:
+                raise LibraryError("root_changed")
 
         walk(held.fd, "", 0)
         directories.check()
@@ -218,12 +216,17 @@ class FolderIndexer:
                     self.state_file.remember(self.active, c["root"], service.binding(c["root"]))
                 current_binding = service.binding(c["root"])
                 events = DirectoryEvents()
+                anchor = [current_binding[0], current_binding[1].device, current_binding[1].file_id]
                 try:
-                    c["signature"] = directory_signature(
-                        current_binding[0],
-                        [current_binding[0], current_binding[1].device, current_binding[1].file_id],
-                        events,
-                    )
+                    c["signature"] = directory_signature(current_binding[0], anchor, events)
+                    if reconcile_locations(
+                        c["session"],
+                        c["root"],
+                        current_binding,
+                        c["signature"],
+                        lambda: directory_signature(current_binding[0], anchor),
+                    ):
+                        self.revision += 1
                 except BaseException:
                     events.close()
                     raise

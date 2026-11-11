@@ -6,6 +6,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import PurePosixPath
 
 from .errors import (
@@ -403,6 +404,38 @@ class Catalog:
             if after_write is not None:
                 after_write(tuple(results))
         return tuple(results)
+
+    def reconcile_monitored_locations(
+        self,
+        root_id: str,
+        *,
+        expected_root_path: str,
+        expected: list[FileLocation],
+        changes: list[tuple[FileLocation, str, LocationAvailability]],
+        observed_at: str,
+    ) -> None:
+        """Apply a verified root observation if its catalog snapshot is still current."""
+        with self._write():
+            root = self._repository.get_root(root_id)
+            if (
+                root is None
+                or root.availability is not RootAvailability.AVAILABLE
+                or root.normalized_path != expected_root_path
+                or self._repository.list_root_locations(root_id, len(expected) + 1, 0) != expected
+            ):
+                raise CatalogStateConflictError("monitored root changed", relative_paths=())
+            for location, relative_path, availability in changes:
+                if relative_path != location.normalized_relative_path:
+                    self._repository.insert_location(
+                        replace(
+                            location,
+                            id=str(uuid.uuid4()),
+                            availability=LocationAvailability.MISSING,
+                        )
+                    )
+                self._repository.reconcile_location(
+                    location, _relative_path(relative_path), availability, observed_at
+                )
 
     def create_album(self, name: str, *, description: str | None = None) -> Album:
         name = _nonblank(name, "name")

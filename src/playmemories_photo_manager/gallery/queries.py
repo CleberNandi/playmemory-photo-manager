@@ -198,7 +198,8 @@ class GalleryQueries:
                 FROM file_location fl
                 JOIN library_root lr ON lr.id = fl.library_root_id
                 WHERE fl.asset_id = ?
-                ORDER BY fl.library_root_id, fl.normalized_relative_path, fl.id
+                ORDER BY fl.availability = 'missing', fl.library_root_id,
+                         fl.normalized_relative_path, fl.id
                 LIMIT ?""",
                 (identifier, MAX_DETAIL_LOCATIONS + 1),
             ).fetchall()

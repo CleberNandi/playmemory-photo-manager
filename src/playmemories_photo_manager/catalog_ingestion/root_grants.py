@@ -320,6 +320,8 @@ class RootGrantService:
             finally:
                 connection.rollback()
         for location in locations:
+            if location.availability == "missing":
+                continue
             if len(location.normalized_relative_path) > 4096:
                 raise PreparationError("resource_limit")
             relative = PurePosixPath(location.normalized_relative_path)
@@ -448,7 +450,7 @@ class RootGrantService:
                 # the existing admission below verifies all known occurrences before scanning.
                 known = self.session.query_connection.execute(
                     "SELECT 1 FROM file_location WHERE library_root_id=? "
-                    "AND filesystem_id IS NOT NULL LIMIT 1",
+                    "AND availability = 'present' AND filesystem_id IS NOT NULL LIMIT 1",
                     (root_id,),
                 ).fetchone()
                 if known is None:
