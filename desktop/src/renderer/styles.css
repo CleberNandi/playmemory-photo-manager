@@ -132,8 +132,10 @@ button, summary { touch-action: manipulation; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .duplicates-view { padding-top: 24px; overflow-wrap: anywhere; }
 .duplicates-view h2:focus { outline: none; }
-.synthetic-banner { border-left: 4px solid var(--color-accent-strong); padding: 16px; background: #f4e7cf; line-height: 1.6; }
-.duplicate-notice { padding: 12px 16px; background: #eeeae0; border-radius: 8px; margin: 16px 0; line-height: 1.6; }
+.synthetic-banner { border-left: 4px solid var(--color-accent-strong); padding: 16px; background: var(--color-surface); line-height: 1.6; }
+.duplicate-notice { padding: 12px 16px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; margin: 16px 0; line-height: 1.6; }
+.duplicate-notice[data-coverage="partial"], .duplicate-notice[data-coverage="unavailable"] { border-inline-start: 4px solid var(--color-warning); }
+.duplicate-notice summary { color: var(--color-accent-strong); cursor: pointer; }
 .duplicate-notice p { margin-block: 8px; }
 .duplicate-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
 .duplicate-layout:has(.duplicate-group) { grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.5fr); }

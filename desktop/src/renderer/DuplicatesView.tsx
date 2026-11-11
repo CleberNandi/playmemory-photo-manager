@@ -37,10 +37,10 @@ const issueNames: Record<string, string> = {
 export function Coverage({page}: {page: DuplicateListPage | DuplicateGroupPage}) {
   const synthetic = page.source === "synthetic_fixture";
   const issueCount = page.issue_count ?? page.issues.length;
-  return <div className="duplicate-notice" role="status">
+  return <div className="duplicate-notice" data-coverage={page.coverage} role="status">
     <strong>{page.coverage === "complete" ? synthetic ? "Cobertura completa do cenário sintético" : "Cobertura completa do catálogo analisado" : page.coverage === "partial" ? "Cobertura parcial: não permite concluir ausência de duplicatas" : "Cobertura indisponível"}</strong>
     <p>{page.eligible_location_count} ocorrências elegíveis{synthetic && " simuladas"} · {page.hashed_location_count} arquivos com hashing executado.{synthetic && " Sem observação física."}</p>
-    {issueCount > 0 && <details><summary>{issueCount} impedimento(s){issueCount > page.issues.length && " · amostra"}</summary><ul>{page.issues.map((issue, i) => <li key={i}>{issueNames[issue.kind] ?? issue.kind} · {issue.relative_path}</li>)}</ul></details>}
+    {issueCount > 0 && <details><summary>Ver {issueCount} {issueCount === 1 ? "impedimento" : "impedimentos"}{issueCount > page.issues.length && " · amostra"}</summary><ul>{page.issues.map((issue, i) => <li key={i}>{issueNames[issue.kind] ?? issue.kind} · {issue.relative_path}</li>)}</ul></details>}
   </div>;
 }
 export function DuplicatesView({canScan = false, onAsset, detailsOpen, onClearAsset}: {canScan?: boolean; onAsset: (id: string, button: HTMLButtonElement) => void; detailsOpen: boolean; onClearAsset: () => void}) {
