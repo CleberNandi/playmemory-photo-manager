@@ -1,6 +1,6 @@
 import { BrowserWindow } from "electron";
-import { readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile, unlink, utimes, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import type { PythonBackend } from "./backend.js";
 
 // Exercises the production preload and renderer. Never supplies a substitute bridge.
@@ -354,12 +354,15 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("0 imagem(ns)")');
  if(location.path!==join(root,"image-000.jpg")&&!Buffer.from(await readFile(join(root,"image-000.jpg"))).equals(bytes))throw new Error("managed import changed unrelated original");
  await writeFile("/tmp/playmemories-managed-library.png",(await window.webContents.capturePage()).toPNG());
+ await click(basename(root));
+ await wait('document.querySelector(".source-section button[aria-pressed=true]") && document.querySelectorAll(".media-card").length === 24');
+ await utimes(location.path, new Date(), new Date("2020-01-01T00:00:00Z"));
+ await unlink(join(root, location.path.endsWith("image-001.jpg") ? "image-002.jpg" : "image-001.jpg"));
  await writeFile(join(root,"auto-added.jpg"),bytes);
- await wait('document.querySelector(".folder-monitor")?.textContent.includes("1 imagem(ns) nova(s)")');
- let all: {items:{representative_location:{relative_path:string}}[];next_cursor:string|null};let after:string|null=null;let found=false;
- do{all=await evaluate(`window.photoManager.listGallery({pageSize:50,after:${JSON.stringify(after)}})`);found||=all.items.some(item=>item.representative_location?.relative_path==="auto-added.jpg");after=all.next_cursor;}while(after&&!found);
- if(!found)throw new Error("automatic addition missing");
+ await wait(`Array.from(document.querySelectorAll(".media-card")).some(card =>
+   card.querySelector("h3")?.title === "auto-added.jpg" &&
+   card.querySelector("img")?.naturalWidth > 0)`);
  await writeFile("/tmp/playmemories-monitor.png",(await window.webContents.capturePage()).toPNG());
- console.log("SMOKE FOLDER MONITOR PASS: new image discovered without native reselection; catalog and gallery invalidation; bounded registered folders");
+ console.log("SMOKE FOLDER MONITOR PASS: decoded thumbnail in the open folder after unrelated mtime change and deletion");
  console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; unrelated originals unchanged; explicit fixture rotation saved; native dialogs NOT TESTED");
 }

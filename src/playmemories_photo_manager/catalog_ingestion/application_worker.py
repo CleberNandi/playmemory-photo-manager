@@ -80,6 +80,8 @@ def main():
             scoped.original.scan_result.root.absolute_path,
         ) != (source.root_id, source.root_path):
             raise ValueError
+        if scoped.additions_only != source.additions_only:
+            raise ValueError
         identity = scoped.original.scan_result.root.physical_identity
         if (identity.device, identity.file_id) != source.root_identity:
             raise ValueError

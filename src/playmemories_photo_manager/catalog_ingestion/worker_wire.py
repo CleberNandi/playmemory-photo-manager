@@ -100,7 +100,9 @@ def decode_result(payload):
     result = _restore(json.loads(payload, object_pairs_hook=unique_object))
     if not isinstance(result, scoping.ScopedIngestionProposal):
         raise ValueError("invalid result type")
-    expected = scoping.scope_catalogable_proposal(result.original, result.eligibilities)
+    expected = scoping.scope_catalogable_proposal(
+        result.original, result.eligibilities, additions_only=result.additions_only
+    )
     if result != expected:
         raise ValueError("result does not match its evidence")
     return result

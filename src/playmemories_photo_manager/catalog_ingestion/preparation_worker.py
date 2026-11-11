@@ -11,7 +11,7 @@ import signal
 import sys
 from pathlib import Path
 
-from ..change_planning import PlanningContext
+from ..change_planning import ChangeClassification, PlanningContext
 from ..library import LibraryError
 from ..scanner import ScanLimits, ScanOptions, ScanResourceLimitError, ScanScopeChangedError, scan
 from .media import (
@@ -75,6 +75,7 @@ def main() -> int:
             "catalog_identity",
             "root_identity",
             "mount_id",
+            "additions_only",
         }:
             raise ValueError
         checkpoint()
@@ -117,8 +118,26 @@ def main() -> int:
         emit(
             "progress", phase="verifying", observed_count=count, verified_count=0, excluded_count=0
         )
+        context = PlanningContext(
+            request["root_id"],
+            snapshot.library_root.normalized_path,
+            observed.root.absolute_path,
+            observed.scope,
+        )
+        from .service import prepare_from_snapshot
+
+        original = prepare_from_snapshot(snapshot, observed, context)
+        decode_paths = frozenset(
+            change.relative_path
+            for change in original.plan.changes
+            if request["additions_only"]
+            and change.classification is ChangeClassification.NEW_FILE_CANDIDATE
+        )
         eligible = classify_media(
-            observed, request["root_id"], cancellation_requested=lambda: cancelled
+            observed,
+            request["root_id"],
+            cancellation_requested=lambda: cancelled,
+            decode_paths=decode_paths,
         )
         checkpoint()
         if any(item.state == "failed" for item in eligible):
@@ -134,16 +153,8 @@ def main() -> int:
             verified_count=count,
             excluded_count=excluded,
         )
-        context = PlanningContext(
-            request["root_id"],
-            snapshot.library_root.normalized_path,
-            observed.root.absolute_path,
-            observed.scope,
-        )
-        from .service import prepare_from_snapshot
-
         proposal = scope_catalogable_proposal(
-            prepare_from_snapshot(snapshot, observed, context), eligible
+            original, eligible, additions_only=request["additions_only"]
         )
         payload = encode_result(proposal)
         checkpoint()

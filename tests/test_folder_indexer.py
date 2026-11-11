@@ -192,3 +192,66 @@ def test_one_unavailable_root_does_not_block_other_registered_folders(library):
     assert result["error"] is not None
     assert result["added_count"] == 1, result
     assert len(dispatcher.request("gallery.list", {"session_id": session})["items"]) == 2
+
+
+@pytest.mark.parametrize("change", ["mtime", "delete", "replace"])
+def test_anchored_root_discovers_additions_after_known_file_changes(library, change):
+    dispatcher, _, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    existing = root / "first.jpg"
+    if change == "delete":
+        existing.unlink()
+    elif change == "replace":
+        replacement = root / "replacement.jpg"
+        raster(replacement)
+        replacement.replace(existing)
+    else:
+        import os
+
+        info = existing.stat()
+        os.utime(existing, ns=(info.st_atime_ns, info.st_mtime_ns - 1_000_000_000))
+    raster(root / "new.jpg")
+    result = settle(dispatcher, session)
+    assert result["error"] is None, result
+    assert result["added_count"] == 1
+
+
+def test_filesystem_events_retry_incomplete_jpeg_without_waiting_for_poll(library):
+    dispatcher, _, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    dispatcher.indexer.interval = 3600
+    dispatcher.indexer.due = time.monotonic() + 3600
+    assert any(events.fd >= 0 for events in dispatcher.indexer.watches.values())
+    target = root / "copy.jpg"
+    source = (root / "first.jpg").read_bytes()
+    target.write_bytes(source[:128])
+    raster(root / "unrelated.jpg")
+    dispatcher.indexer.last_check = None
+    result = settle(dispatcher, session, force=False)
+    assert result["error"] is None, result
+    assert result["added_count"] == 1
+    target.write_bytes(source)
+    dispatcher.indexer.last_check = None
+    result = settle(dispatcher, session, force=False)
+    assert result["error"] is None, result
+    assert result["added_count"] == 2
+
+
+def test_indexer_waits_for_its_writer_before_rechecking_catalog_binding(library, monkeypatch):
+    from playmemories_photo_manager.library import LibraryError, LibrarySession
+
+    dispatcher, _, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    indexer = dispatcher.indexer
+    binding = LibrarySession.catalog_binding.fget
+
+    def guarded_binding(owner):
+        if owner is indexer.active and indexer.context and indexer.context["phase"] == "apply":
+            raise LibraryError("busy")
+        return binding(owner)
+
+    monkeypatch.setattr(LibrarySession, "catalog_binding", property(guarded_binding))
+    raster(root / "new.jpg")
+    result = settle(dispatcher, session)
+    assert result["error"] is None, result
+    assert result["added_count"] == 1

@@ -465,3 +465,23 @@ def test_thumbnail_store_never_writes_library(tmp_path: Path) -> None:
     store.open(_id(2))
 
     assert tuple((path.name, path.read_bytes()) for path in library.iterdir()) == before
+
+
+def test_recent_folder_page_filters_before_paginating(database):
+    target = _root(database, 101)
+    other = _root(database, 102)
+    older = _asset(database, 1, created_at="2026-01-01T00:00:00Z")
+    recent = _asset(database, 2, created_at="2026-01-02T00:00:00Z")
+    unrelated = _asset(database, 3, created_at="2026-01-03T00:00:00Z")
+    _location(database, 201, older, target)
+    _location(database, 202, recent, target)
+    _location(database, 203, unrelated, other)
+    queries = GalleryQueries(database)
+    first = queries.list_assets(GalleryQuery(root_id=target, newest_first=True, page_size=1))
+    assert [item.asset_id for item in first.items] == [recent]
+    assert first.next_cursor
+    second = queries.list_assets(
+        GalleryQuery(root_id=target, newest_first=True, page_size=1, after=first.next_cursor)
+    )
+    assert [item.asset_id for item in second.items] == [older]
+    assert not second.has_more

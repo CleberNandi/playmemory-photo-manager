@@ -1,4 +1,4 @@
-"""Bounded periodic additions from registered folders, with independent finite workers."""
+"""Bounded event-driven additions from registered folders, with independent finite workers."""
 
 import os
 import time
@@ -8,10 +8,11 @@ from uuid import uuid4
 from ..catalog_ingestion.media import _Directories
 from ..catalog_ingestion.root_grants import RootGrantService, _HeldRoot
 from ..library import LibraryError, LibrarySession
+from .directory_events import DirectoryEvents
 
 
-def directory_signature(path, anchor):
-    """Read directory metadata only; unchanged folders do not reread image contents."""
+def directory_signature(path, anchor, events=None):
+    """Record directory and file metadata without reading image contents."""
     held = _HeldRoot(Path(path))
     directories = _Directories()
     count = 0
@@ -24,6 +25,8 @@ def directory_signature(path, anchor):
             nonlocal count
             if depth > 32 or len(directories.fds) > 240:
                 raise LibraryError("resource_limit")
+            if events is not None:
+                events.add(fd)
             info = os.fstat(fd)
             result.append((relative, info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns))
             with os.scandir(fd) as entries:
@@ -38,6 +41,17 @@ def directory_signature(path, anchor):
                 if item.is_dir(follow_symlinks=False):
                     child = directories.child(fd, item.name, held.mount)
                     walk(child, relative + "/" + item.name, depth + 1)
+                elif item.is_file(follow_symlinks=False):
+                    info = item.stat(follow_symlinks=False)
+                    result.append(
+                        (
+                            relative + "/" + item.name,
+                            info.st_ino,
+                            info.st_size,
+                            info.st_mtime_ns,
+                            info.st_ctime_ns,
+                        )
+                    )
 
         walk(held.fd, "", 0)
         directories.check()
@@ -60,6 +74,9 @@ class FolderIndexer:
         self.blocked = False
         self.context = None
         self.signatures = {}
+        self.watches = {}
+        self.event_due = None
+        self.next_event_check = 0
         self.queue = []
         self.revision = 0
         self.added = 0
@@ -139,8 +156,27 @@ class FolderIndexer:
 
     def tick(self):
         try:
-            if self.active.catalog_binding != self.binding:
+            applying = self.context is not None and self.context["phase"] == "apply"
+            # The admitted worker owns the write. Its transient SQLite journal must not
+            # be mistaken for an unrelated catalog or abort a transaction in progress.
+            if not applying and self.active.catalog_binding != self.binding:
                 raise LibraryError("stale_session")
+            now = time.monotonic()
+            if now >= self.next_event_check:
+                self.next_event_check = now + 0.1
+                for root, events in self.watches.items():
+                    if events.changed():
+                        self.signatures.pop(root, None)
+                        if self.event_due is None:
+                            self.event_due = now + 0.5
+            if (
+                self.event_due is not None
+                and now >= self.event_due
+                and not self.context
+                and not self.queue
+            ):
+                self.due = 0
+                self.event_due = None
             if self.context:
                 self.context["service"].tick()
                 if self.context["phase"] in ("closing", "closing_next"):
@@ -181,10 +217,22 @@ class FolderIndexer:
                 if anchor is None:
                     self.state_file.remember(self.active, c["root"], service.binding(c["root"]))
                 current_binding = service.binding(c["root"])
-                c["signature"] = directory_signature(
-                    current_binding[0],
-                    [current_binding[0], current_binding[1].device, current_binding[1].file_id],
-                )
+                events = DirectoryEvents()
+                try:
+                    c["signature"] = directory_signature(
+                        current_binding[0],
+                        [current_binding[0], current_binding[1].device, current_binding[1].file_id],
+                        events,
+                    )
+                except BaseException:
+                    events.close()
+                    raise
+                previous = self.watches.pop(c["root"], None)
+                if previous is not None:
+                    previous.close()
+                self.watches[c["root"]] = events
+                if len(self.watches) > 32:
+                    self.watches.pop(next(iter(self.watches))).close()
                 c["operation"] = service.prepare(
                     {
                         "session_id": service.session_id,
@@ -220,7 +268,8 @@ class FolderIndexer:
                 c["ids"] = c["ids"][:100]
                 if len(c["ids"]) >= 100 or not result["next_cursor"]:
                     if not c["ids"]:
-                        self.signatures[c["root"]] = c["signature"]
+                        if self.event_due is None:
+                            self.signatures[c["root"]] = c["signature"]
                         if len(self.signatures) > 32:
                             self.signatures.pop(next(iter(self.signatures)))
                         c["phase"] = "closing_next"
@@ -270,6 +319,9 @@ class FolderIndexer:
             self.due = time.monotonic() + (0 if self.queue else self.interval)
 
     def shutdown(self):
+        for events in self.watches.values():
+            events.close()
+        self.watches.clear()
         self.allowed = False
         self.queue = []
         return self._close()

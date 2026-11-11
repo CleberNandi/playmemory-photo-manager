@@ -96,7 +96,14 @@ def _dispatch(
     if method == "gallery.list":
         if not isinstance(params, dict):
             raise BridgeRequestError("params must be an object")
-        unknown = set(params) - {"page_size", "after", "capture_period", "favorites_only"}
+        unknown = set(params) - {
+            "page_size",
+            "after",
+            "capture_period",
+            "favorites_only",
+            "root_id",
+            "include_roots",
+        }
         if unknown:
             raise BridgeRequestError("unsupported gallery parameters")
         page_size = params.get("page_size", 24)
@@ -109,16 +116,29 @@ def _dispatch(
         after = params.get("after")
         if after is not None and not isinstance(after, str):
             raise BridgeRequestError("after must be text or null")
-        return asdict(
+        if type(params.get("include_roots", False)) is not bool:
+            raise BridgeRequestError("include_roots must be boolean")
+        root_id = params.get("root_id")
+        page = asdict(
             GalleryQueries(connection).list_assets(
                 GalleryQuery(
                     page_size=page_size,
                     after=after,
                     capture_period=params.get("capture_period"),
                     favorites_only=params.get("favorites_only", False),
+                    root_id=root_id,
+                    newest_first=root_id is not None,
                 )
             )
         )
+        if params.get("include_roots"):
+            page["roots"] = [
+                {"id": row[0], "name": row[1]}
+                for row in connection.execute(
+                    "SELECT id, display_name FROM library_root ORDER BY display_name, id LIMIT 2000"
+                )
+            ]
+        return page
     if method == "shutdown":
         return {"accepted": True}
     raise BridgeRequestError("unsupported method")

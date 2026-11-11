@@ -56,6 +56,7 @@ class PreparationInput:
     catalog_identity: tuple[int, int]
     root_identity: tuple[int, int]
     mount_id: int
+    additions_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,8 @@ def _validate_input(value):
             or any(type(n) is not int or n < 0 for n in identity)
         ):
             raise PreparationError("invalid_request")
+    if type(value.additions_only) is not bool:
+        raise PreparationError("invalid_request")
     if type(value.mount_id) is not int or value.mount_id < 0:
         raise PreparationError("invalid_request")
 
@@ -481,6 +484,8 @@ class PreparationController:
         else:
             try:
                 result = decode_result(self._staging)
+                if result.additions_only != self._value.additions_only:
+                    raise ValueError
                 if result.original.plan.library_root_id != self._value.root_id:
                     raise ValueError
                 if result.original.scan_result.root.physical_identity != PhysicalIdentity(

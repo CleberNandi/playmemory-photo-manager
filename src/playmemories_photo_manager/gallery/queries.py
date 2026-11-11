@@ -70,7 +70,8 @@ class GalleryQueries:
         normalized = _validate_query(query)
         filters = _filter_values(normalized)
         cursor_values = _decode_cursor(normalized.after, filters) if normalized.after else None
-        sql = """
+        comparison, direction = ("<", "DESC") if normalized.newest_first else (">", "ASC")
+        sql = f"""
             WITH candidates AS (
                 SELECT a.*,
                     CASE
@@ -107,8 +108,8 @@ class GalleryQueries:
             )
             SELECT * FROM candidates
             WHERE (? IS NULL OR projected_availability = ?)
-              AND (? IS NULL OR (created_at, id) > (?, ?))
-            ORDER BY created_at, id
+              AND (? IS NULL OR (created_at, id) {comparison} (?, ?))
+            ORDER BY created_at {direction}, id {direction}
             LIMIT ?
         """
         after_created, after_id = cursor_values or (None, None)
@@ -139,6 +140,7 @@ class GalleryQueries:
                 locations.get(row["id"], ()),
                 annotations.get(row["id"]),
                 self._thumbnail_reference(row["id"]),
+                preferred_root=normalized.root_id,
             )
             for row in visible
         )
@@ -288,17 +290,27 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         raise InvalidCursorError("cursor must be text")
     if type(query.favorites_only) is not bool:
         raise InvalidGalleryQueryError("favorites_only must be boolean")
+    if type(query.newest_first) is not bool:
+        raise InvalidGalleryQueryError("newest_first must be boolean")
     try:
         period = validate_period(query.capture_period)
     except ValueError as error:
         raise InvalidGalleryQueryError("invalid capture period") from error
     return GalleryQuery(
-        query.page_size, query.after, kind, root_id, availability, period, query.favorites_only
+        query.page_size,
+        query.after,
+        kind,
+        root_id,
+        availability,
+        period,
+        query.favorites_only,
+        query.newest_first,
     )
 
 
 def _filter_values(query: GalleryQuery) -> dict[str, str | bool | None]:
     return {
+        **({"newest_first": True} if query.newest_first else {}),
         "kind": query.kind.value if query.kind else None,
         "capture_period": query.capture_period,
         "favorites_only": query.favorites_only,
@@ -484,8 +496,11 @@ def _gallery_item(
     locations: tuple[LocationSummary, ...],
     annotation: Annotation | None,
     thumbnail: ThumbnailReference | None,
+    *,
+    preferred_root: str | None = None,
 ) -> GalleryItem:
-    representative = min(locations, key=_location_rank) if locations else None
+    candidates = tuple(loc for loc in locations if loc.library_root_id == preferred_root)
+    representative = min(candidates or locations, key=_location_rank, default=None)
     summary = AnnotationSummary(
         rating=annotation.rating if annotation else None,
         favorite=annotation.favorite if annotation else False,

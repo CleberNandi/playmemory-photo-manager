@@ -126,7 +126,8 @@ class ApplicationCommands:
             raise PreparationError("invalid_request")
         _validate_input(source)
         if (
-            source.root_id != scoped.original.plan.library_root_id
+            source.additions_only != scoped.additions_only
+            or source.root_id != scoped.original.plan.library_root_id
             or source.root_path != scoped.original.scan_result.root.absolute_path
             or source.root_identity
             != (

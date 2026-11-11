@@ -104,6 +104,8 @@ class _Grant:
     held: _HeldRoot
     expires: float
     diagnostics: tuple[str, ...]
+    anchored: bool = False
+    monitored: bool = False
 
 
 class RootGrantService:
@@ -367,7 +369,9 @@ class RootGrantService:
         self._params(params, ("session_id", "window_id", "path", "recursive", "identity_reviewed"))
         if params["identity_reviewed"] is not True:
             raise PreparationError("invalid_request")
-        path = _path(params["path"])
+        return self._select(_path(params["path"]))
+
+    def _select(self, path, *, expected=None, monitored=False):
         self._application_idle()
         if self.preparation.busy:
             raise PreparationError("busy")
@@ -384,6 +388,8 @@ class RootGrantService:
                     > MAX_HELD_FDS
                 ):
                     raise PreparationError("resource_limit")
+                if expected is not None and (str(path), held.identity, held.mount) != expected:
+                    raise PreparationError("root_changed")
                 roots = self._roots()
                 existing = self._validate_overlap(held, roots)
                 if existing is None and len(roots) == MAX_ROOTS:
@@ -399,7 +405,8 @@ class RootGrantService:
                         raise PreparationError("root_changed")
                     if binding is None:
                         diagnostics = ("ROOT_IDENTITY_UNAVAILABLE",)
-                    self._known_locations(held, existing.id)
+                    if expected is None:
+                        self._known_locations(held, existing.id)
                 held.check()
                 if len(self._bindings) >= MAX_ROOTS and (
                     existing is None or existing.id not in self._bindings
@@ -413,7 +420,9 @@ class RootGrantService:
                 held.check()
                 identifier = str(uuid4())
                 self._bindings[root.id] = (root.normalized_path, held.identity, held.mount)
-                self._grants[identifier] = _Grant(root, held, time.monotonic() + 300, diagnostics)
+                self._grants[identifier] = _Grant(
+                    root, held, time.monotonic() + 300, diagnostics, expected is not None, monitored
+                )
                 held = None
                 return {"root_grant_id": identifier, "root_id": root.id, "expires_in_ms": 300000}
             finally:
@@ -452,14 +461,8 @@ class RootGrantService:
                 raise PreparationError("root_changed")
             expected = (root.normalized_path, held.identity, held.mount)
             held.check()
-            result = self.select(
-                {
-                    "session_id": self.session_id,
-                    "window_id": self.window_id,
-                    "path": root.normalized_path,
-                    "recursive": True,
-                    "identity_reviewed": True,
-                }
+            result = self._select(
+                held.path, expected=expected if anchor is not None else None, monitored=True
             )
             if self._bindings.get(root_id) != expected:
                 raise PreparationError("root_changed")
@@ -493,7 +496,8 @@ class RootGrantService:
                 root = self._validate_overlap(grant.held, self._roots())
                 if root != grant.root:
                     raise PreparationError("root_changed")
-                self._known_locations(grant.held, root.id)
+                if not grant.anchored:
+                    self._known_locations(grant.held, root.id)
                 value = PreparationInput(
                     str(self._catalog),
                     root.normalized_path,
@@ -501,6 +505,7 @@ class RootGrantService:
                     self._catalog_identity,
                     (grant.held.identity.device, grant.held.identity.file_id),
                     grant.held.mount,
+                    additions_only=grant.monitored,
                 )
                 job = self.preparation.start(value, request_id)
             except BaseException:

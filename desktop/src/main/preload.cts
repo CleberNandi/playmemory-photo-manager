@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld("photoManager", {
   getIndexStatus:()=>ipcRenderer.invoke("index:status"),
   refreshFolders:()=>ipcRenderer.invoke("index:refresh"),
   onGalleryChanged:(listener:()=>void)=>{const notify=()=>listener();ipcRenderer.on("gallery:changed",notify);return ()=>ipcRenderer.removeListener("gallery:changed",notify);},
-  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean } = {}) =>
+  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string } = {}) =>
     scoped("gallery:list", params),
   saveRotation:(assetId:string,angle:number,mode:"replace"|"copy")=>scoped("image:save",{assetId,angle,mode}),
   getImageSaveStatus:(jobId:string)=>scoped("image:save-status",jobId),

@@ -34,7 +34,9 @@ def authorize_scoped_ingestion(
     """
     if not isinstance(scoped, ScopedIngestionProposal):
         raise IngestionAuthorizationError("scoped proposal is required")
-    rebuilt = scope_catalogable_proposal(scoped.original, scoped.eligibilities)
+    rebuilt = scope_catalogable_proposal(
+        scoped.original, scoped.eligibilities, additions_only=scoped.additions_only
+    )
     if rebuilt != scoped:
         raise IngestionAuthorizationError("scoped proposal has changed")
     if (

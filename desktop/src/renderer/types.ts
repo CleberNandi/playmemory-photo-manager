@@ -11,6 +11,7 @@ export interface GalleryItem {
 }
 
 export interface GalleryPage {
+  roots?: {id: string; name: string}[];
   items: GalleryItem[];
   next_cursor: string | null;
   has_more: boolean;
@@ -39,7 +40,7 @@ declare global {
       closeLibrary?(sessionId: string): Promise<LibraryState>;
       setReopenLibrary?(value: boolean): Promise<LibraryState>;
       forgetLibrary?(): Promise<LibraryState>;
-      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean }): Promise<GalleryPage>;
+      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string }): Promise<GalleryPage>;
       saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;
       getImageSaveStatus?(jobId:string):Promise<ImageSaveJob>;
       showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|null>;

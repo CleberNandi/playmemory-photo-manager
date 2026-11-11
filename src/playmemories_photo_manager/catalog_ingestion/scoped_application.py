@@ -53,7 +53,9 @@ def apply_scoped_ingestion(
     if not isinstance(catalog, Catalog) or not isinstance(scoped, ScopedIngestionProposal):
         raise IngestionAuthorizationError("catalog and scoped proposal are required")
     # Validate even a no-op, without consulting filesystem or starting a transaction.
-    rebuilt = scope_catalogable_proposal(scoped.original, scoped.eligibilities)
+    rebuilt = scope_catalogable_proposal(
+        scoped.original, scoped.eligibilities, additions_only=scoped.additions_only
+    )
     if rebuilt != scoped:
         raise IngestionAuthorizationError("scoped proposal has changed")
     selected = set()
@@ -135,7 +137,9 @@ def apply_scoped_ingestion(
                     scoped.original.scan_result,
                     scoped.original.planning_context,
                 )
-                current_scope = scope_catalogable_proposal(current, scoped.eligibilities)
+                current_scope = scope_catalogable_proposal(
+                    current, scoped.eligibilities, additions_only=scoped.additions_only
+                )
                 if current_scope != scoped:
                     raise CatalogStateConflictError("catalog changed", relative_paths=())
                 validate_scoped_authorization(current_scope, authorization)
