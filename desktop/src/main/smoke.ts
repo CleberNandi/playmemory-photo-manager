@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,listMediaDevices,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -325,6 +325,8 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  for(let i=0;i<125;i++)await writeFile(join(root,`image-${String(i).padStart(3,"0")}.jpg`),bytes);
  await writeFile(join(root,"notes.txt"),"synthetic unsupported file");
  const click=(label:string)=>evaluate(`Array.from(document.querySelectorAll("button")).find(button=>button.textContent===${JSON.stringify(label)}).click()`);
+ await click("Detectar dispositivos");
+ await wait('Array.from(document.querySelectorAll("button")).some(button=>button.textContent==="Atualizar dispositivos")');
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Seleção cancelada")');
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("125 imagem(ns)")');
  await wait('document.querySelectorAll(".media-card").length === 24');

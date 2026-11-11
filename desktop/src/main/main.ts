@@ -292,6 +292,11 @@ app.whenReady().then(async () => {
     try { return await query("thumbnail.get", sessionId, {asset_id: assetId}); }
     finally { thumbnailRequests--; }
   });
+  register("devices:list", 1, (raw) => {
+    const {sessionId, params} = envelope(raw);
+    if (demo || params !== null) throw new Error("invalid_request");
+    return libraries.query("devices.list", sessionId, {});
+  });
   for (const [channel, method] of [["duplicates:start", "duplicates.start"], ["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"]] as const) {
     register(channel, 1, (raw) => {
       const {sessionId, params} = envelope(raw);

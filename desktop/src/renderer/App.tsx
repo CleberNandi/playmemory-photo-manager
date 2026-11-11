@@ -13,6 +13,7 @@ import { MediaCard } from "./MediaCard";
 import { LibraryWorkspace } from "./LibraryWorkspace";
 import { CatalogingPanel } from "./CatalogingPanel";
 import { useLibrarySession } from "./LibrarySession";
+import { MediaDevicesPanel } from "./MediaDevicesPanel";
 import { AlbumPanel } from "./AlbumPanel";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import type { Album, AnnotationField, GalleryItem, GalleryPage, PhotoFacets, PhotoFilters } from "./types";
@@ -224,7 +225,7 @@ function GalleryApp() {
         <DesktopMenu label="Ferramentas">{session?.catalogingEnabled && <button onClick={()=>{setCalendar(false);setPreparing(true);}}>Preparação avançada</button>}<button onClick={() => {resetSelection(); setView("duplicates");}}>Duplicatas exatas</button></DesktopMenu>
         <DesktopMenu label="Ajuda"><p>Operação local. Imagens só são alteradas ao salvar. Favoritos, período e pastas consultam o catálogo. A busca e os filtros consultam a biblioteca inteira.</p></DesktopMenu>
       </nav>
-    <Sidebar view={view} albumActive={!!album} albums={canManageAlbums ? {
+    <Sidebar canListDevices={!!session && !!window.photoManager?.listMediaDevices} view={view} albumActive={!!album} albums={canManageAlbums ? {
       open:albumsOpen, toggle:()=>setAlbumsOpen(open=>!open),
       panel:<AlbumPanel active={album} selected={view==="gallery"&&!calendar?selected:null} onOpen={next=>{
         changeAlbum(next);setFolder(null);setFavorites(false);setCaptureFilter(null);setCalendar(false);setView("gallery");
@@ -318,11 +319,11 @@ function GalleryApp() {
   </div>;
 }
 
-export function Sidebar({view = "gallery", onNavigate, folders = [], folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource, albums, albumActive = false}: {albums?: {open:boolean; toggle:()=>void; panel:ReactNode}; albumActive?:boolean; view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void; folders?: {id: string; name: string}[]; folder?: string | null; favorites?: boolean; canPrepare?: boolean; preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void}) {
+export function Sidebar({canListDevices = false, view = "gallery", onNavigate, folders = [], folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource, albums, albumActive = false}: {albums?: {open:boolean; toggle:()=>void; panel:ReactNode}; albumActive?:boolean; canListDevices?:boolean; view?: "gallery" | "duplicates"; onNavigate?: (view: "gallery" | "duplicates") => void; folders?: {id: string; name: string}[]; folder?: string | null; favorites?: boolean; canPrepare?: boolean; preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void}) {
   return <aside className="sidebar">
     <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span className="brand-name">PlayMemories<span className="sr-only"> Photo Manager</span></span></div>
     <section className="source-section"><h2>Notificações</h2><p>{preparing ? "Consulte o andamento no painel central" : "Consulte tarefas em Adicionar pastas"}</p></section>
-    <section className="source-section"><h2>Câmeras e mídias</h2><p>Detecção de dispositivos ainda indisponível.</p></section>
+    <section className="source-section"><h2>Câmeras e mídias</h2>{canListDevices ? <MediaDevicesPanel /> : <p>Detecção de dispositivos indisponível.</p>}</section>
     <nav className="primary-nav" aria-label="Principal">
       <NavItem icon="library" label="Biblioteca" active={view === "gallery" && !folder && !favorites && !albumActive} onClick={() => {onNavigate?.("gallery"); onSource?.(null, false);}} />
       <button className="nav-item" aria-pressed={favorites} onClick={() => onSource?.(null, true)}>☆ Favoritos</button>

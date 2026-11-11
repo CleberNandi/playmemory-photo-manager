@@ -78,6 +78,7 @@ declare global {
       editAnnotation?(assetId: string, field: AnnotationField, value: string | number | null): Promise<unknown>;
       getPreview?(assetId: string, variant?: "dimensions" | "original", offset?: number): Promise<unknown>;
       getThumbnail?(assetId: string): Promise<unknown>;
+      listMediaDevices?(): Promise<MediaDevices>;
       startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
       getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;
@@ -145,3 +146,6 @@ export interface DuplicateGroupParams extends DuplicateListParams {snapshotId: s
 export interface ImageSaveJob {job_id:string;asset_id:string;state:string;result_asset_id:string|null;error:string|null}
 
 export type Album = {id: string; name: string};
+
+export type MediaDevices = {status: "ready"; devices: {id: string; name: string; kind: "imaging" | "storage"}[]; total_count: number}
+  | {status: "unsupported" | "unavailable"};

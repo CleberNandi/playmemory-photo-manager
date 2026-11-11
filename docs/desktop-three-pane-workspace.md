@@ -96,3 +96,12 @@ e respeitam a sessão ativa. O demo mantém a opção desabilitada.
 Para excluir uma coleção, selecione-a e use **Excluir álbum**. A confirmação mostra seu
 nome. O catálogo remove a coleção e seus vínculos. Os itens, originais e vínculos com
 outros álbuns são preservados. Se a coleção estiver aberta, a galeria volta à Biblioteca.
+
+## Câmeras e mídias conectadas no Linux
+
+Em **Câmeras e mídias**, use **Detectar dispositivos** e **Atualizar dispositivos** depois
+de conectar ou remover um aparelho. O backend consulta o sysfs local e lista interfaces
+USB que anunciam a classe Still Imaging, cartões SD e armazenamento removível ou USB.
+O painel identifica a classe anunciada pelo dispositivo. A detecção de protocolos USB
+proprietários e a navegação/importação por PTP/MTP ficam pendentes. Para mídias montadas,
+use **Adicionar pastas** para escolher uma pasta por meio do diálogo nativo.

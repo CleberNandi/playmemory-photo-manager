@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("photoManager", {
   getPreview: (assetId: string, variant?: "dimensions" | "original", offset?: number) =>
     scoped("preview:get", variant ? {assetId, variant, ...(offset === undefined ? {} : {offset})} : assetId),
   getThumbnail: (assetId: string) => scoped("thumbnail:get", assetId),
+  listMediaDevices: () => scoped("devices:list", null),
   startDuplicateScan: () => scoped("duplicates:start", {}),
   listDuplicates: (params: {pageSize?: number; after?: string | null} = {}) => scoped("duplicates:list", params),
   getDuplicateGroup: (params: {snapshotId: string; groupKey: string; pageSize?: number; after?: string | null}) => scoped("duplicates:group", params),

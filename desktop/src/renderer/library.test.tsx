@@ -85,3 +85,23 @@ it("confirms the named album before deleting it and returns to the library", asy
   expect(host.querySelector('option[value="album-a"]')).toBeNull();
   expect(listGallery).toHaveBeenLastCalledWith({pageSize: 24});
 });
+
+it("refreshes connected media on demand in the active library", async () => {
+  const listMediaDevices = vi.fn().mockResolvedValueOnce({status: "ready", devices: [
+    {id: "imaging:1-2", name: "Synthetic Camera", kind: "imaging"},
+    {id: "storage:sdb", name: "Synthetic Card", kind: "storage"},
+  ], total_count: 2}).mockResolvedValueOnce({status: "ready", devices: [], total_count: 0});
+  window.photoManager = {
+    getLibraryState: vi.fn().mockResolvedValue(first),
+    listGallery: vi.fn().mockResolvedValue({items: [], next_cursor: null, has_more: false}),
+    retryGallery: vi.fn(), listMediaDevices,
+  };
+  await act(async () => root.render(<App />));
+  expect(listMediaDevices).not.toHaveBeenCalled();
+  await click("Detectar dispositivos");
+  expect(host.querySelector(".media-devices")?.textContent).toContain("Synthetic Camera");
+  expect(host.querySelector(".media-devices")?.textContent).toContain("Synthetic Card");
+  await click("Atualizar dispositivos");
+  expect(host.querySelector(".media-devices")).toBeNull();
+  expect(host.textContent).toContain("Nenhum dispositivo compatível detectado");
+});

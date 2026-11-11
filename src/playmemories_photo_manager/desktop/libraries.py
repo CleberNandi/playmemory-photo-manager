@@ -140,6 +140,7 @@ class LibraryDispatcher:
                 "preview.get",
                 "calendar.summary",
                 "asset.reveal",
+                "devices.list",
                 "duplicates.list",
                 "duplicates.group",
             )
@@ -173,6 +174,7 @@ class LibraryDispatcher:
             "thumbnail.get",
             "preview.get",
             "calendar.summary",
+            "devices.list",
             "duplicates.list",
             "duplicates.group",
         ):
@@ -231,6 +233,7 @@ class LibraryDispatcher:
             "thumbnail.get",
             "preview.get",
             "duplicates.start",
+            "devices.list",
             "duplicates.list",
             "duplicates.group",
         ):
@@ -238,6 +241,12 @@ class LibraryDispatcher:
         if "session_id" not in params:
             raise LibraryError("stale_session")
         active = self.require_session(params["session_id"])
+        if method == "devices.list":
+            from .devices import list_media_devices
+
+            if set(params) != {"session_id"}:
+                raise LibraryError("invalid_request")
+            return list_media_devices()
         if method in ("duplicates.list", "duplicates.group"):
             return self.duplicate_scan.request(
                 active, method, {key: value for key, value in params.items() if key != "session_id"}
