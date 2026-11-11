@@ -31,10 +31,26 @@ it("discards late calendar responses and shows sanitized errors",async()=>{
  await act(async()=>finish({period:null,buckets:[["1999",99]],undated:99,partial:0}));expect(host.textContent).not.toContain("1999");expect(host.textContent).toContain("Fevereiro");
  window.photoManager!.getCalendar=vi.fn().mockRejectedValue(new Error("/private"));await act(async()=>root.render(<CaptureCalendar period="2025" {...props}/>));expect(host.querySelector('[role="alert"]')?.textContent).toContain("Não foi possível");expect(host.textContent).not.toContain("/private");
 });
-it("polls pending preview, displays bounded JPEG and closes without modifying media",async()=>{
- vi.useFakeTimers();window.photoManager!.getPreview=vi.fn().mockResolvedValueOnce({status:"pending"}).mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});const close=vi.fn();
- await act(async()=>root.render(<ImageViewer assetId="asset" onClose={close}/>));expect(host.textContent).toContain("Preparando prévia");await act(async()=>vi.advanceTimersByTimeAsync(150));
- expect(host.querySelector("img")?.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAA");Object.defineProperty(host.querySelector("img")!,"naturalWidth",{value:80});await act(async()=>host.querySelector("img")!.dispatchEvent(new Event("load")));await click("100%");expect(host.querySelector<HTMLImageElement>("img")?.style.width).toBe("80px");await click("Fechar imagem");expect(close).toHaveBeenCalledOnce();
+it("switches from the fitted preview to the original resolution at 100%",async()=>{
+ vi.useFakeTimers();
+ window.photoManager!.getPreview=vi.fn().mockImplementation((_id,variant)=>
+   Promise.resolve(variant==="original"
+    ? {base64:"/9j/AAAB",digest:"a".repeat(64),total:6}
+    : {media_type:"image/jpeg",base64:"/9j/AAAA"}));
+ const close=vi.fn();
+ await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));
+ expect(host.querySelector("img")?.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAA");
+ await click("100%");
+ const img=host.querySelector("img")!;
+ expect(img.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAB");
+ Object.defineProperties(img,{naturalWidth:{value:4000},naturalHeight:{value:4000}});
+ await act(async()=>img.dispatchEvent(new Event("load")));
+ expect(img.style.width).toBe("4000px");
+ expect(host.textContent).toContain("4000 × 4000 px · 100%");
+ await click("Ajustar");
+ expect(host.querySelector("img")?.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAA");
+ await click("Fechar imagem");
+ expect(close).toHaveBeenCalledOnce();
 });
 it("rejects external preview URLs and stops polling after unmount",async()=>{
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"https://invalid.test/private"});

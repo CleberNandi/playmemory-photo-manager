@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from "react";
+import {readOriginal} from "./image-data";
 import type {ImageSaveJob} from "./types";
 export function viewerGeometry(width:number,height:number,rotation:number,zoom:number,viewportWidth:number,viewportHeight:number){
  const sideways=rotation%180!==0;
@@ -14,8 +15,9 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  const inFlight=useRef(false),mounted=useRef(true);
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;};},[]);
  const [image,setImage]=useState<{id:string;url:string}|null>(null);
+ const [original,setOriginal]=useState<{id:string;attempt:number;url:string|null}|null>(null);
  const [failure,setFailure]=useState<string|null>(null);
- const [dimensions,setDimensions]=useState<{id:string;width:number;height:number}|null>(null);
+ const [dimensions,setDimensions]=useState<{id:string;url:string;width:number;height:number}|null>(null);
  const [view,setView]=useState({id:assetId,zoom:0,rotation:initialRotation});
  const [retry,setRetry]=useState({id:assetId,value:0});
  const [viewport,setViewport]=useState({width:1280,height:960});
@@ -25,8 +27,12 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  const dialog=useRef<HTMLDialogElement>(null),canvas=useRef<HTMLDivElement>(null);
  const rotation=view.id===assetId?view.rotation:initialRotation,zoom=view.id===assetId?view.zoom:0;
  const attempt=retry.id===assetId?retry.value:0;
- const url=image?.id===assetId?image.url:null;
- const size=dimensions?.id===assetId?dimensions:null;
+ const preview=image?.id===assetId?image.url:null;
+ const full=original?.id===assetId&&original.attempt===attempt?original:null;
+ const showingOriginal=!!(zoom&&full?.url);
+ const url=showingOriginal?full!.url:preview;
+ const size=dimensions?.id===assetId&&dimensions.url===url?dimensions:null;
+ const wantsOriginal=zoom!==0;
  const failed=failure===assetId;
  if(view.id!==assetId)setView({id:assetId,zoom:0,rotation:initialRotation});
  const update=(next:{zoom?:number;rotation?:number})=>setView({id:assetId,zoom,rotation,...next});
@@ -91,7 +97,15 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  // The current edit and leave guard belong to the active viewer frame.
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[onPrevious,onNext,rotation,saving,leaving]);
- const geometry=size?viewerGeometry(size.width,size.height,rotation,zoom,viewport.width,viewport.height):null;
+ useEffect(()=>{
+  if(!wantsOriginal)return;
+  let active=true;
+  void readOriginal(assetId,()=>active)
+   .then(url=>{if(active)setOriginal({id:assetId,attempt,url});})
+   .catch(()=>{if(active)setOriginal({id:assetId,attempt,url:null});});
+  return ()=>{active=false;};
+ },[assetId,attempt,wantsOriginal]);
+ const geometry=size?viewerGeometry(size.width,size.height,rotation,showingOriginal?zoom:0,viewport.width,viewport.height):null;
  return <dialog className="image-viewer" ref={dialog} aria-label="Visualizar imagem" onKeyDown={event=>{
   if(event.key==="Escape"){event.stopPropagation();return;}
 
@@ -104,14 +118,15 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
     <div className="viewer-control-group" aria-label="Rotação"><button disabled={!url||saving} onClick={()=>rotate(-90)}>Girar à esquerda</button><button disabled={!url||saving} onClick={()=>rotate(90)}>Girar à direita</button><button disabled={rotation===0||saving} onClick={()=>update({rotation:0})}>Restaurar rotação</button></div>
     <div className="viewer-control-group viewer-save-group" aria-label="Gravação"><button disabled={saving||uncertain||!rotation||!window.photoManager?.saveRotation||!canSave} onClick={()=>void save("replace")}>Salvar alterações</button><button disabled={saving||uncertain||!rotation||!window.photoManager?.saveRotation||!canSave} onClick={()=>void save("copy")}>Salvar como cópia</button></div>
    </div>
-   <p className="viewer-hint">Prévia até 1280 × 960. Alterações só são gravadas ao salvar.{!canSave?" Gravação disponível para PNG e JPEG.":""}</p>
+   <p className="viewer-hint">Ajustar encaixa a imagem na janela. 100% usa a resolução original. Alterações só são gravadas ao salvar.{!canSave?" Gravação disponível para PNG e JPEG.":""}</p>
   </header>
   {leaving&&<section ref={unsaved} className="viewer-unsaved" role="alertdialog" aria-modal="true" aria-label="Rotação não salva"><strong>Salvar a rotação antes de sair desta imagem?</strong><button disabled={!window.photoManager?.saveRotation||uncertain||!canSave} onClick={()=>void save("replace")}>Salvar alterações e continuar</button><button disabled={!window.photoManager?.saveRotation||uncertain||!canSave} onClick={()=>void save("copy")}>Salvar cópia e continuar</button><button onClick={()=>{const action=leaving.action;setLeaving(null);update({rotation:0});action();}}>Descartar rotação</button><button onClick={()=>{setLeaving(null);closeButton.current?.focus();}}>Continuar editando</button></section>}
   {saving&&<p className="viewer-caption" role="status">Salvando imagem em resolução original… Aguarde a conclusão.</p>}
   {saveMessage&&<p className="viewer-caption" role="status">{saveMessage}</p>}
-  <p className="viewer-caption" role="status">{name}{position?` · ${position}`:""} · {rotation}°</p>
-  <div ref={canvas} inert={!!leaving} className={`viewer-image${zoom?" viewer-zoomed":""}`}>
-   {url?<div className="viewer-stage" style={geometry?{width:geometry.boxWidth,height:geometry.boxHeight}:undefined}><img key={assetId} src={url} alt={`Prévia de ${name}`} onLoad={event=>setDimensions({id:assetId,width:event.currentTarget.naturalWidth,height:event.currentTarget.naturalHeight||1})} onError={()=>{setImage(null);setFailure(assetId);}} style={geometry?{width:`${geometry.width}px`,height:`${geometry.height}px`,maxWidth:"none",maxHeight:"none",transform:`translate(-50%, -50%) rotate(${rotation}deg)`}:{transform:`rotate(${rotation}deg)`}}/></div>:failed?<div role="alert"><p>Prévia indisponível. O arquivo pode estar offline, ter mudado ou não ser decodificável dentro dos limites.</p><button onClick={()=>{setFailure(null);setRetry({id:assetId,value:attempt+1});}}>Tentar prévia novamente</button></div>:<p role="status">Preparando prévia…</p>}
+  <p className="viewer-caption" role="status">{name}{position?` · ${position}`:""} · {rotation}°{showingOriginal&&size?` · ${size.width} × ${size.height} px · ${zoom}%`:""}</p>
+  {wantsOriginal&&!showingOriginal&&<p className="viewer-caption" role="status">{full?"Resolução original indisponível. Exibindo prévia ajustada.":"Carregando resolução original…"}</p>}
+  <div ref={canvas} inert={!!leaving} className={`viewer-image${showingOriginal?" viewer-zoomed":""}`}>
+   {url?<div className="viewer-stage" style={geometry?{width:geometry.boxWidth,height:geometry.boxHeight}:undefined}><img key={assetId} src={url} alt={showingOriginal?name:`Prévia de ${name}`} onLoad={event=>setDimensions({id:assetId,url,width:event.currentTarget.naturalWidth,height:event.currentTarget.naturalHeight||1})} onError={()=>{if(showingOriginal)setOriginal({id:assetId,attempt,url:null});else{setImage(null);setFailure(assetId);}}} style={geometry?{width:`${geometry.width}px`,height:`${geometry.height}px`,maxWidth:"none",maxHeight:"none",transform:`translate(-50%, -50%) rotate(${rotation}deg)`}:{transform:`rotate(${rotation}deg)`}}/></div>:failed?<div role="alert"><p>Prévia indisponível. O arquivo pode estar offline, ter mudado ou não ser decodificável dentro dos limites.</p><button onClick={()=>{setFailure(null);setRetry({id:assetId,value:attempt+1});}}>Tentar prévia novamente</button></div>:<p role="status">Preparando prévia…</p>}
   </div>
  </dialog>;
 }

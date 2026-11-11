@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FavoriteButton } from "./FavoriteButton";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
+import { readDimensions } from "./image-data";
 import { requestThumbnail } from "./thumbnails";
 import type { AssetDetails, DetailsResult } from "./types";
 
@@ -9,6 +10,7 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
   const [locationError,setLocationError]=useState(false);
   const [attempt, setAttempt] = useState(0);
   const [thumbnail, setThumbnail] = useState<{id: string; url: string} | null>(null);
+  const [dimensions, setDimensions] = useState<{id:string; revision:number; width:number; height:number}|null>(null);
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => { close.current?.focus(); }, []);
   useEffect(() => {
@@ -30,6 +32,16 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
     return () => { active = false; };
   }, [assetId, attempt, revision]);
   const value = result?.id === assetId ? result.value : null;
+  const photo = value?.status === "ready" && value.details.asset.kind === "photo";
+  useEffect(() => {
+    if (!photo || !window.photoManager?.getPreview) return;
+    let active = true;
+    void readDimensions(assetId, () => active).then(size => {
+      if (active) setDimensions(size ? {id:assetId, revision, ...size} : null);
+    }).catch(() => {if (active) setDimensions(null);});
+    return () => {active = false;};
+  }, [assetId, revision, photo]);
+  const size = dimensions?.id === assetId && dimensions.revision === revision ? dimensions : null;
   return <aside className="asset-details" aria-labelledby="details-heading">
     <header><h2 id="details-heading">Propriedades</h2><button ref={close} className="primary-button" onClick={onClose}>Fechar detalhes</button></header>
     <p className="section-kicker">{onFavoriteChanged?"Favoritos ficam no catálogo. Edições da imagem exigem salvar.":"Somente leitura"}</p>
@@ -45,18 +57,18 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
       </section>
       {onFavoriteChanged && <FavoriteButton key={assetId} assetId={assetId} favorite={value.details.annotation?.favorite??false} onChanged={onFavoriteChanged} />}
       {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Miniatura da imagem" onError={() => setThumbnail(null)} /><figcaption>Miniatura</figcaption></figure>}
-      <DetailsContent details={value.details} />
+      <DetailsContent details={value.details} dimensions={size} />
     </>}
   </aside>;
 }
 function Fields({values}: {values: Record<string, string | number | boolean | null>}) {
   return <dl>{Object.entries(values).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value === null ? "Não informado" : typeof value === "boolean" ? value ? "Sim" : "Não" : String(value)}</dd></div>)}</dl>;
 }
-export function DetailsContent({details: d}: {details: AssetDetails}) {
+export function DetailsContent({details: d, dimensions}: {details: AssetDetails; dimensions?: {width:number; height:number}|null}) {
   return <>
     <h3>{d.annotation?.title ?? "Sem título"}</h3>
     <AvailabilityIndicator availability={d.availability} /><p>Disponibilidade registrada no catálogo; sem verificação física atual.</p>
-    <Fields values={{"Asset ID": d.asset.id, "Tipo": d.asset.kind, "Media type": d.asset.media_type, "Tamanho conhecido (bytes)": d.asset.byte_size, "Favorito": d.annotation?.favorite ?? null, "Rating (1–5)": d.annotation?.rating ?? null}} />
+    <Fields values={{"Asset ID": d.asset.id, "Tipo": d.asset.kind, "Media type": d.asset.media_type, "Tamanho conhecido (bytes)": d.asset.byte_size, ...(d.asset.kind === "photo" ? {"Dimensões originais": dimensions ? `${dimensions.width} × ${dimensions.height} px` : null} : {}), "Favorito": d.annotation?.favorite ?? null, "Rating (1–5)": d.annotation?.rating ?? null}} />
     <h3>Descrição e tags</h3><p className="preserve-text">{d.annotation?.description ?? "Sem descrição"}</p><p>{d.tags.length ? d.tags.map((tag) => tag.display_name).join(" · ") : "Sem tags"}</p>
     <h3>Informações temporais</h3><Fields values={{"Catalogado em (não é captura)": d.asset.created_at}} />
     {d.capture ? <Fields values={{"Captura local": d.capture.local_value, "Precisão": d.capture.precision, "Estado de timezone": d.capture.timezone_state, "Offset (minutos)": d.capture.offset_minutes, "Zona": d.capture.timezone_name, "Fonte": d.capture.source_kind, "Metadata selecionada": d.capture.metadata_id, "Motivo da seleção": d.capture.selection_reason}} /> : <p>Sem data de captura selecionada.</p>}

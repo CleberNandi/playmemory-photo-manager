@@ -204,16 +204,25 @@ class LibraryDispatcher:
                 # The operation sets an explicit boolean; the UI never automatically retries.
                 raise LibraryError("outcome_unknown") from None
         if method in ("thumbnail.get", "preview.get"):
-            if set(params) != {"session_id", "asset_id"}:
+            allowed = {"session_id", "asset_id"}
+            if method == "preview.get":
+                allowed |= {"variant", "offset"}
+            if set(params) - allowed or "asset_id" not in params:
+                raise LibraryError("invalid_request")
+            variant = "grid" if method == "thumbnail.get" else params.get("variant", "preview")
+            offset = params.get("offset", 0)
+            if (
+                variant not in ("grid", "preview", "dimensions", "original")
+                or type(offset) is not int
+                or not 0 <= offset < 16 * 1024 * 1024
+                or ("offset" in params and variant != "original")
+                or (method == "preview.get" and variant == "grid")
+            ):
                 raise LibraryError("invalid_request")
             if self.images.closed and not self.images.jobs:
                 self.images = ImageService()
             asset_id = _uuid(params["asset_id"])
-            return self.images.request(
-                active.query_connection,
-                asset_id,
-                "grid" if method == "thumbnail.get" else "preview",
-            )
+            return self.images.request(active.query_connection, asset_id, variant, offset)
         try:
             return _dispatch(
                 active.query_connection,

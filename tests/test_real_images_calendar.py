@@ -335,3 +335,35 @@ def test_detailed_preview_adapts_to_ipc_budget_instead_of_disappearing(library):
         assert (source.read_bytes(), source.stat().st_mtime_ns) == before
     finally:
         close_images(service)
+
+
+def test_original_dimensions_and_chunked_view_preserve_full_resolution(library):
+    from playmemories_photo_manager.imaging.service import CHUNK_SIZE
+
+    root, path, connection, root_id = library
+    source = root / "large.png"
+    Image.new("RGB", (4000, 4000), (25, 100, 210)).save(source)
+    before = source.read_bytes()
+    apply(root, path, connection, root_id)
+    asset_id = connection.execute("SELECT id FROM asset").fetchone()[0]
+    service = ImageService()
+    try:
+        assert wait_image(service, connection, asset_id, "dimensions") == {
+            "width": 4000,
+            "height": 4000,
+        }
+        first = wait_image(service, connection, asset_id, "original")
+        assert first["total"] > CHUNK_SIZE
+        pieces = [first]
+        for offset in range(CHUNK_SIZE, first["total"], CHUNK_SIZE):
+            piece = service.request(connection, asset_id, "original", offset)
+            assert piece["digest"] == first["digest"]
+            pieces.append(piece)
+        content = b"".join(base64.b64decode(piece["base64"], validate=True) for piece in pieces)
+        assert len(content) == first["total"]
+        with Image.open(io.BytesIO(content)) as rendered:
+            rendered.load()
+            assert rendered.size == (4000, 4000)
+        assert source.read_bytes() == before
+    finally:
+        close_images(service)

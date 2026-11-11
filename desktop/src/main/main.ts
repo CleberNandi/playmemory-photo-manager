@@ -186,11 +186,23 @@ app.whenReady().then(async () => {
     return query("calendar.summary", sessionId, {period});
   });
   register("preview:get", 1, async (raw) => {
-    const {sessionId, params: assetId} = envelope(raw);
-    if (!canonicalId(assetId)) throw new Error("invalid_request");
+    const {sessionId, params} = envelope(raw);
+    let request: Record<string, unknown>;
+    if (canonicalId(params)) {
+      request = {asset_id: params};
+    } else {
+      if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
+      const {assetId, variant, offset} = params as Record<string, unknown>;
+      if (Object.keys(params).some(key => !["assetId", "variant", "offset"].includes(key))
+        || !canonicalId(assetId) || (variant !== "dimensions" && variant !== "original")
+        || (offset !== undefined && (variant !== "original" || typeof offset !== "number"
+          || !Number.isInteger(offset) || offset < 0 || offset >= 16 * 1024 * 1024))) throw new Error("invalid_request");
+      if (demo) return null;
+      request = {asset_id:assetId, variant, ...(offset === undefined ? {} : {offset})};
+    }
     if (thumbnailRequests >= 4) return {status:"pending"};
     thumbnailRequests++;
-    try { return await query("preview.get", sessionId, {asset_id:assetId}); }
+    try { return await query("preview.get", sessionId, request); }
     finally { thumbnailRequests--; }
   });
   register("asset:details", 1, async (raw) => {

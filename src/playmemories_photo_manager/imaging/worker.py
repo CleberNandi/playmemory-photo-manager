@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import io
+import json
 import os
 import resource
 import signal
@@ -11,6 +12,7 @@ import sys
 import warnings
 
 MAX_OUTPUT = 160 * 1024
+MAX_ORIGINAL = 16 * 1024 * 1024
 
 
 def _preview(image):
@@ -50,6 +52,9 @@ def main():
         ):
             if image.width * image.height > MAX_PIXELS:
                 return 2
+            if variant == "dimensions":
+                sys.stdout.write(json.dumps({"width": image.width, "height": image.height}))
+                return 0
             # First frame/page only; no external program or original path enters the decoder.
             image.seek(0)
             image.load()
@@ -63,9 +68,13 @@ def main():
                 data = output.getvalue()
             elif variant == "preview":
                 data = _preview(upright)
+            elif variant == "original":
+                upright.save(output, format="JPEG", quality=90)
+                data = output.getvalue()
             else:
                 return 2
-            if data is None or len(data) > MAX_OUTPUT:
+            limit = MAX_ORIGINAL if variant == "original" else MAX_OUTPUT
+            if data is None or len(data) > limit:
                 return 2
             sys.stdout.buffer.write(data)
             return 0
