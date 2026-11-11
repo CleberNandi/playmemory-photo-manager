@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("photoManager", {
   showMediaMenu: (assetId:string)=>scoped("asset:menu",assetId),
   locateMedia: (assetId:string,describe=false)=>scoped("asset:locate",{assetId,describe}),
   getAssetDetails: (assetId: string) => scoped("asset:details", assetId),
+  editAnnotation: (assetId: string, field: string, value: string | number | null) =>
+    scoped("annotation:edit", {assetId, field, value}),
   setFavorite: (assetId: string, favorite: boolean) => scoped("annotation:favorite", {assetId, favorite}),
   getCalendar: (period: string | null) => scoped("calendar:summary", period),
   getPreview: (assetId: string, variant?: "dimensions" | "original", offset?: number) =>

@@ -17,6 +17,8 @@ export interface GalleryPage {
   has_more: boolean;
 }
 
+export type AnnotationField = "rating" | "title" | "description" | "tag_add" | "tag_remove";
+
 declare global {
   interface Window {
     photoManager?: {
@@ -48,6 +50,7 @@ declare global {
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
       setFavorite?(assetId: string, favorite: boolean): Promise<{asset_id: string; favorite: boolean}>;
       getCalendar?(period: string | null): Promise<{period: string | null; buckets: [string,number][]; undated:number; partial:number}>;
+      editAnnotation?(assetId: string, field: AnnotationField, value: string | number | null): Promise<unknown>;
       getPreview?(assetId: string, variant?: "dimensions" | "original", offset?: number): Promise<unknown>;
       getThumbnail?(assetId: string): Promise<unknown>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;

@@ -210,6 +210,20 @@ class CatalogRepository:
         ).fetchone()
         return _tag(row) if row else None
 
+    def find_tag_by_key(self, key: str) -> Tag | None:
+        row = self.connection.execute(
+            "SELECT id, display_name, normalized_key, created_at FROM tag WHERE normalized_key = ?",
+            (key,),
+        ).fetchone()
+        return _tag(row) if row else None
+
+    def attach_tag_if_absent(self, asset_id: str, tag_id: str) -> None:
+        self.connection.execute(
+            "INSERT INTO asset_tag(asset_id, tag_id) VALUES (?, ?) "
+            "ON CONFLICT(asset_id, tag_id) DO NOTHING",
+            (asset_id, tag_id),
+        )
+
     def list_tags(self, limit: int, offset: int) -> list[Tag]:
         rows = self.connection.execute(
             """SELECT id, display_name, normalized_key, created_at FROM tag

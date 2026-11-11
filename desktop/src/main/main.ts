@@ -96,7 +96,7 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
       const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
@@ -171,6 +171,32 @@ app.whenReady().then(async () => {
     const p=params as {assetId:unknown;describe:unknown};
     if(!canonicalId(p.assetId)||typeof p.describe!=="boolean")throw new Error("invalid_request");
     try{return await mediaActions.locate(sessionId,p.assetId,p.describe);}catch{return {status:"unavailable"};}
+  });
+  register("annotation:edit", 1, (raw) => {
+    if (demo || folderImports.busy || imageEdits.busy) throw new Error("unavailable");
+    const {sessionId, params} = envelope(raw);
+    if (!params || typeof params !== "object" || Array.isArray(params)
+      || Object.keys(params).sort().join() !== "assetId,field,value") throw new Error("invalid_request");
+    const {assetId, field, value} = params as Record<string, unknown>;
+    if (!canonicalId(assetId)) throw new Error("invalid_request");
+    switch (field) {
+      case "rating":
+        if (value !== null && (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 5)) throw new Error("invalid_request");
+        break;
+      case "tag_remove":
+        if (!canonicalId(value)) throw new Error("invalid_request");
+        break;
+      case "title":
+      case "description":
+      case "tag_add": {
+        if (value === null && field !== "tag_add") break;
+        const limit = field === "description" ? 2000 : field === "title" ? 200 : 100;
+        if (typeof value !== "string" || value.length > limit || value.includes("\0")) throw new Error("invalid_request");
+        break;
+      }
+      default: throw new Error("invalid_request");
+    }
+    return libraries.query("annotation.edit", sessionId, {asset_id:assetId, field, value});
   });
   register("annotation:favorite", 1, (raw) => {
     const {sessionId, params} = envelope(raw);

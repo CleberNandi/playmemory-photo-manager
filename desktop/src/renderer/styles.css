@@ -225,3 +225,16 @@ button, summary { touch-action: manipulation; }
 .viewer-hint { margin: 8px 0 0; font-size: 12px; color: var(--color-text-muted); line-height: 1.4; }
 .folder-monitor { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--color-border); color: var(--color-text-muted); font-size: 12px; }
 .folder-monitor p { margin: 0; }
+
+.image-viewer.viewer-maximized { box-sizing: border-box; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; }
+.viewer-window-controls { display: flex; flex-wrap: wrap; gap: 6px; }
+.annotation-editor form { display: grid; gap: 4px; margin: 8px 0; }
+.annotation-editor label { display: grid; gap: 4px; }
+.annotation-editor input, .annotation-editor textarea { width: 100%; box-sizing: border-box; }
+.annotation-editor textarea { resize: vertical; }
+.annotation-editor fieldset { margin: 0; padding: 6px; }
+.rating-buttons { display: flex; flex-wrap: wrap; gap: 3px; }
+.rating-buttons button { font-size: 1.1rem; }
+.rating-buttons button[aria-pressed="true"] { background: var(--color-sidebar-active); }
+.annotation-tags { padding: 0; list-style: none; }
+.annotation-tags li { display: flex; align-items: center; justify-content: space-between; gap: 4px; overflow-wrap: anywhere; }

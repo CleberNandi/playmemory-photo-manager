@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listCatalogingCandidates,listDuplicates,listGallery,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -335,8 +335,27 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await evaluate('document.querySelector(".card-select").click()');await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
  await wait('document.querySelector(".asset-details")?.textContent.includes("80 × 40 px")');
  console.log("SMOKE MEDIA ORIGIN PASS: catalog occurrence resolved, origin shown; native popup and file manager NOT TESTED");
+ await evaluate('document.querySelector(`[aria-label="4 estrelas"]`).click()');
+ await wait('document.querySelector(`[aria-label="4 estrelas"]`)?.getAttribute("aria-pressed")==="true"');
+ await evaluate(`(() => {
+   const field = document.querySelector(".annotation-editor input");
+   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, "Viagem");
+   field.dispatchEvent(new Event("input", {bubbles:true}));
+ })()`);
+ await click("Adicionar tag");
+ await wait('document.querySelector(".annotation-tags")?.textContent.includes("Viagem")');
+ console.log("SMOKE ANNOTATIONS PASS: stars and tag saved through catalog UI");
  const beforeEdit=Buffer.from(await readFile(location.path));
  await evaluate('document.querySelector(".open-image").click()');await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');
+ if(await evaluate<boolean>('!!document.querySelector(".viewer-save-group")'))throw new Error("save controls visible for clean image");
+ await click("Maximizar");
+ await wait('document.querySelector(".image-viewer")?.classList.contains("viewer-maximized")');
+ await click("Restaurar janela");
+ await click("Próxima");
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("2 de 24") && document.querySelector(".image-viewer img")?.naturalWidth>0');
+ await click("Anterior");
+ await wait('document.querySelector(".viewer-caption")?.textContent.includes("1 de 24") && document.querySelector(".image-viewer img")?.naturalWidth>0');
+ console.log("SMOKE MANAGED VIEWER PASS: maximize, restore, next and previous with viewer open");
  await click("100%");await wait('document.querySelector(".viewer-caption")?.textContent.includes("80 × 40 px · 100%")');
  await click("Ajustar");
  await click("Girar à direita");await click("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');

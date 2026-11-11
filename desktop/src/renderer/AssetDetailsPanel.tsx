@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { AnnotationEditor } from "./AnnotationEditor";
 import { FavoriteButton } from "./FavoriteButton";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
 import { readDimensions } from "./image-data";
 import { requestThumbnail } from "./thumbnails";
-import type { AssetDetails, DetailsResult } from "./types";
+import type { AnnotationField, AssetDetails, DetailsResult } from "./types";
 
-export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, suspended=false}: {assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void}) {
+export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, onAnnotationChanged, suspended=false}: {assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void; onAnnotationChanged?:(field:AnnotationField, value:string|number|null)=>void}) {
   const [result, setResult] = useState<{id: string; value: DetailsResult} | null>(null);
   const [locationError,setLocationError]=useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -56,6 +57,11 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
         {locationError&&<p role="alert">Não foi possível localizar o arquivo. Ele pode estar offline, ter mudado ou não estar mais disponível.</p>}
       </section>
       {onFavoriteChanged && <FavoriteButton key={assetId} assetId={assetId} favorite={value.details.annotation?.favorite??false} onChanged={onFavoriteChanged} />}
+      {onAnnotationChanged && window.photoManager?.editAnnotation &&
+        <AnnotationEditor key={assetId} details={value.details} onUpdated={(field, edited) => {
+          setAttempt(value => value + 1);
+          onAnnotationChanged(field, edited);
+        }} />}
       {thumbnail?.id === assetId && <figure><img className="details-thumbnail" src={thumbnail.url} alt="Miniatura da imagem" onError={() => setThumbnail(null)} /><figcaption>Miniatura</figcaption></figure>}
       <DetailsContent details={value.details} dimensions={size} />
     </>}
