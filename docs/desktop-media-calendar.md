@@ -3,9 +3,10 @@
 ## Comportamento
 
 A biblioteca produz miniaturas reais de 256 × 160 e abre uma prévia orientada por EXIF
-(até 1280 × 960) pelo botão Abrir imagem ou duplo clique. A prévia oferece ajuste à janela,
-100%, ampliação/redução e fechamento por Escape. Não é um editor nem um visualizador de
-resolução original. GIF animado e imagens de múltiplas páginas usam somente o primeiro quadro.
+(até 1280 × 960) pelo botão Abrir imagem ou duplo clique. O visualizador oferece ajuste à janela,
+fechamento por Escape e zoom em resolução original, conforme o
+[contrato do visualizador](desktop-viewer-navigation.md). GIF animado e imagens de múltiplas
+páginas usam somente o primeiro quadro.
 O nome do cartão prioriza o nome do arquivo; o caminho relativo completo fica no tooltip e
 nas propriedades.
 

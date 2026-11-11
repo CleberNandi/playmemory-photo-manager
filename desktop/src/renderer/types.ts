@@ -48,7 +48,7 @@ declare global {
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
       setFavorite?(assetId: string, favorite: boolean): Promise<{asset_id: string; favorite: boolean}>;
       getCalendar?(period: string | null): Promise<{period: string | null; buckets: [string,number][]; undated:number; partial:number}>;
-      getPreview?(assetId: string): Promise<unknown>;
+      getPreview?(assetId: string, variant?: "dimensions" | "original", offset?: number): Promise<unknown>;
       getThumbnail?(assetId: string): Promise<unknown>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
       getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;

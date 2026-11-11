@@ -333,9 +333,12 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  const location=await backend.request("asset.reveal",{session_id:initial.session.session_id,asset_id:first}) as {path:string};
  if(!location.path.startsWith(root+"/"))throw new Error("reveal escaped synthetic root");
  await evaluate('document.querySelector(".card-select").click()');await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
+ await wait('document.querySelector(".asset-details")?.textContent.includes("80 × 40 px")');
  console.log("SMOKE MEDIA ORIGIN PASS: catalog occurrence resolved, origin shown; native popup and file manager NOT TESTED");
  const beforeEdit=Buffer.from(await readFile(location.path));
  await evaluate('document.querySelector(".open-image").click()');await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');
+ await click("100%");await wait('document.querySelector(".viewer-caption")?.textContent.includes("80 × 40 px · 100%")');
+ await click("Ajustar");
  await click("Girar à direita");await click("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');
  if(!Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("save copy changed source");
  await wait('document.querySelector(".image-viewer img")?.naturalWidth>0');

@@ -25,7 +25,8 @@ contextBridge.exposeInMainWorld("photoManager", {
   getAssetDetails: (assetId: string) => scoped("asset:details", assetId),
   setFavorite: (assetId: string, favorite: boolean) => scoped("annotation:favorite", {assetId, favorite}),
   getCalendar: (period: string | null) => scoped("calendar:summary", period),
-  getPreview: (assetId: string) => scoped("preview:get", assetId),
+  getPreview: (assetId: string, variant?: "dimensions" | "original", offset?: number) =>
+    scoped("preview:get", variant ? {assetId, variant, ...(offset === undefined ? {} : {offset})} : assetId),
   getThumbnail: (assetId: string) => scoped("thumbnail:get", assetId),
   listDuplicates: (params: {pageSize?: number; after?: string | null} = {}) => scoped("duplicates:list", params),
   getDuplicateGroup: (params: {snapshotId: string; groupKey: string; pageSize?: number; after?: string | null}) => scoped("duplicates:group", params),

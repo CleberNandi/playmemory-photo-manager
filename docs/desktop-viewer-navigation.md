@@ -11,9 +11,14 @@ a navegação correspondente, sem circular para o início. Nome e posição deix
 explícita. Uma imagem sem prévia não impede avançar para a seguinte.
 
 Girar à esquerda/direita aplica passos de 90 graus à prévia já decodificada. Restaurar rotação
-volta a zero; Ajustar calcula a caixa delimitadora considerando a orientação. Zoom 100% refere-se
-à prévia derivada, não à resolução integral do original. O layout reserva a área correta para
-rolagem quando o zoom excede a janela, inclusive em 90/270 graus.
+volta a zero. Ajustar usa a prévia reduzida e considera a orientação no encaixe. O botão 100%
+e os controles de zoom solicitam uma renderização JPEG sem redimensionar, com orientação EXIF
+aplicada. O layout permite rolar a imagem, inclusive em 90/270 graus. Propriedades mostra a
+largura e altura gravadas no arquivo, antes da orientação EXIF.
+
+A renderização integral tem limite de 40 megapixels na decodificação e de 16 MiB na saída.
+A imagem passa pelo worker confinado e chega em blocos pelo IPC existente. Se a versão integral
+ficar indisponível, o visualizador informa a falha e mantém a prévia ajustada quando disponível.
 
 A rotação fica somente no visualizador. A continuação
 [desktop-save-rotation.md](desktop-save-rotation.md) oferece Salvar alterações e Salvar como cópia,

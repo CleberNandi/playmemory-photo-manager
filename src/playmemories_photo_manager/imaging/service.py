@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import os
 import stat
 import subprocess
@@ -12,8 +14,9 @@ from collections import OrderedDict
 from pathlib import Path, PurePosixPath
 
 from ..catalog_ingestion.media import _Changed, _Directories, _file_state, _mount_id
+from .worker import MAX_ORIGINAL, MAX_OUTPUT
 
-MAX_OUTPUT = 160 * 1024
+CHUNK_SIZE = 96 * 1024
 
 
 class ImageService:
@@ -22,9 +25,9 @@ class ImageService:
         self.cache = OrderedDict()
         self.closed = False
 
-    def request(self, connection, asset_id, variant):
+    def request(self, connection, asset_id, variant, offset=0):
         self.tick()
-        if self.closed or variant not in ("grid", "preview"):
+        if self.closed or variant not in ("grid", "preview", "dimensions", "original"):
             return None
         row = connection.execute(
             """SELECT fl.*,lr.normalized_path FROM file_location fl
@@ -77,7 +80,20 @@ class ImageService:
                     del self.cache[key]  # Consume failure once; a later explicit read may retry.
                 else:
                     self.cache.move_to_end(key)
+                if variant == "original" and result is not None:
+                    data, digest = result
+                    if not 0 <= offset < len(data) or offset % CHUNK_SIZE:
+                        return None
+                    return {
+                        "base64": base64.b64encode(data[offset : offset + CHUNK_SIZE]).decode(
+                            "ascii"
+                        ),
+                        "digest": digest,
+                        "total": len(data),
+                    }
                 return result
+            if offset:
+                return None
             if key in self.jobs or len(self.jobs) >= 4:
                 return {"status": "pending"}
             process = subprocess.Popen(
@@ -128,18 +144,19 @@ class ImageService:
     def tick(self):
         for key, job in tuple(self.jobs.items()):
             process, deadline, data, directories, fd, parent, name, state = job
+            limit = MAX_ORIGINAL if key[1] == "original" else MAX_OUTPUT
             try:
                 for _ in range(8):
                     chunk = os.read(process.stdout.fileno(), 32768)
                     if not chunk:
                         break
                     data.extend(chunk)
-                    if len(data) > MAX_OUTPUT:
+                    if len(data) > limit:
                         break
             except BlockingIOError:
                 pass
             if (
-                self.closed or time.monotonic() > deadline or len(data) > MAX_OUTPUT
+                self.closed or time.monotonic() > deadline or len(data) > limit
             ) and process.poll() is None:
                 process.kill()
             code = process.poll()
@@ -147,7 +164,7 @@ class ImageService:
                 continue
             # Drain after actual reap, bounded by the same response limit.
             try:
-                while len(data) <= MAX_OUTPUT:
+                while len(data) <= limit:
                     chunk = os.read(process.stdout.fileno(), 32768)
                     if not chunk:
                         break
@@ -160,23 +177,32 @@ class ImageService:
                 linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 if (
                     code == 0
-                    and 0 < len(data) <= MAX_OUTPUT
+                    and 0 < len(data) <= limit
                     and state == _file_state(os.fstat(fd)) == _file_state(linked)
                 ):
-                    result = {
-                        "media_type": "image/png" if key[1] == "grid" else "image/jpeg",
-                        "base64": base64.b64encode(data).decode("ascii"),
-                        "synthetic": False,
-                    }
-                    if key[1] == "grid":
-                        result.update(width=256, height=160)
-            except (OSError, RuntimeError, _Changed):
+                    if key[1] == "original":
+                        result = (bytes(data), hashlib.sha256(data).hexdigest())
+                    elif key[1] == "dimensions":
+                        result = json.loads(data)
+                    else:
+                        result = {
+                            "media_type": "image/png" if key[1] == "grid" else "image/jpeg",
+                            "base64": base64.b64encode(data).decode("ascii"),
+                            "synthetic": False,
+                        }
+                        if key[1] == "grid":
+                            result.update(width=256, height=160)
+            except (OSError, RuntimeError, ValueError, _Changed):
                 pass
             finally:
                 process.stdout.close()
                 os.close(fd)
                 directories.close()
                 del self.jobs[key]
+            if key[1] == "original":
+                for cached in tuple(self.cache):
+                    if cached[1] == "original":
+                        del self.cache[cached]
             self.cache[key] = result
             if len(self.cache) > 32:
                 self.cache.popitem(last=False)
