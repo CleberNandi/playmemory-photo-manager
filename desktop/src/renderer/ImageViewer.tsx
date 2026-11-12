@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from "react";
+import {useEffect,useLayoutEffect,useRef,useState,type KeyboardEvent as ReactKeyboardEvent} from "react";
 import {requestThumbnail} from "./thumbnails";
 import {readOriginal} from "./image-data";
 import type {ImageSaveJob} from "./types";
@@ -21,6 +21,10 @@ function FilmFrame({frame, selected, onClick}: {frame:ViewerFrame; selected:bool
 
 export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name="Imagem selecionada",position,onPrevious,onNext,onSaved,frames,onFrame,loadingNext=false,nextError=false,canSave=true}: {assetId:string;onClose:()=>void;restoreFocus?:()=>void;initialRotation?:number;name?:string;position?:string;onPrevious?:()=>void;onNext?:()=>void;frames?:ViewerFrame[];onFrame?:(id:string)=>void;loadingNext?:boolean;nextError?:boolean;canSave?:boolean;onSaved?:(mode:"replace"|"copy",assetId:string)=>void}) {
  const activeFrame=frames?.findIndex(frame=>frame.id===assetId)??-1;
+ const hasSequence=!!onFrame&&activeFrame>=0;
+ const [showFilmstrip,setShowFilmstrip]=useState(false);
+ const [context,setContext]=useState<{id:string;x:number;y:number}|null>(null);
+ const contextMenu=useRef<HTMLDivElement>(null),photo=useRef<HTMLImageElement>(null);
  const [saving,setSaving]=useState(false);
  const [saveMessage,setSaveMessage]=useState<{id:string;text:string}|null>(null);
  const [uncertain,setUncertain]=useState(false);
@@ -44,10 +48,38 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  const full=original?.id===assetId&&original.attempt===attempt?original:null;
  const showingOriginal=!!(zoom&&full?.url);
  const url=showingOriginal?full!.url:preview;
+ const menuOpen=context?.id===assetId&&!!url&&!saving&&!leaving&&!loadingNext;
  const size=dimensions?.id===assetId&&dimensions.url===url?dimensions:null;
  const wantsOriginal=zoom!==0;
  const failed=failure===assetId;
- if(view.id!==assetId)setView({id:assetId,zoom:0,rotation:initialRotation});
+ if(view.id!==assetId){
+  setView({id:assetId,zoom:0,rotation:initialRotation});
+  setContext(null);
+ }
+ const dismissMenu=()=>{setContext(null);photo.current?.focus({preventScroll:true});};
+ const openMenu=(x:number,y:number)=>{if(url&&!saving&&!leaving&&!loadingNext)setContext({id:assetId,x,y});};
+ useLayoutEffect(()=>{
+  if(!menuOpen||!context)return;
+  const node=contextMenu.current!;
+  const place=()=>{
+   node.style.left=`${Math.max(8,Math.min(context.x,innerWidth-node.offsetWidth-8))}px`;
+   node.style.top=`${Math.max(8,Math.min(context.y,innerHeight-node.offsetHeight-8))}px`;
+  };
+  place();
+  node.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({preventScroll:true});
+  window.addEventListener("resize",place);
+  return ()=>window.removeEventListener("resize",place);
+ },[context,menuOpen]);
+ const menuKeys=(event:ReactKeyboardEvent<HTMLDivElement>)=>{
+  if(event.key==="Tab"){dismissMenu();return;}
+  if(!["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End"].includes(event.key))return;
+  event.preventDefault();event.stopPropagation();
+  const items=[...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  const index=items.indexOf(document.activeElement as HTMLButtonElement);
+  const offset=event.key==="ArrowUp"||event.key==="ArrowLeft"?-1:1;
+  const target=event.key==="Home"?0:event.key==="End"?items.length-1:(index+offset+items.length)%items.length;
+  items[target]?.focus();
+ };
  const update=(next:{zoom?:number;rotation?:number})=>setView({id:assetId,zoom,rotation,...next});
  const leave=(action:(()=>void)|undefined)=>{if(!action||saving)return;if(rotation!==0)setLeaving({action});else action();};
  const save=async(mode:"replace"|"copy")=>{
@@ -102,14 +134,14 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
  },[assetId,attempt]);
  useEffect(()=>{
   const keyboard=(event:KeyboardEvent)=>{
-   if(saving||leaving||!dialog.current?.open||event.altKey||event.ctrlKey||event.metaKey)return;
+   if(saving||leaving||menuOpen||!dialog.current?.open||event.altKey||event.ctrlKey||event.metaKey)return;
    if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
    event.preventDefault();event.stopPropagation();if(event.key==="ArrowLeft")leave(onPrevious);else if(!loadingNext)leave(onNext);
   };
   document.addEventListener("keydown",keyboard);return ()=>document.removeEventListener("keydown",keyboard);
  // The current edit and leave guard belong to the active viewer frame.
  // eslint-disable-next-line react-hooks/exhaustive-deps
- },[onPrevious,onNext,rotation,saving,leaving,loadingNext]);
+ },[onPrevious,onNext,rotation,saving,leaving,loadingNext,menuOpen]);
  useEffect(()=>{
   if(!wantsOriginal)return;
   let active=true;
@@ -119,10 +151,17 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
   return ()=>{active=false;};
  },[assetId,attempt,wantsOriginal]);
  const geometry=size?viewerGeometry(size.width,size.height,rotation,showingOriginal?zoom:0,viewport.width,viewport.height):null;
- return <dialog className="image-viewer" ref={dialog} aria-label="Visualizar imagem" onKeyDown={event=>{
-  if(event.key==="Escape"){event.stopPropagation();return;}
-
- }} onCancel={event=>{event.preventDefault();if(leaving)setLeaving(null);else leave(onClose);}}>
+ const menuAction=(action:()=>void)=>{dismissMenu();action();};
+ return <dialog className="image-viewer" ref={dialog} aria-label="Visualizar imagem" onPointerDown={event=>{
+  if(menuOpen&&!contextMenu.current?.contains(event.target as Node))dismissMenu();
+ }} onKeyDown={event=>{
+  if(event.key!=="Escape")return;
+  event.stopPropagation();
+  if(menuOpen){event.preventDefault();dismissMenu();}
+ }} onCancel={event=>{
+  event.preventDefault();
+  if(menuOpen)dismissMenu();else if(leaving)setLeaving(null);else leave(onClose);
+ }}>
   <header inert={!!leaving} className="viewer-toolbar">
    <div className="viewer-title">
     <button className="viewer-icon" data-icon="←" ref={closeButton} autoFocus disabled={saving} onClick={()=>leave(onClose)}
@@ -144,18 +183,38 @@ export function ImageViewer({assetId,onClose,restoreFocus,initialRotation=0,name
     <span className="sr-only">Próxima</span>
   </button>
   <div ref={canvas} inert={!!leaving} className={`viewer-image${showingOriginal?" viewer-zoomed":""}`}>
-   {url?<div className="viewer-stage" style={geometry?{width:geometry.boxWidth,height:geometry.boxHeight}:undefined}><img key={assetId} src={url} alt={showingOriginal?name:`Prévia de ${name}`} onLoad={event=>setDimensions({id:assetId,url,width:event.currentTarget.naturalWidth,height:event.currentTarget.naturalHeight||1})} onError={()=>{if(showingOriginal)setOriginal({id:assetId,attempt,url:null});else{setImage(null);setFailure(assetId);}}} style={geometry?{width:`${geometry.width}px`,height:`${geometry.height}px`,maxWidth:"none",maxHeight:"none",transform:`translate(-50%, -50%) rotate(${rotation}deg)`}:{transform:`rotate(${rotation}deg)`}}/></div>:failed?<div role="alert"><p>Prévia indisponível. O arquivo pode estar offline, ter mudado ou não ser decodificável dentro dos limites.</p><button onClick={()=>{setFailure(null);setRetry({id:assetId,value:attempt+1});}}>Tentar prévia novamente</button></div>:<p role="status">Preparando prévia…</p>}
+   {url?<div className="viewer-stage" style={geometry?{width:geometry.boxWidth,height:geometry.boxHeight}:undefined}><img key={assetId} ref={photo} src={url} tabIndex={0} draggable={false} aria-haspopup="menu"
+    className={hasSequence?"viewer-photo-toggle":undefined}
+    onClick={()=>{if(hasSequence&&!saving)setShowFilmstrip(visible=>!visible);}}
+    onContextMenu={event=>{event.preventDefault();openMenu(event.clientX,event.clientY);}}
+    onKeyDown={event=>{
+     if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10")){
+      event.preventDefault();
+      const bounds=event.currentTarget.getBoundingClientRect();
+      openMenu(bounds.left+16,bounds.top+16);
+     }else if(hasSequence&&!saving&&(event.key==="Enter"||event.key===" ")){
+      event.preventDefault();
+      if(!event.repeat)setShowFilmstrip(visible=>!visible);
+     }
+    }} alt={showingOriginal?name:`Prévia de ${name}`} onLoad={event=>setDimensions({id:assetId,url,width:event.currentTarget.naturalWidth,height:event.currentTarget.naturalHeight||1})} onError={()=>{if(showingOriginal)setOriginal({id:assetId,attempt,url:null});else{setImage(null);setFailure(assetId);}}} style={geometry?{width:`${geometry.width}px`,height:`${geometry.height}px`,maxWidth:"none",maxHeight:"none",transform:`translate(-50%, -50%) rotate(${rotation}deg)`}:{transform:`rotate(${rotation}deg)`}}/></div>:failed?<div role="alert"><p>Prévia indisponível. O arquivo pode estar offline, ter mudado ou não ser decodificável dentro dos limites.</p><button onClick={()=>{setFailure(null);setRetry({id:assetId,value:attempt+1});}}>Tentar prévia novamente</button></div>:<p role="status">Preparando prévia…</p>}
   </div>
   </div>
-  <footer className="viewer-tools" inert={!!leaving}>
-   <div className="viewer-controls" role="toolbar" aria-label="Controles da imagem">
-    <div className="viewer-control-group" aria-label="Zoom"><button onClick={()=>update({zoom:0})}>Ajustar</button><button onClick={()=>update({zoom:100})}>100%</button><button aria-label="Ampliar imagem" onClick={()=>update({zoom:Math.min(200,(zoom||100)+25)})}>+</button><button aria-label="Reduzir imagem" onClick={()=>update({zoom:Math.max(25,(zoom||100)-25)})}>−</button></div>
-    <div className="viewer-control-group" aria-label="Rotação"><button disabled={!url||saving||loadingNext} onClick={()=>rotate(-90)}>Girar à esquerda</button><button disabled={!url||saving||loadingNext} onClick={()=>rotate(90)}>Girar à direita</button><button disabled={rotation===0||saving} onClick={()=>update({rotation:0})}>Restaurar rotação</button></div>
-    {rotation!==0&&canSave&&<div className="viewer-control-group viewer-save-group" aria-label="Gravação"><button disabled={saving||uncertain||!rotation||!window.photoManager?.saveRotation||!canSave} onClick={()=>void save("replace")}>Salvar alterações</button><button disabled={saving||uncertain||!rotation||!window.photoManager?.saveRotation||!canSave} onClick={()=>void save("copy")}>Salvar como cópia</button></div>}
-   </div>
-   <p className="viewer-hint">Ajustar encaixa a imagem na janela. 100% usa a resolução original. Alterações só são gravadas ao salvar.{!canSave?" Gravação disponível para PNG e JPEG.":""}</p>
-  </footer>
-  {frames&&onFrame&&activeFrame>=0&&<nav className="viewer-filmstrip" aria-label="Miniaturas da sequência" inert={!!leaving||saving}>
+  {menuOpen&&<div className="viewer-context-menu" ref={contextMenu} role="menu" aria-label="Opções da imagem" onKeyDown={menuKeys}>
+   <button role="menuitem" onClick={()=>menuAction(()=>update({zoom:0}))}>Encaixar à janela</button>
+   <button role="menuitem" onClick={()=>menuAction(()=>update({zoom:100}))}>Tamanho real (100%)</button>
+   <button role="menuitem" onClick={()=>menuAction(()=>update({zoom:Math.min(200,(zoom||100)+25)}))}>Ampliar imagem</button>
+   <button role="menuitem" onClick={()=>menuAction(()=>update({zoom:Math.max(25,(zoom||100)-25)}))}>Reduzir imagem</button>
+   <hr role="separator" />
+   <button role="menuitem" onClick={()=>menuAction(()=>rotate(-90))}>Girar à esquerda</button>
+   <button role="menuitem" onClick={()=>menuAction(()=>rotate(90))}>Girar à direita</button>
+   <button role="menuitem" disabled={rotation===0} onClick={()=>menuAction(()=>update({rotation:0}))}>Restaurar rotação</button>
+   {rotation!==0&&canSave&&<>
+    <hr role="separator" />
+    <button role="menuitem" disabled={uncertain||!window.photoManager?.saveRotation} onClick={()=>menuAction(()=>void save("replace"))}>Salvar alterações</button>
+    <button role="menuitem" disabled={uncertain||!window.photoManager?.saveRotation} onClick={()=>menuAction(()=>void save("copy"))}>Salvar como cópia</button>
+   </>}
+  </div>}
+  {showFilmstrip&&hasSequence&&frames&&onFrame&&<nav className="viewer-filmstrip" aria-label="Miniaturas da sequência" inert={!!leaving||saving}>
     {frames.slice(Math.max(0,activeFrame-6), activeFrame+7).map(frame=>
       <FilmFrame key={frame.id} frame={frame} selected={frame.id===assetId}
         onClick={()=>{if(frame.id!==assetId)leave(()=>onFrame(frame.id));}} />)}

@@ -11,9 +11,13 @@ nem carrega páginas automaticamente. Vídeos não entram nessa sequência. Os e
 a navegação correspondente, sem circular para o início. Nome e posição deixam essa cobertura
 explícita. Uma imagem sem prévia não impede avançar para a seguinte.
 
+Um clique na foto abre o carrossel, que começa oculto. Outro clique na foto fecha o carrossel.
+Escolher uma miniatura muda a foto e mantém o carrossel aberto.
+
+O menu de contexto abre com o botão direito sobre a foto ou com Shift+F10 quando ela tem foco.
 Girar à esquerda/direita aplica passos de 90 graus à prévia já decodificada. Restaurar rotação
-volta a zero. Ajustar usa a prévia reduzida e considera a orientação no encaixe. O botão 100%
-e os controles de zoom solicitam uma renderização JPEG sem redimensionar, com orientação EXIF
+volta a zero. Encaixar à janela usa a prévia reduzida e considera a orientação no encaixe. Tamanho
+real (100%) e os controles de zoom solicitam uma renderização JPEG sem redimensionar, com orientação EXIF
 aplicada. O layout permite rolar a imagem, inclusive em 90/270 graus. Propriedades mostra a
 largura e altura gravadas no arquivo, antes da orientação EXIF.
 
@@ -21,8 +25,8 @@ A renderização integral tem limite de 40 megapixels na decodificação e de 16
 A imagem passa pelo worker confinado e chega em blocos pelo IPC existente. Se a versão integral
 ficar indisponível, o visualizador informa a falha e mantém a prévia ajustada quando disponível.
 
-Maximizar ocupa a área do aplicativo, e Restaurar janela volta ao tamanho anterior.
-Os botões de gravação aparecem enquanto houver rotação pendente em um formato gravável.
+O visualizador ocupa a janela do aplicativo. As ações de gravação aparecem no menu de contexto
+enquanto houver rotação pendente em um formato gravável.
 
 A rotação fica somente no visualizador. A continuação
 [desktop-save-rotation.md](desktop-save-rotation.md) oferece Salvar alterações e Salvar como cópia,
@@ -51,7 +55,7 @@ pnpm --dir desktop start
 ```
 
 1. Abrir uma imagem e conferir nome/posição.
-2. Girar à direita/esquerda, ajustar e testar 100% com rolagem.
+2. Clicar na foto para abrir e fechar o carrossel. Pelo botão direito, girar, encaixar e testar 100% com rolagem.
 3. Avançar com Próxima e escolher salvar ou descartar; voltar com seta esquerda.
 4. Fechar com Escape e conferir seleção/propriedades da última imagem visualizada.
 5. Conferir que o botão direito da galeria não possui Girar.

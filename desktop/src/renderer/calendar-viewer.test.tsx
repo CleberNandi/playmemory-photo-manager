@@ -9,6 +9,54 @@ let host:HTMLDivElement;let root:Root;
 beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});host=document.createElement("div");document.body.append(host);root=createRoot(host);window.photoManager={listGallery:vi.fn().mockResolvedValue({items:[],has_more:false,next_cursor:null}),retryGallery:vi.fn(),getCalendar:vi.fn().mockResolvedValue({period:null,buckets:[["2024",3]],undated:4,partial:0})};HTMLDialogElement.prototype.showModal=vi.fn(function(this:HTMLDialogElement){this.setAttribute("open","");});});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();delete window.photoManager;vi.useRealTimers();});
 async function click(text:string){await act(async()=>[...host.querySelectorAll("button")].find(b=>b.textContent===text)!.click());}
+const viewerPhoto=()=>host.querySelector<HTMLImageElement>(".viewer-image img")!;
+async function openImageMenu(){
+ await act(async()=>viewerPhoto().dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,button:2,clientX:40,clientY:60})));
+}
+async function chooseImageOption(text:string){await openImageMenu();await click(text);}
+
+it("shows viewer commands only in the photo menu and keeps Escape local to it",async()=>{
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+ const close=vi.fn(), next=vi.fn();
+ await act(async()=>root.render(<ImageViewer assetId="a" onClose={close} onNext={next}/>));
+ expect(host.querySelector('[role="menu"]')).toBeNull();
+ expect(host.textContent).not.toContain("Girar à direita");
+ await openImageMenu();
+ expect(host.querySelector('[role="menu"]')).not.toBeNull();
+ expect(document.activeElement?.textContent).toBe("Encaixar à janela");
+ await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true,cancelable:true})));
+ expect(document.activeElement?.textContent).toBe("Tamanho real (100%)");
+ await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true,cancelable:true})));
+ expect(next).not.toHaveBeenCalled();
+ await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true})));
+ expect(host.querySelector('[role="menu"]')).toBeNull();
+ expect(document.activeElement).toBe(viewerPhoto());
+ expect(close).not.toHaveBeenCalled();
+ await act(async()=>viewerPhoto().dispatchEvent(new KeyboardEvent("keydown",{key:"F10",shiftKey:true,bubbles:true,cancelable:true})));
+ expect(host.querySelector('[role="menu"]')).not.toBeNull();
+ await act(async()=>host.querySelector(".viewer-toolbar")!.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true})));
+ expect(host.querySelector('[role="menu"]')).toBeNull();
+});
+
+it("toggles the filmstrip with a single photo click and selects a thumbnail without hiding it",async()=>{
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+ const onFrame=vi.fn(),frames=[{id:"a",name:"A.jpg"},{id:"b",name:"B.jpg"}];
+ await act(async()=>root.render(<ImageViewer assetId="a" onClose={vi.fn()} frames={frames} onFrame={onFrame}/>));
+ const strip=()=>host.querySelector(".viewer-filmstrip");
+ expect(strip()).toBeNull();
+ await openImageMenu();
+ expect(strip()).toBeNull();
+ await act(async()=>host.querySelector(".viewer-toolbar")!.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true})));
+ await act(async()=>viewerPhoto().click());
+ expect(strip()?.querySelector('[aria-current="true"]')?.getAttribute("aria-label")).toBe("A.jpg");
+ await act(async()=>strip()!.querySelector<HTMLButtonElement>('[aria-label="B.jpg"]')!.click());
+ expect(onFrame).toHaveBeenCalledWith("b");
+ await act(async()=>root.render(<ImageViewer assetId="b" onClose={vi.fn()} frames={frames} onFrame={onFrame}/>));
+ expect(strip()?.querySelector('[aria-current="true"]')?.getAttribute("aria-label")).toBe("B.jpg");
+ await act(async()=>viewerPhoto().click());
+ expect(strip()).toBeNull();
+});
+
 it("drills through years, leap month, day and queries the entire catalog period",async()=>{
  window.photoManager!.getCalendar=vi.fn().mockImplementation((period)=>Promise.resolve({period,buckets:period===null?[["2024",3]]:period==="2024"?[["2024-02",3]]:[["2024-02-29",3]],undated:4,partial:0}));
  await act(async()=>root.render(<App/>));await click("Calendário");
@@ -40,14 +88,14 @@ it("switches from the fitted preview to the original resolution at 100%",async()
  const close=vi.fn();
  await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));
  expect(host.querySelector("img")?.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAA");
- await click("100%");
+ await chooseImageOption("Tamanho real (100%)");
  const img=host.querySelector("img")!;
  expect(img.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAB");
  Object.defineProperties(img,{naturalWidth:{value:4000},naturalHeight:{value:4000}});
  await act(async()=>img.dispatchEvent(new Event("load")));
  expect(img.style.width).toBe("4000px");
  expect(host.textContent).toContain("4000 × 4000 px · 100%");
- await click("Ajustar");
+ await chooseImageOption("Encaixar à janela");
  expect(host.querySelector("img")?.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/AAAA");
  await click("Fechar imagem");
  expect(close).toHaveBeenCalledOnce();
@@ -69,7 +117,7 @@ it("never renders numeric short-circuit values in year or month headers",async()
 it("rotates by quarter turns, resets and fits the rotated bounding box",async()=>{
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});await act(async()=>root.render(<ImageViewer assetId="a" onClose={vi.fn()}/>));
  const image=host.querySelector("img")!;Object.defineProperties(image,{naturalWidth:{value:800},naturalHeight:{value:400}});await act(async()=>image.dispatchEvent(new Event("load")));
- await click("Girar à direita");expect(image.style.transform).toContain("rotate(90deg)");await click("Girar à esquerda");expect(image.style.transform).toContain("rotate(0deg)");await click("Girar à esquerda");expect(image.style.transform).toContain("rotate(270deg)");await click("Restaurar rotação");expect(image.style.transform).toContain("rotate(0deg)");
+ await chooseImageOption("Girar à direita");expect(image.style.transform).toContain("rotate(90deg)");await chooseImageOption("Girar à esquerda");expect(image.style.transform).toContain("rotate(0deg)");await chooseImageOption("Girar à esquerda");expect(image.style.transform).toContain("rotate(270deg)");await chooseImageOption("Restaurar rotação");expect(image.style.transform).toContain("rotate(0deg)");
  expect(viewerGeometry(800,400,90,0,424,424)).toEqual({width:400,height:200,boxWidth:200,boxHeight:400});
  expect(viewerGeometry(800,400,90,100,424,424)).toEqual({width:800,height:400,boxWidth:400,boxHeight:800});
 });
@@ -78,7 +126,7 @@ it("navigates with buttons and arrows without remounting the dialog or leaking E
  await act(async()=>root.render(<ImageViewer assetId="a" onClose={close} onPrevious={previous} onNext={next} name="A.jpg" position="2 de 3 imagens carregadas"/>));const dialog=host.querySelector("dialog")!;
  await click("Próxima");await act(async()=>document.body.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowLeft",bubbles:true})));expect(next).toHaveBeenCalledOnce();expect(previous).toHaveBeenCalledOnce();
  const escape=vi.fn();document.addEventListener("keydown",escape);await act(async()=>dialog.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));document.removeEventListener("keydown",escape);expect(escape).not.toHaveBeenCalled();
- await click("Girar à direita");await act(async()=>root.render(<ImageViewer assetId="b" onClose={close} name="B.jpg"/>));expect(host.querySelector("dialog")).toBe(dialog);expect(host.querySelector(".viewer-caption")!.textContent).toContain("B.jpg · 0°");expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalledTimes(1);
+ await chooseImageOption("Girar à direita");await act(async()=>root.render(<ImageViewer assetId="b" onClose={close} name="B.jpg"/>));expect(host.querySelector("dialog")).toBe(dialog);expect(host.querySelector(".viewer-caption")!.textContent).toContain("B.jpg · 0°");expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalledTimes(1);
  await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));expect(host.querySelector(".viewer-caption")!.textContent).toContain("0°");
 });
 it("drops previous-asset previews while the next image is pending",async()=>{
@@ -147,11 +195,11 @@ it("loads the next photo across pages, retries failures and keeps navigation his
 });
 
 it("asks before leaving an unsaved rotation and offers discard or continuing",async()=>{
- window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});const close=vi.fn();await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));await click("Girar à direita");await click("Fechar imagem");expect(close).not.toHaveBeenCalled();expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();await click("Continuar editando");expect(host.querySelector('[role="alertdialog"]')).toBeNull();await click("Fechar imagem");await click("Descartar rotação");expect(close).toHaveBeenCalledOnce();
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});const close=vi.fn();await act(async()=>root.render(<ImageViewer assetId="a" onClose={close}/>));await chooseImageOption("Girar à direita");await click("Fechar imagem");expect(close).not.toHaveBeenCalled();expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();await click("Continuar editando");expect(host.querySelector('[role="alertdialog"]')).toBeNull();await click("Fechar imagem");await click("Descartar rotação");expect(close).toHaveBeenCalledOnce();
 });
 it("saves full-resolution rotation through scoped commands and refreshes the preview",async()=>{
- vi.useFakeTimers();window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});window.photoManager!.saveRotation=vi.fn().mockResolvedValue({job_id:"job",asset_id:"a",state:"running",result_asset_id:null,error:null});window.photoManager!.getImageSaveStatus=vi.fn().mockResolvedValue({job_id:"job",asset_id:"a",state:"completed",result_asset_id:"copy",error:null});const saved=vi.fn();await act(async()=>root.render(<ImageViewer assetId="a" onClose={vi.fn()} onSaved={saved}/>));await click("Girar à direita");await click("Salvar como cópia");expect(window.photoManager!.saveRotation).toHaveBeenCalledWith("a",90,"copy");await act(async()=>vi.advanceTimersByTimeAsync(250));expect(saved).toHaveBeenCalledWith("copy","copy");expect(host.textContent).toContain("Cópia salva");expect(host.querySelector(".viewer-caption")?.textContent).not.toContain("90°");expect(window.photoManager!.getPreview).toHaveBeenCalledTimes(2);
+ vi.useFakeTimers();window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});window.photoManager!.saveRotation=vi.fn().mockResolvedValue({job_id:"job",asset_id:"a",state:"running",result_asset_id:null,error:null});window.photoManager!.getImageSaveStatus=vi.fn().mockResolvedValue({job_id:"job",asset_id:"a",state:"completed",result_asset_id:"copy",error:null});const saved=vi.fn();await act(async()=>root.render(<ImageViewer assetId="a" onClose={vi.fn()} onSaved={saved}/>));await chooseImageOption("Girar à direita");await chooseImageOption("Salvar como cópia");expect(window.photoManager!.saveRotation).toHaveBeenCalledWith("a",90,"copy");await act(async()=>vi.advanceTimersByTimeAsync(250));expect(saved).toHaveBeenCalledWith("copy","copy");expect(host.textContent).toContain("Cópia salva");expect(host.querySelector(".viewer-caption")?.textContent).not.toContain("90°");expect(window.photoManager!.getPreview).toHaveBeenCalledTimes(2);
 });
 it("cancelled saving preserves edits and an unknown outcome blocks further saves",async()=>{
- window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});window.photoManager!.saveRotation=vi.fn().mockResolvedValueOnce({job_id:"job",asset_id:"a",state:"cancelled",result_asset_id:null,error:null}).mockResolvedValueOnce({job_id:"job2",asset_id:"a",state:"outcome_unknown",result_asset_id:null,error:"outcome_unknown"});await act(async()=>root.render(<ImageViewer assetId="a" onClose={vi.fn()}/>));await click("Girar à direita");await click("Salvar alterações");expect(host.textContent).toContain("90°");await click("Salvar alterações");expect([...host.querySelectorAll("button")].find(button=>button.textContent==="Salvar alterações")!.disabled).toBe(true);expect(host.textContent).toContain("não haverá repetição automática");
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});window.photoManager!.saveRotation=vi.fn().mockResolvedValueOnce({job_id:"job",asset_id:"a",state:"cancelled",result_asset_id:null,error:null}).mockResolvedValueOnce({job_id:"job2",asset_id:"a",state:"outcome_unknown",result_asset_id:null,error:"outcome_unknown"});await act(async()=>root.render(<ImageViewer assetId="a" onClose={vi.fn()}/>));await chooseImageOption("Girar à direita");await chooseImageOption("Salvar alterações");expect(host.textContent).toContain("90°");await chooseImageOption("Salvar alterações");await openImageMenu();expect([...host.querySelectorAll("button")].find(button=>button.textContent==="Salvar alterações")!.disabled).toBe(true);expect(host.textContent).toContain("não haverá repetição automática");
 });

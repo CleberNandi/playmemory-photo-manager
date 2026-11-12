@@ -272,7 +272,12 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await waitFor('document.querySelectorAll(".synthetic-thumbnail").length === 2 && [...document.querySelectorAll(".synthetic-thumbnail")].every(img => img.complete && img.naturalWidth === 256)');
   await evaluate('document.querySelector(".open-image").click()');
   await waitFor('document.querySelector(".viewer-image img")?.naturalWidth > 0');
-  await click("Girar à direita");
+  const chooseViewerOption=async(text:string)=>{
+   await evaluate('document.querySelector(".viewer-image img").dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,button:2,clientX:innerWidth-5,clientY:innerHeight-5}))');
+   await waitFor('!!document.querySelector(".viewer-context-menu")');
+   await click(text);
+  };
+  await chooseViewerOption("Girar à direita");
   await waitFor('document.querySelector(".viewer-image img")?.style.transform.includes("rotate(90deg)")');
   if(!await evaluate<boolean>('(()=>{const image=document.querySelector(".viewer-image img").getBoundingClientRect(),canvas=document.querySelector(".viewer-image").getBoundingClientRect();return image.width<=canvas.width+1&&image.height<=canvas.height+1;})()'))throw new Error("rotated fit overflow");
   await click("Próxima");await waitFor('!!document.querySelector(".viewer-unsaved")');await click("Descartar rotação");await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2") && document.querySelector(".viewer-image img")?.naturalWidth>0');
@@ -282,8 +287,8 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await waitFor('document.querySelector(".viewer-caption")?.textContent.includes("2 de 2")');
   console.log("SMOKE VIEWER NAVIGATION PASS: quarter-turn fits; next/previous arrows; temporary rotation resets; close restores latest thumbnail");
   window.setContentSize(760,520);await new Promise(resolve=>setTimeout(resolve,120));
-  const layout=await evaluate<{overflow:boolean;hint:number;image:number}>('(()=>{const header=document.querySelector(".viewer-toolbar"),hint=document.querySelector(".viewer-hint"),image=document.querySelector(".viewer-image");return {overflow:header.scrollWidth>header.clientWidth+1,hint:hint.getBoundingClientRect().height,image:image.getBoundingClientRect().height};})()');
-  if(layout.overflow||layout.hint>50||layout.image<100)throw new Error("viewer toolbar layout regressed");
+  const layout=await evaluate<{overflow:boolean;image:number}>('(()=>{const header=document.querySelector(".viewer-toolbar"),image=document.querySelector(".viewer-image");return {overflow:header.scrollWidth>header.clientWidth+1,image:image.getBoundingClientRect().height};})()');
+  if(layout.overflow||layout.image<100)throw new Error("viewer toolbar layout regressed");
   await writeFile("/tmp/playmemories-viewer-760.png",(await window.webContents.capturePage()).toPNG());
   window.setContentSize(1180,760);await new Promise(resolve=>setTimeout(resolve,80));
   await writeFile("/tmp/playmemories-image-viewer.png", (await window.webContents.capturePage()).toPNG());
@@ -473,7 +478,7 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  console.log("SMOKE FILTER OPTIONS PASS: selected a catalog label beyond the initial 24");
  const beforeEdit=Buffer.from(await readFile(location.path));
  await evaluate('document.querySelector(".open-image").click()');await wait('document.querySelector(".viewer-image img")?.naturalWidth>0');
- if(await evaluate<boolean>('!!document.querySelector(".viewer-save-group")'))throw new Error("save controls visible for clean image");
+ if(await evaluate<boolean>('!!document.querySelector(".viewer-context-menu, .viewer-filmstrip")'))throw new Error("save controls visible for clean image");
  const fillsWindow = await evaluate<boolean>(`(() => {
    const viewer = document.querySelector(".image-viewer");
    const rect = viewer.getBoundingClientRect();
@@ -487,13 +492,35 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("Anterior");
  await wait('document.querySelector(".viewer-caption")?.textContent.includes("1 de 24") && document.querySelector(".viewer-image img")?.naturalWidth>0');
  await writeFile("/tmp/playmemories-workspace-viewer.png",(await window.webContents.capturePage()).toPNG());
- console.log("SMOKE MANAGED VIEWER PASS: full-window viewer, overlaid arrows, next and previous");
- await click("100%");await wait('document.querySelector(".viewer-caption")?.textContent.includes("80 × 40 px · 100%")');
- await click("Ajustar");
- await click("Girar à direita");await wait('!!document.querySelector(".viewer-save-group")');await click("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');
+ const clickPhoto=async(button:"left"|"right")=>{
+  const point=await evaluate<{x:number;y:number}>('(()=>{const r=document.querySelector(".viewer-image img").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()');
+  window.webContents.sendInputEvent({type:"mouseDown",button,clickCount:1,...point});
+  window.webContents.sendInputEvent({type:"mouseUp",button,clickCount:1,...point});
+ };
+ await clickPhoto("left");await wait('!!document.querySelector(".viewer-filmstrip [aria-current=true]")');
+ await wait('!!document.querySelector(".viewer-filmstrip img")');
+ await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+ await writeFile("/tmp/playmemories-viewer-filmstrip.png",(await window.webContents.capturePage()).toPNG());
+ await clickPhoto("left");await wait('!document.querySelector(".viewer-filmstrip")');
+ await clickPhoto("right");await wait('!!document.querySelector(".viewer-context-menu") && !document.querySelector(".viewer-filmstrip")');
+ await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+ await writeFile("/tmp/playmemories-viewer-context.png",(await window.webContents.capturePage()).toPNG());
+ window.webContents.sendInputEvent({type:"keyDown",keyCode:"Escape"});
+ window.webContents.sendInputEvent({type:"keyUp",keyCode:"Escape"});
+ await wait('!!document.querySelector(".image-viewer") && !document.querySelector(".viewer-context-menu")');
+
+ console.log("SMOKE MANAGED VIEWER PASS: full-window viewer, next and previous, photo clicks toggle filmstrip, right click opens menu, Escape dismisses menu");
+ const chooseViewerOption=async(text:string)=>{
+   await evaluate('document.querySelector(".viewer-image img").dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,button:2,clientX:innerWidth-5,clientY:innerHeight-5}))');
+   await wait('!!document.querySelector(".viewer-context-menu")');
+   await click(text);
+  };
+  await chooseViewerOption("Tamanho real (100%)");await wait('document.querySelector(".viewer-caption")?.textContent.includes("80 × 40 px · 100%")');
+ await chooseViewerOption("Encaixar à janela");
+ await chooseViewerOption("Girar à direita");await chooseViewerOption("Salvar como cópia");await wait('document.querySelector(".image-viewer")?.textContent.includes("Cópia salva e adicionada")');
  if(!Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("save copy changed source");
  await wait('document.querySelector(".viewer-image img")?.naturalWidth>0');
- await click("Girar à direita");await wait('!!document.querySelector(".viewer-save-group")');await click("Salvar alterações");await wait('document.querySelector(".image-viewer")?.textContent.includes("Alterações salvas no arquivo original")');
+ await chooseViewerOption("Girar à direita");await chooseViewerOption("Salvar alterações");await wait('document.querySelector(".image-viewer")?.textContent.includes("Alterações salvas no arquivo original")');
  if(Buffer.from(await readFile(location.path)).equals(beforeEdit))throw new Error("replace did not change full original");
  const afterEdit=await backend.request("asset.reveal",{session_id:initial.session.session_id,asset_id:first}) as {path:string};
  if(afterEdit.path!==location.path)throw new Error("edited asset lost location");
