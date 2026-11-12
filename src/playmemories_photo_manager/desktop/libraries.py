@@ -44,12 +44,20 @@ def _album_action(active, params):
                 "albums": [{"id": album.id, "name": album.name} for album in albums[:50]],
                 "next_offset": offset + 50 if len(albums) > 50 else None,
             }
-        if action == "create" and fields == {"action", "name"}:
+        if (action == "create" and fields == {"action", "name"}) or (
+            action == "rename" and fields == {"action", "album_id", "name"}
+        ):
             name = params["name"]
             if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120 or "\0" in name:
                 raise LibraryError("invalid_request")
+            album_id = _uuid(params["album_id"]) if action == "rename" else None
             with active.command_connection() as connection:
-                album = Catalog(connection).create_album(name.strip())
+                catalog = Catalog(connection)
+                album = (
+                    catalog.rename_album(album_id, name.strip())
+                    if album_id is not None
+                    else catalog.create_album(name.strip())
+                )
             return {"id": album.id, "name": album.name}
         if action == "delete" and fields == {"action", "album_id"}:
             album_id = _uuid(params["album_id"])
@@ -415,7 +423,10 @@ class LibraryDispatcher:
             "ingestion.cancel": {"session_id", "window_id", "operation_id"},
             "ingestion.page": {"session_id", "window_id", "proposal_id", "cursor", "page_size"},
         }
-        if method not in allowed or set(params) != allowed[method]:
+        fields = set(params)
+        if method == "ingestion.select_root":
+            fields.discard("return_covered_folder")
+        if method not in allowed or fields != allowed[method]:
             raise LibraryError("invalid_request")
         try:
             if self.ingestion is None:
@@ -429,7 +440,7 @@ class LibraryDispatcher:
                 raise LibraryError("stale_session")
             if method == "ingestion.select_root":
                 result = service.select(params)
-                if self.index_state is not None:
+                if self.index_state is not None and "root_grant_id" in result:
                     self.index_state.remember(
                         active, result["root_id"], service.binding(result["root_id"])
                     )

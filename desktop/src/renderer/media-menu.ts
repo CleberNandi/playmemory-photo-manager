@@ -1,5 +1,5 @@
 import type {KeyboardEvent,MouseEvent} from "react";
-export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTMLElement>,assetId:string,onSelect?:(button:HTMLButtonElement)=>void,onOpen?:(rotation?:number)=>void,onError?:()=>void){
+export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTMLElement>,assetId:string,onSelect?:(button:HTMLButtonElement)=>void,onOpen?:(rotation?:number)=>void,onError?:()=>void,onAddToAlbum?:()=>void){
  if(!window.photoManager?.showMediaMenu)return;
  event.preventDefault();event.stopPropagation();
  const host=event.currentTarget;
@@ -11,6 +11,7 @@ export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTML
   if(!host.isConnected)return;
   if(action==="view")onOpen?.();
   else if(action==="properties"){if(button)onSelect?.(button);}
+  else if(action==="add-to-album"){onAddToAlbum?.();return;}
   else if(action==="favorite")host.querySelector<HTMLButtonElement>(".favorite-toggle")?.click();
   if(action!=="view"&&action!=="properties")button?.focus({preventScroll:true});
  }catch{if(host.isConnected)onError?.();}

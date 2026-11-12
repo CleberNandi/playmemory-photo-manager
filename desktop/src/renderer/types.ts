@@ -31,6 +31,7 @@ export type PhotoFacets = {
 
 export interface GalleryPage {
   facets?: PhotoFacets;
+  subfolders?: string[];
   roots?: {id: string; name: string}[];
   items: GalleryItem[];
   next_cursor: string | null;
@@ -65,12 +66,13 @@ declare global {
       listFilterOptions?(facet: Facet, keyword: string, offset: number): Promise<FilterOptionsPage>;
       listAlbums?(offset: number): Promise<{albums: Album[]; next_offset: number | null}>;
       createAlbum?(name: string): Promise<Album>;
+      renameAlbum?(albumId: string, name: string): Promise<Album>;
       deleteAlbum?(albumId: string): Promise<{changed: boolean}>;
       changeAlbumMembership?(albumId: string, assetId: string, action: "add" | "remove"): Promise<{changed: boolean}>;
-      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; albumId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
+      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; folderPath?: string; albumId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
       saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;
       getImageSaveStatus?(jobId:string):Promise<ImageSaveJob>;
-      showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|null>;
+      showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|"add-to-album"|null>;
       locateMedia?(assetId:string,describe?:boolean):Promise<{status:string}>;
       getAssetDetails?(assetId: string): Promise<DetailsResult>;
       setFavorite?(assetId: string, favorite: boolean): Promise<{asset_id: string; favorite: boolean}>;

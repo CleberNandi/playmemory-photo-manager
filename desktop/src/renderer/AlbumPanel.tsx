@@ -1,106 +1,117 @@
 import {useEffect, useRef, useState} from "react";
 import type {Album} from "./types";
 
-export function AlbumPanel({active, selected, onOpen, onDelete, onMembershipChanged}: {
-  active: Album | null;
-  selected: string | null;
+export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename, onDelete, onAdded, onRemoved}: {
+  active?: Album;
+  selected?: string | null;
+  picking?: string;
   onOpen: (album: Album) => void;
-  onDelete: (albumId: string) => void;
-  onMembershipChanged: (albumId: string, assetId: string, action: "add" | "remove") => void;
+  onBack?: () => void;
+  onRename?: (album: Album) => void;
+  onDelete?: () => void;
+  onAdded?: () => void;
+  onRemoved?: () => void;
 }) {
+  const api = window.photoManager!;
   const [albums, setAlbums] = useState<Album[]>([]);
-  const [offset, setOffset] = useState<number | null>(0);
-  const [target, setTarget] = useState("");
+  const [offset, setOffset] = useState<number | null>(null);
+  const [action, setAction] = useState<"create" | "rename" | "delete" | null>(null);
   const [name, setName] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<Album | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(!active);
   const [feedback, setFeedback] = useState<{text: string; error?: boolean}>();
   const pending = useRef(false);
-  const bridge = window.photoManager!;
+  const heading = useRef<HTMLHeadingElement>(null);
 
+  useEffect(() => { if (picking) heading.current?.focus(); }, [picking]);
   useEffect(() => {
-    let cancelled = false;
-    pending.current = true;
-    bridge.listAlbums!(0).then(page => {
-      if (cancelled) return;
+    if (active) return;
+    let live = true;
+    api.listAlbums!(0).then(page => {
+      if (!live) return;
       setAlbums(page.albums);
       setOffset(page.next_offset);
     }).catch(() => {
-      if (!cancelled) setFeedback({text:"Não foi possível carregar os álbuns.", error:true});
-    }).finally(() => {
-      if (!cancelled) {pending.current = false; setBusy(false);}
-    });
-    return () => {cancelled = true;};
-  }, [bridge]);
+      if (live) setFeedback({text:"Não foi possível carregar os álbuns.", error:true});
+    }).finally(() => { if (live) setBusy(false); });
+    return () => { live = false; };
+  }, [active, api]);
 
-  async function run(action: () => Promise<void>) {
-    if (pending.current) return;
+  async function run(task: () => Promise<void>) {
+    if (pending.current || busy) return;
     pending.current = true;
     setBusy(true);
     setFeedback(undefined);
-    try {await action();}
-    catch {setFeedback({text:"Não foi possível concluir a ação no catálogo.", error:true});}
-    finally {pending.current = false; setBusy(false);}
+    try { await task(); }
+    catch { setFeedback({text:"Não foi possível concluir a ação no catálogo.", error:true}); }
+    finally { pending.current = false; setBusy(false); }
   }
 
-  const chosen = albums.find(album => album.id === target);
-  const deletionTarget = chosen ?? active;
-  async function deleteAlbum(album: Album) {
-    await bridge.deleteAlbum!(album.id);
-    setAlbums(previous => previous.filter(item => item.id !== album.id));
-    setTarget(current => current === album.id ? "" : current);
-    if (offset !== null) setOffset(0);
-    setConfirmDelete(null);
-    onDelete(album.id);
-    setFeedback({text:"Álbum excluído."});
+  function start(mode: "create" | "rename" | "delete") {
+    setName(mode === "rename" ? active?.name ?? "" : "");
+    setAction(mode);
+    setFeedback(undefined);
   }
 
-  async function membership(album: Album, assetId: string, action: "add" | "remove") {
-    const {changed} = await bridge.changeAlbumMembership!(album.id, assetId, action);
-    if (changed) onMembershipChanged(album.id, assetId, action);
-    setFeedback({text: action === "remove" ? "Item removido do álbum."
-      : changed ? "Item adicionado ao álbum." : "Este item já faz parte do álbum."});
+  async function save() {
+    const value = name.trim();
+    if (!value) return;
+    if (action === "rename" && active) {
+      onRename?.(await api.renameAlbum!(active.id, value));
+    } else {
+      const album = await api.createAlbum!(value);
+      const page = await api.listAlbums!(0);
+      setAlbums(page.albums.some(item => item.id === album.id) ? page.albums : [album, ...page.albums]);
+      setOffset(page.next_offset);
+      setFeedback({text:"Álbum criado."});
+    }
+    setAction(null);
   }
 
-  return <section className="album-panel" aria-label="Gerenciar álbuns">
-    <form onSubmit={event => {
-      event.preventDefault();
-      void run(async () => {
-        const album = await bridge.createAlbum!(name.trim());
-        setAlbums(previous => [...previous, album]);
-        if (offset !== null) setOffset(0);
-        setTarget(album.id);
-        setName("");
-        setFeedback({text:"Álbum criado."});
-      });
-    }}>
-      <label>Nome do álbum <input maxLength={120} value={name} onChange={event => setName(event.target.value)} /></label>
-      <button disabled={busy || !name.trim()}>Criar álbum</button>
-    </form>
-    <label>Álbum <select value={target} onChange={event => setTarget(event.target.value)}>
-      <option value="">Selecione</option>
-      {albums.map(album => <option key={album.id} value={album.id}>{album.name}</option>)}
-    </select></label>
-    <button disabled={busy || !chosen} onClick={() => {if (chosen) onOpen(chosen);}}>Abrir álbum</button>
-    <button disabled={busy || !chosen || !selected} onClick={() => {
-      if (chosen && selected) void run(() => membership(chosen, selected, "add"));
-    }}>Adicionar item selecionado</button>
-    {active && <button disabled={busy || !selected} onClick={() => {
-      if (selected) void run(() => membership(active, selected, "remove"));
-    }}>Remover item deste álbum</button>}
-    {bridge.deleteAlbum && (confirmDelete ? <fieldset disabled={busy}>
-      <legend>Excluir o álbum “{confirmDelete.name}”?</legend>
-      <p>As fotos e os vínculos com outros álbuns serão preservados.</p>
-      <button onClick={() => void run(() => deleteAlbum(confirmDelete))}>Confirmar exclusão</button>
-      <button onClick={() => setConfirmDelete(null)}>Cancelar</button>
-    </fieldset> : <button disabled={busy || !deletionTarget} onClick={() => setConfirmDelete(deletionTarget)}>
-      Excluir álbum
-    </button>)}
-    {offset !== null && <button disabled={busy} onClick={() => void run(async () => {
-      const page = await bridge.listAlbums!(offset);
+  return <section className={active ? "album-panel album-actions" : "album-panel collection-page"} aria-label={picking ? "Adicionar a álbum" : "Gerenciar álbuns"} aria-busy={busy}>
+    <div className="collection-actions">
+      {picking && <h2 ref={heading} tabIndex={-1}>Adicionar a álbum</h2>}
+      {onBack && <button className="primary-button" onClick={onBack}>{picking ? "Fechar" : "Voltar aos álbuns"}</button>}
+      {!active && action !== "create" && <button className="primary-button" disabled={busy} onClick={() => start("create")}>Novo álbum</button>}
+      {active && api.renameAlbum && <button className="primary-button" disabled={busy} onClick={() => start("rename")}>Renomear álbum</button>}
+      {active && selected && <button className="primary-button" disabled={busy} onClick={() => void run(async () => {
+        await api.changeAlbumMembership!(active.id, selected, "remove");
+        onRemoved?.();
+        setFeedback({text:"Item removido do álbum."});
+      })}>Remover do álbum</button>}
+      {active && api.deleteAlbum && <button className="primary-button" disabled={busy} onClick={() => start("delete")}>Excluir álbum</button>}
+    </div>
+    {(action === "create" || action === "rename") && <form className="collection-form" onSubmit={event => {event.preventDefault();void run(save);}}>
+      <label>Nome do álbum<input autoFocus maxLength={120} value={name} onChange={event => setName(event.target.value)} /></label>
+      <button className="primary-button" disabled={busy || !name.trim()}>{action === "rename" ? "Salvar nome" : "Criar álbum"}</button>
+      <button className="primary-button" type="button" disabled={busy} onClick={() => setAction(null)}>Cancelar</button>
+    </form>}
+    {action === "delete" && active && <fieldset disabled={busy}>
+      <legend>Excluir o álbum “{active.name}”?</legend>
+      <p>As fotos permanecem na biblioteca.</p>
+      <button className="primary-button" onClick={() => void run(async () => {
+        await api.deleteAlbum!(active.id);
+        onDelete?.();
+      })}>Confirmar exclusão</button>
+      <button className="primary-button" onClick={() => setAction(null)}>Cancelar</button>
+    </fieldset>}
+    {!active && albums.length > 0 && <ul className="collection-grid">
+      {albums.map(album => <li key={album.id}>
+        <button className="collection-card" disabled={busy} onClick={() => {
+          if (!picking) {onOpen(album);return;}
+          void run(async () => {
+            const result = await api.changeAlbumMembership!(album.id, picking, "add");
+            onAdded?.();
+            setFeedback({text:result.changed ? `Item adicionado a “${album.name}”.` : `O item já está em “${album.name}”.`});
+          });
+        }}>{album.name}</button>
+      </li>)}
+    </ul>}
+    {!active && !busy && !feedback?.error && !albums.length && <p>Nenhum álbum criado.</p>}
+    {offset !== null && <button className="primary-button" disabled={busy} onClick={() => void run(async () => {
+      const page = await api.listAlbums!(offset);
       setAlbums(previous => [...new Map([...previous, ...page.albums].map(album => [album.id, album])).values()]);
       setOffset(page.next_offset);
-    })}>{offset ? "Carregar mais álbuns" : "Carregar álbuns"}</button>}
+    })}>Carregar mais álbuns</button>}
     {feedback && <p role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
   </section>;
 }

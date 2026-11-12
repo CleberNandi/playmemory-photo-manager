@@ -39,6 +39,12 @@ def _path(raw: object) -> Path:
     return path
 
 
+class _CoveredSubfolder(PreparationError):
+    def __init__(self, root_id: str, relative_path: str):
+        super().__init__("covered_subfolder")
+        self.folder = {"root_id": root_id, "relative_path": relative_path}
+
+
 @contextmanager
 def _sanitize():
     try:
@@ -286,7 +292,7 @@ class RootGrantService:
                 continue
             if held.path.is_relative_to(path):
                 if selecting and root.availability == "available":
-                    raise PreparationError("covered_subfolder")
+                    raise _CoveredSubfolder(root.id, held.path.relative_to(path).as_posix())
                 raise PreparationError("unsafe_location")
             if path.is_relative_to(held.path):
                 raise PreparationError("unsafe_location")
@@ -372,10 +378,19 @@ class RootGrantService:
 
     def select(self, params: object) -> dict:
         """Only after both trusted native dialogs confirmed. Cancellation never calls this."""
-        self._params(params, ("session_id", "window_id", "path", "recursive", "identity_reviewed"))
-        if params["identity_reviewed"] is not True:
+        fields = ("session_id", "window_id", "path", "recursive", "identity_reviewed")
+        wants_folder = isinstance(params, dict) and "return_covered_folder" in params
+        self._params(params, (*fields, "return_covered_folder") if wants_folder else fields)
+        if params["identity_reviewed"] is not True or (
+            wants_folder and params["return_covered_folder"] is not True
+        ):
             raise PreparationError("invalid_request")
-        return self._select(_path(params["path"]))
+        try:
+            return self._select(_path(params["path"]))
+        except _CoveredSubfolder as error:
+            if not wants_folder:
+                raise
+            return {"covered_folder": error.folder}
 
     def _select(self, path, *, expected=None, monitored=False):
         self._application_idle()

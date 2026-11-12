@@ -8,7 +8,7 @@ import { CatalogingController } from "./cataloging.js";
 import { app, BrowserWindow, dialog, ipcMain, session, Menu, shell } from "electron";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { LibraryController } from "./libraries.js";
 import { LibraryPreferences, canonicalId, ensurePrivateDirectory } from "./library-preferences.js";
@@ -33,7 +33,11 @@ const managedMode=!demo && (process.env.PLAYMEMORIES_DESKTOP_SMOKE !== "1" || ma
 const smokeDirectory = process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" || demo ? mkdtempSync(join(tmpdir(), "pm-desktop-smoke-")) : null;
 if (smokeDirectory) { app.setPath("userData", smokeDirectory); app.setPath("sessionData", smokeDirectory); }
 const smokeSelections = smokeDirectory && process.env.PLAYMEMORIES_DESKTOP_SMOKE === "1" && !demo ? [null, join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "B.sqlite3"), join(smokeDirectory, "A.sqlite3"), join(smokeDirectory, "missing.sqlite3")] : null;
-const ingestionSmokeRoot = (ingestionLab||managedSmoke) && smokeSelections && smokeDirectory ? mkdtempSync(join(tmpdir(), "pm-ingestion-smoke-")) : null;
+const ingestionSmokeDirectory = (ingestionLab||managedSmoke) && smokeSelections && smokeDirectory
+  ? mkdtempSync(join(tmpdir(), "pm-ingestion-smoke-")) : null;
+const ingestionSmokeRoot = ingestionSmokeDirectory && managedSmoke
+  ? join(ingestionSmokeDirectory, "Acervo de teste") : ingestionSmokeDirectory;
+if (ingestionSmokeRoot && ingestionSmokeRoot !== ingestionSmokeDirectory) mkdirSync(ingestionSmokeRoot);
 const ingestionSelections = ingestionSmokeRoot ? [null, ingestionSmokeRoot, ingestionSmokeRoot, ingestionSmokeRoot, ingestionSmokeRoot] : null;
 const rendererFile = resolve(import.meta.dirname, "../renderer/index.html");
 const expectedUrl = process.env.VITE_DEV_SERVER_URL ? new URL(process.env.VITE_DEV_SERVER_URL).href : pathToFileURL(rendererFile).href;
@@ -142,6 +146,9 @@ app.whenReady().then(async () => {
     if (input.action === "create" && keys === "action,name" && typeof input.name === "string" &&
         input.name.trim() && input.name.length <= 120 && !input.name.includes("\0"))
       return libraries.query("album.action", sessionId, input);
+    if (input.action === "rename" && keys === "action,album_id,name" && canonicalId(input.album_id)
+      && typeof input.name === "string" && input.name.trim().length > 0 && input.name.length <= 120 && !input.name.includes("\0"))
+      return libraries.query("album.action", sessionId, input);
     if (input.action === "delete" && keys === "action,album_id" && canonicalId(input.album_id))
       return libraries.query("album.action", sessionId, input);
     if ((input.action === "add" || input.action === "remove") && keys === "action,album_id,asset_id" &&
@@ -152,11 +159,14 @@ app.whenReady().then(async () => {
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; albumId?: unknown; filters?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "albumId", "filters"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; folderPath?: unknown; albumId?: unknown; filters?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "folderPath", "albumId", "filters"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
     if (p.rootId !== undefined && (typeof p.rootId !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(p.rootId))) throw new Error("invalid_request");
+    if (p.folderPath !== undefined && (p.rootId === undefined || typeof p.folderPath !== "string"
+      || p.folderPath.length > 4096 || p.folderPath.includes("\0")
+      || (p.folderPath !== "" && p.folderPath.split("/").some(part => ["", ".", ".."].includes(part))))) throw new Error("invalid_request");
     if (p.albumId !== undefined && !canonicalId(p.albumId)) throw new Error("invalid_request");
     const filters: Record<string, unknown> = {};
     if (p.filters !== undefined) {
@@ -171,7 +181,7 @@ app.whenReady().then(async () => {
         filters[key] = value;
       }
     }
-    return query("gallery.list", sessionId, {...filters, ...(p.albumId ? {album_id:p.albumId} : {}), include_facets:!p.after, include_roots:!p.after, ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+    return query("gallery.list", sessionId, {...filters, ...(p.albumId ? {album_id:p.albumId} : {}), include_facets:!p.after, include_roots:!p.after, ...(p.folderPath !== undefined ? {folder_path:p.folderPath} : {}), ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
   });
   imageEdits=new ImageEdits(libraries,async(source,angle)=>{
     if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return join(dirname(source),basename(source,extname(source))+"-rotacionada"+extname(source));
@@ -340,7 +350,7 @@ app.whenReady().then(async () => {
     });
     return answer.response === 1;
   });
-  const folderSelections=managedSmoke&&ingestionSmokeRoot?[null,ingestionSmokeRoot,ingestionSmokeRoot]:null;
+  const folderSelections=managedSmoke&&ingestionSmokeRoot?[null,ingestionSmokeRoot,ingestionSmokeRoot,join(ingestionSmokeRoot,"teste")]:null;
   folderImports=new FolderImportController(backend,libraries,windowId,async()=>{
     if(folderSelections)return folderSelections.shift()??null;
     if(!mainWindow)return null;
@@ -413,5 +423,5 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   quitting = true;
   indexer?.dispose();
-  void backend.stop().then(() => { if (smokeDirectory) rmSync(smokeDirectory, {recursive: true, force: true}); if (ingestionSmokeRoot) rmSync(ingestionSmokeRoot, {recursive: true, force: true}); app.exit(Number(process.exitCode ?? 0)); }).catch(() => { quitting = false; console.error("backend cleanup pending"); });
+  void backend.stop().then(() => { if (smokeDirectory) rmSync(smokeDirectory, {recursive: true, force: true}); if (ingestionSmokeDirectory) rmSync(ingestionSmokeDirectory, {recursive: true, force: true}); app.exit(Number(process.exitCode ?? 0)); }).catch(() => { quitting = false; console.error("backend cleanup pending"); });
 });

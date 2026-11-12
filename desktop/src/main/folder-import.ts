@@ -3,7 +3,7 @@ import {lstat,realpath} from "node:fs/promises";
 import type {PythonBackend} from "./backend.js";
 import type {LibraryController} from "./libraries.js";
 import {canonicalId,validPath} from "./library-preferences.js";
-export interface FolderImportJob {job_id:string;session_id:string;state:"choosing"|"scanning"|"adding"|"completed"|"cancelled"|"stopped"|"failed"|"outcome_unknown";added_count:number;excluded_count:number;error:string|null}
+export interface FolderImportJob {job_id:string;session_id:string;state:"choosing"|"scanning"|"adding"|"completed"|"cancelled"|"stopped"|"failed"|"outcome_unknown";added_count:number;excluded_count:number;error:string|null;covered_folder?:{root_id:string;relative_path:string}}
 const active=(job:FolderImportJob|null)=>!!job&&["choosing","scanning","adding"].includes(job.state);
 const failure=(code:string):never=>{throw Object.assign(new Error(code),{code});};
 const pause=()=>new Promise(resolve=>setTimeout(resolve,150));
@@ -57,7 +57,15 @@ export class FolderImportController {
         if(this.stopped){job.state="stopped";return;}
         if(await this.identity(path)!==binding)return failure("root_changed");
         job.state="scanning";
-        const grant=await this.send(job,"ingestion.select_root",{path,recursive:true,identity_reviewed:true}) as {root_grant_id:string};
+        const grant=await this.send(job,"ingestion.select_root",{path,recursive:true,identity_reviewed:true,return_covered_folder:true}) as
+          {root_grant_id:string} | {covered_folder:{root_id:string;relative_path:string}};
+        if ("covered_folder" in grant) {
+          if(await this.identity(path)!==binding)return failure("root_changed");
+          job.covered_folder=grant.covered_folder;
+          job.state="failed";
+          job.error="covered_subfolder";
+          return;
+        }
         if(await this.identity(path)!==binding)return failure("root_changed");
         let preparation=await this.send(job,"ingestion.prepare",{root_grant_id:grant.root_grant_id,recursive:true,client_request_id:randomUUID()}) as {operation_id:string;state:string;proposal_id:string|null;excluded_count:number;terminal_reason?:string};
         const deadline=Date.now()+45000;

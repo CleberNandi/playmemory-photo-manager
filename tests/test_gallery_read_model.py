@@ -485,3 +485,38 @@ def test_recent_folder_page_filters_before_paginating(database):
     )
     assert [item.asset_id for item in second.items] == [older]
     assert not second.has_more
+
+
+def test_folder_browser_queries_immediate_children_and_scopes_pagination(database):
+    root = _root(database, 901)
+    direct = _asset(database, 902)
+    nested = _asset(database, 903)
+    deeper = _asset(database, 904)
+    former = _asset(database, 905)
+    _location(database, 920, direct, root, relative_path="photo.jpg")
+    _location(database, 921, nested, root, relative_path="teste/photo.jpg")
+    _location(database, 922, deeper, root, relative_path="teste/2026/photo.jpg")
+    _location(database, 923, former, root, relative_path="old/photo.jpg", availability="missing")
+    _location(database, 924, nested, root, relative_path="former.jpg", availability="missing")
+    gallery = GalleryQueries(database)
+
+    assert gallery.list_subfolders(root, "") == ("teste",)
+    assert gallery.list_subfolders(root, "teste") == ("2026",)
+    assert {item.asset_id for item in gallery.list_assets().items} == {
+        direct,
+        nested,
+        deeper,
+        former,
+    }
+    assert [
+        item.asset_id
+        for item in gallery.list_assets(GalleryQuery(root_id=root, folder_path="")).items
+    ] == [direct]
+    scoped = gallery.list_assets(GalleryQuery(root_id=root, folder_path="teste"))
+    assert [item.asset_id for item in scoped.items] == [nested]
+    assert scoped.items[0].representative_location.relative_path == "teste/photo.jpg"
+    cursor = gallery.list_assets(GalleryQuery(page_size=1)).next_cursor
+    with pytest.raises(InvalidCursorError):
+        gallery.list_assets(GalleryQuery(root_id=root, folder_path="teste", after=cursor))
+    with pytest.raises(InvalidGalleryQueryError):
+        gallery.list_assets(GalleryQuery(root_id=root, folder_path="../outside"))

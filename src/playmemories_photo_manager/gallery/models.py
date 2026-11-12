@@ -56,6 +56,7 @@ class GalleryQuery:
     camera: str | None = None
     lens: str | None = None
     album_id: str | None = None
+    folder_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

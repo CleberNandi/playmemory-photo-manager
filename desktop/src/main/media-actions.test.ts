@@ -9,7 +9,7 @@ function fixture(){
  return {session,asset,query,choose,reveal,describe,switch:()=>{current=randomUUID();},actions:new MediaActions(libraries,choose,reveal,describe)};
 }
 it("returns only actions, and cancellation performs no external operation",async()=>{
- const f=fixture();expect(await f.actions.menu(f.session,f.asset)).toBeNull();expect(f.reveal).not.toHaveBeenCalled();expect(f.query).toHaveBeenCalledTimes(1);expect(f.choose.mock.calls[0][0].map((item:{action:string})=>item.action)).toEqual(["view","reveal","location","favorite","properties"]);
+ const f=fixture();expect(await f.actions.menu(f.session,f.asset)).toBeNull();expect(f.reveal).not.toHaveBeenCalled();expect(f.query).toHaveBeenCalledTimes(1);expect(f.choose.mock.calls[0][0].map((item:{action:string})=>item.action)).toEqual(["view","reveal","location","favorite","add-to-album","properties"]);
 });
 it("reveals only a backend-resolved path and never returns it to the renderer",async()=>{
  const f=fixture();f.choose.mockResolvedValue("reveal");expect(await f.actions.menu(f.session,f.asset)).toBeNull();expect(f.reveal).toHaveBeenCalledWith("/synthetic/media/photo.jpg");
@@ -25,5 +25,5 @@ it("rejects renderer paths, malicious backend paths and late menu actions",async
  const g=fixture();g.choose.mockImplementation(async()=>{g.switch();return "view";});await expect(g.actions.menu(g.session,g.asset)).rejects.toThrow("stale_session");
 });
 it("marks unavailable physical actions disabled while preserving catalog properties",async()=>{
- const f=fixture();f.query.mockResolvedValue({availability:"offline",annotation:null,asset:{kind:"photo"}});await f.actions.menu(f.session,f.asset);expect(f.choose.mock.calls[0][0].filter((item:{enabled:boolean})=>item.enabled).map((item:{action:string})=>item.action)).toEqual(["favorite","properties"]);
+ const f=fixture();f.query.mockResolvedValue({availability:"offline",annotation:null,asset:{kind:"photo"}});await f.actions.menu(f.session,f.asset);expect(f.choose.mock.calls[0][0].filter((item:{enabled:boolean})=>item.enabled).map((item:{action:string})=>item.action)).toEqual(["favorite","add-to-album","properties"]);
 });

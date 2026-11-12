@@ -456,6 +456,14 @@ class Catalog:
     def list_albums(self, *, limit: int = DEFAULT_PAGE_SIZE, offset: int = 0) -> list[Album]:
         return self._read(self._repository.list_albums, *_page(limit, offset))
 
+    def rename_album(self, album_id: str, name: str) -> Album:
+        _uuid(album_id, "album_id")
+        name = _nonblank(name, "name")
+        with self._write():
+            if not self._repository.rename_album(album_id, name):
+                raise NotFoundError("album does not exist")
+            return self.get_album(album_id)
+
     def delete_album(self, album_id: str) -> bool:
         """Delete a virtual collection and its memberships via the catalog foreign key."""
         _uuid(album_id, "album_id")

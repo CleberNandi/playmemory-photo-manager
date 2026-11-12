@@ -56,7 +56,7 @@ it("shows preparation on demand and removes it on session close", async () => {
   await click("Fechar biblioteca"); expect(host.querySelector('[aria-label="Preparar catalogação"]')).toBeNull();
 });
 
-it("confirms the named album before deleting it and returns to the library", async () => {
+it("confirms the named album before deleting it and returns to the album list", async () => {
   const album = {id: "album-a", name: "Viagem"};
   const listGallery = vi.fn().mockResolvedValue({items: [], next_cursor: null, has_more: false});
   const deleteAlbum = vi.fn().mockResolvedValue({changed: true});
@@ -67,12 +67,7 @@ it("confirms the named album before deleting it and returns to the library", asy
   };
   await act(async () => root.render(<App />));
   await click("Álbuns");
-  await act(async () => {
-    const select = host.querySelector("select")!;
-    select.value = album.id;
-    select.dispatchEvent(new Event("change", {bubbles: true}));
-  });
-  await click("Abrir álbum");
+  await click("Viagem");
   expect(host.querySelector("h1")?.textContent).toBe("Viagem");
   await click("Excluir álbum");
   expect(host.querySelector("legend")?.textContent).toBe("Excluir o álbum “Viagem”?");
@@ -81,8 +76,7 @@ it("confirms the named album before deleting it and returns to the library", asy
   await click("Excluir álbum");
   await click("Confirmar exclusão");
   expect(deleteAlbum).toHaveBeenCalledExactlyOnceWith(album.id);
-  expect(host.querySelector("h1")?.textContent).toBe("Biblioteca");
-  expect(host.querySelector('option[value="album-a"]')).toBeNull();
+  expect(host.querySelector("h1")?.textContent).toBe("Álbuns");
   expect(listGallery).toHaveBeenLastCalledWith({pageSize: 24});
 });
 
@@ -98,6 +92,7 @@ it("refreshes connected media on demand in the active library", async () => {
   };
   await act(async () => root.render(<App />));
   expect(listMediaDevices).not.toHaveBeenCalled();
+  await act(async () => [...host.querySelectorAll("summary")].find(item=>item.textContent==="Câmeras e mídias")!.click());
   await click("Detectar dispositivos");
   expect(host.querySelector(".media-devices")?.textContent).toContain("Synthetic Camera");
   expect(host.querySelector(".media-devices")?.textContent).toContain("Synthetic Card");

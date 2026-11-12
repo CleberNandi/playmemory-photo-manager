@@ -66,7 +66,24 @@ class GalleryQueries:
         connection.create_function(
             "fold_text", 1, lambda value: (value or "").casefold(), deterministic=True
         )
+        connection.create_function("media_parent", 1, _media_parent, deterministic=True)
         self._thumbnail_store = thumbnail_store
+
+    def list_subfolders(self, root_id: str, folder_path: str) -> tuple[str, ...]:
+        prefix = folder_path + "/" if folder_path else ""
+        rows = self._connection.execute(
+            """WITH descendants(tail) AS (
+                   SELECT substr(normalized_relative_path, length(?) + 1)
+                   FROM file_location
+                   WHERE library_root_id = ? AND availability <> 'missing'
+                   AND substr(normalized_relative_path, 1, length(?)) = ?
+               )
+               SELECT DISTINCT substr(tail, 1, instr(tail, '/') - 1) AS name
+               FROM descendants WHERE instr(tail, '/') > 1
+               ORDER BY name COLLATE NOCASE, name LIMIT 2000""",
+            (prefix, root_id, prefix, prefix),
+        )
+        return tuple(row["name"] for row in rows)
 
     def list_assets(self, query: GalleryQuery | None = None) -> GalleryPage:
         query = query or GalleryQuery()
@@ -107,6 +124,8 @@ class GalleryQueries:
                   AND (? IS NULL OR EXISTS (
                       SELECT 1 FROM file_location fl
                       WHERE fl.asset_id = a.id AND fl.library_root_id = ?
+                        AND (? IS NULL OR (fl.availability <> 'missing'
+                             AND media_parent(fl.normalized_relative_path) = ?))
                   ))
                   AND (? IS NULL OR EXISTS (SELECT 1 FROM album_asset aa
                     WHERE aa.asset_id=a.id AND aa.album_id=?))
@@ -147,6 +166,7 @@ class GalleryQueries:
             *([filters["capture_period"]] * 5),
             filters["root_id"],
             filters["root_id"],
+            *([normalized.folder_path] * 2),
             *([filters.get("album_id")] * 2),
             *([filters.get("media_type")] * 2),
             *([filters.get("rating")] * 2),
@@ -175,6 +195,7 @@ class GalleryQueries:
                 annotations.get(row["id"]),
                 self._thumbnail_reference(row["id"]),
                 preferred_root=normalized.root_id,
+                preferred_folder=normalized.folder_path,
             )
             for row in visible
         )
@@ -308,6 +329,10 @@ class GalleryQueries:
         return self._thumbnail_store.get_reference(asset_id, ThumbnailVariant.GRID_256)
 
 
+def _media_parent(path: str) -> str:
+    return path.rpartition("/")[0]
+
+
 def _validate_query(query: GalleryQuery) -> GalleryQuery:
     if isinstance(query.page_size, bool) or not isinstance(query.page_size, int):
         raise InvalidGalleryQueryError("page_size must be an integer")
@@ -321,6 +346,16 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
     except (ValueError, TypeError) as error:
         raise InvalidGalleryQueryError("unsupported gallery filter") from error
     root_id = _canonical_uuid(query.root_id, "root_id") if query.root_id is not None else None
+    folder = query.folder_path
+    if folder is not None and (
+        root_id is None
+        or not isinstance(folder, str)
+        or len(folder) > 4096
+        or "\0" in folder
+        or folder != ""
+        and any(part in ("", ".", "..") for part in folder.split("/"))
+    ):
+        raise InvalidGalleryQueryError("invalid folder path")
     if query.after is not None and not isinstance(query.after, str):
         raise InvalidCursorError("cursor must be text")
     if type(query.favorites_only) is not bool:
@@ -354,6 +389,7 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         query.camera,
         query.lens,
         _canonical_uuid(query.album_id, "album_id") if query.album_id is not None else None,
+        folder,
     )
 
 
@@ -361,7 +397,16 @@ def _filter_values(query: GalleryQuery) -> dict[str, str | int | bool | None]:
     return {
         **{
             field: getattr(query, field)
-            for field in ("keyword", "tag_id", "rating", "media_type", "camera", "lens", "album_id")
+            for field in (
+                "keyword",
+                "tag_id",
+                "rating",
+                "media_type",
+                "camera",
+                "lens",
+                "album_id",
+                "folder_path",
+            )
             if getattr(query, field) is not None
         },
         **({"newest_first": True} if query.newest_first else {}),
@@ -554,8 +599,20 @@ def _gallery_item(
     thumbnail: ThumbnailReference | None,
     *,
     preferred_root: str | None = None,
+    preferred_folder: str | None = None,
 ) -> GalleryItem:
-    candidates = tuple(loc for loc in locations if loc.library_root_id == preferred_root)
+    candidates = tuple(
+        loc
+        for loc in locations
+        if loc.library_root_id == preferred_root
+        and (
+            preferred_folder is None
+            or (
+                loc.availability.value != "missing"
+                and _media_parent(loc.relative_path) == preferred_folder
+            )
+        )
+    )
     representative = min(candidates or locations, key=_location_rank, default=None)
     summary = AnnotationSummary(
         rating=annotation.rating if annotation else None,

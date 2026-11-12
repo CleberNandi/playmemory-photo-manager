@@ -1,6 +1,6 @@
 import {canonicalId,validPath} from "./library-preferences.js";
 import type {LibraryController} from "./libraries.js";
-export type MediaAction="view"|"properties"|"favorite"|"reveal"|"location";
+export type MediaAction="view"|"properties"|"favorite"|"reveal"|"location"|"add-to-album";
 export interface MediaMenuItem {label:string;action:MediaAction;enabled:boolean}
 export class MediaActions {
  private busy=false;
@@ -25,6 +25,7 @@ export class MediaActions {
     {label:"Abrir pasta que contém o arquivo",action:"reveal",enabled:available},
     {label:"Localização do arquivo…",action:"location",enabled:available},
     {label:details.annotation?.favorite?"Remover dos favoritos":"Adicionar aos favoritos",action:"favorite",enabled:true},
+    {label:"Adicionar a álbum…",action:"add-to-album",enabled:true},
     {label:"Propriedades",action:"properties",enabled:true},
    ]);
    this.check(session,asset);

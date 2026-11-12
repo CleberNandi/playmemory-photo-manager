@@ -195,6 +195,16 @@ class CatalogRepository:
         )
         return [_album(row) for row in rows]
 
+    def rename_album(self, identifier: str, name: str) -> bool:
+        return (
+            self.connection.execute(
+                "UPDATE album SET name=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                "WHERE id=?",
+                (name, identifier),
+            ).rowcount
+            == 1
+        )
+
     def delete_album(self, identifier: str) -> bool:
         return (
             self.connection.execute("DELETE FROM album WHERE id = ?", (identifier,)).rowcount == 1

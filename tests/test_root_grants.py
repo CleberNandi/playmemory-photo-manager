@@ -140,6 +140,9 @@ def test_symlinks_and_both_nested_root_directions_are_refused(setup):
     child.mkdir()
     with pytest.raises(PreparationError, match="covered_subfolder"):
         service.select(selection(service, child))
+    assert service.select({**selection(service, child), "return_covered_folder": True}) == {
+        "covered_folder": {"root_id": service._roots()[0].id, "relative_path": "child"}
+    }
     with library.command_connection() as connection:
         assert [item.normalized_path for item in Catalog(connection).list_roots()] == [str(root)]
     # A separate root with a registered nested path also blocks selection of its parent.

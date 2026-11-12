@@ -1,5 +1,5 @@
 import { BrowserWindow } from "electron";
-import { readFile, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, utimes, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { PythonBackend } from "./backend.js";
 
@@ -72,7 +72,7 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
     await writeFile("/tmp/playmemories-d02b2-gallery.png", (await window.webContents.capturePage()).toPNG());
   }
   const exposed = await evaluate<string[]>('Object.keys(window.photoManager).sort()');
-  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,listMediaDevices,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,previewFileRename,refreshFolders,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
+  if (exposed.join() !== 'addMediaFolder,applyCataloging,cancelPreparation,changeAlbumMembership,chooseCreateLibrary,chooseMediaRoot,chooseOpenLibrary,closeLibrary,createAlbum,deleteAlbum,editAnnotation,forgetLibrary,getAssetDetails,getCalendar,getCatalogingApplicationStatus,getDuplicateGroup,getFolderImportStatus,getImageSaveStatus,getIndexStatus,getLibraryState,getPreparationStatus,getPreview,getThumbnail,listAlbums,listCatalogingCandidates,listDuplicates,listFilterOptions,listGallery,listMediaDevices,locateMedia,onBackendReset,onGalleryChanged,openManagedLibrary,prepareCataloging,previewFileRename,refreshFolders,renameAlbum,retryGallery,saveRotation,setFavorite,setReopenLibrary,showMediaMenu,startDuplicateScan,stopFolderImport') throw new Error("unexpected bridge exposure");
   const invalidDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("../invalid")');
   const absentDetails = await evaluate<{status: string}>('window.photoManager.getAssetDetails("00000000-0000-0000-0000-000000000000")');
   if (invalidDetails.status !== "invalid_request" || absentDetails.status !== "not_found") throw new Error("details error contract failed");
@@ -322,9 +322,12 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await wait('document.querySelector(".library-identity strong")?.textContent === "Minha biblioteca" && document.querySelector(".status-panel h2")?.textContent === "Sua biblioteca está vazia"');
  const initial=await evaluate<{session:{session_id:string}}>('window.photoManager.getLibraryState()');
  const bytes=syntheticJpeg();
- for(let i=0;i<125;i++)await writeFile(join(root,`image-${String(i).padStart(3,"0")}.jpg`),bytes);
+ const nested = join(root,"teste");
+ await mkdir(nested);
+ for(let i=0;i<125;i++)await writeFile(join(i===124?nested:root,`image-${String(i).padStart(3,"0")}.jpg`),bytes);
  await writeFile(join(root,"notes.txt"),"synthetic unsupported file");
  const click=(label:string)=>evaluate(`Array.from(document.querySelectorAll("button")).find(button=>button.textContent===${JSON.stringify(label)}).click()`);
+ await evaluate('Array.from(document.querySelectorAll(".sidebar-disclosure summary")).find(item=>item.textContent==="Câmeras e mídias").click()');
  await click("Detectar dispositivos");
  await wait('Array.from(document.querySelectorAll("button")).some(button=>button.textContent==="Atualizar dispositivos")');
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Seleção cancelada")');
@@ -354,35 +357,46 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await evaluate('document.querySelector(".rename-preview summary").click()');
  console.log("SMOKE RENAME PREVIEW PASS: selected location, preserved extension, refused collision, original bytes unchanged");
  await click("Álbuns");
- await evaluate(`(() => {
+ await wait('Array.from(document.querySelectorAll(".album-panel button")).some(button=>button.textContent==="Novo álbum" && !button.disabled)');
+ await click("Novo álbum");
+ await wait('!!document.querySelector(".album-panel input")');
+ const albumName = (name: string) => evaluate(`(() => {
    const field = document.querySelector(".album-panel input");
-   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, "Seleção de teste");
+   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, ${JSON.stringify(name)});
    field.dispatchEvent(new Event("input", {bubbles:true}));
  })()`);
- await wait('!Array.from(document.querySelectorAll(".album-panel button")).find(button=>button.textContent==="Criar álbum")?.disabled');
+ await albumName("Seleção de teste");
  await click("Criar álbum");
- await wait('document.querySelector(".album-panel select")?.selectedOptions[0]?.textContent==="Seleção de teste"');
- await click("Adicionar item selecionado");
- await wait('document.querySelector(".album-panel")?.textContent.includes("Item adicionado ao álbum.")');
- await click("Abrir álbum");
- await wait('document.querySelector(".view-toolbar h1")?.textContent==="Seleção de teste" && document.querySelectorAll(".media-card").length===1');
- await evaluate('document.querySelector(".card-select").click()');
- await click("Remover item deste álbum");
- await wait('document.querySelector(".content")?.textContent.includes("Este álbum está vazio")');
- await click("Excluir álbum");
- await wait('document.querySelector(".album-panel legend")?.textContent.includes("Seleção de teste")');
- await click("Cancelar");
- await wait('document.querySelector(".view-toolbar h1")?.textContent==="Seleção de teste"');
- await click("Excluir álbum");
- await click("Confirmar exclusão");
- await wait('document.querySelector(".view-toolbar h1")?.textContent==="Biblioteca" && !Array.from(document.querySelectorAll(".album-panel option")).some(option=>option.textContent==="Seleção de teste")');
- if (!(await readFile(location.path)).equals(originalBytes)) throw new Error("album changed original");
+ await wait('Array.from(document.querySelectorAll(".album-panel .collection-card")).some(button=>button.textContent==="Seleção de teste")');
  await click("Biblioteca");
  await wait('document.querySelectorAll(".media-card").length===24');
- await click("Álbuns");
  await evaluate('document.querySelector(".card-select").click()');
- await wait('document.querySelector(".asset-origin")?.textContent.includes("image-")');
- console.log("SMOKE ALBUMS PASS: create, add, browse, remove, cancel/confirm delete, and original bytes unchanged");
+ await click("Adicionar a álbum…");
+ await wait('!!document.querySelector(".album-panel .collection-card")');
+ await click("Seleção de teste");
+ await wait('document.querySelector(".album-panel")?.textContent.includes("Item adicionado")');
+ await click("Fechar");
+ await click("Álbuns");
+ await wait('!!document.querySelector(".album-panel .collection-card")');
+ await click("Seleção de teste");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Seleção de teste" && document.querySelectorAll(".media-card").length===1');
+ await click("Renomear álbum");
+ await wait('!!document.querySelector(".album-panel input")');
+ await albumName("Seleção revisada");
+ await click("Salvar nome");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Seleção revisada"');
+ await evaluate('document.querySelector(".card-select").click()');
+ await click("Remover do álbum");
+ await wait('document.querySelector(".content")?.textContent.includes("Este álbum está vazio")');
+ await click("Excluir álbum");
+ await wait('document.querySelector(".album-panel legend")?.textContent.includes("Seleção revisada")');
+ await click("Cancelar");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Seleção revisada"');
+ await click("Excluir álbum");
+ await click("Confirmar exclusão");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Álbuns" && document.querySelector(".album-panel")?.textContent.includes("Nenhum álbum criado")');
+ if (!(await readFile(location.path)).equals(originalBytes)) throw new Error("album changed original");
+ console.log("SMOKE ALBUMS PASS: create, add, browse, rename, remove, cancel/confirm delete, and original bytes unchanged");
  await click("Duplicatas exatas");
  await wait('document.querySelector(".duplicates-view")?.textContent.includes("Nenhuma mídia foi analisada")');
  await click("Buscar duplicatas");
@@ -425,6 +439,7 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  }
  await writeFile("/tmp/playmemories-workspace-properties.png",(await window.webContents.capturePage()).toPNG());
  console.log("SMOKE ANNOTATIONS PASS: stars and tag saved through catalog UI");
+ await click("Pesquisar");
  await wait('Array.from(document.querySelectorAll(`select[aria-label="Rótulos"] option`)).some(option=>option.textContent==="Viagem")');
  await evaluate(`(() => {
    const labels = document.querySelector('select[aria-label="Rótulos"]');
@@ -493,8 +508,19 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("+ Adicionar pastas");await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Pasta carregada") && document.querySelector(".folder-import-panel")?.textContent.includes("0 imagem(ns)")');
  if(location.path!==join(root,"image-000.jpg")&&!Buffer.from(await readFile(join(root,"image-000.jpg"))).equals(bytes))throw new Error("managed import changed unrelated original");
  await writeFile("/tmp/playmemories-managed-library.png",(await window.webContents.capturePage()).toPNG());
+ await click("Fechar aviso");
+ await click("Pastas");
  await click(basename(root));
- await wait('document.querySelector(".source-section button[aria-pressed=true]") && document.querySelectorAll(".media-card").length === 24');
+ await wait('document.querySelector(".folder-navigation")?.textContent.includes("teste") && document.querySelectorAll(".media-card").length===24');
+ await wait('Array.from(document.querySelectorAll(".media-card img")).slice(0,4).length===4');
+ await writeFile("/tmp/playmemories-folders-navigation.png",(await window.webContents.capturePage()).toPNG());
+ await click("teste");
+ await wait('document.querySelector(".folder-breadcrumb [aria-current]")?.textContent==="teste" && document.querySelectorAll(".media-card").length===1 && document.querySelector(".media-card img")?.naturalWidth>0');
+ await evaluate('document.querySelector(".card-select").click()');
+ await wait('document.querySelector(".asset-origin")?.textContent.includes("teste/image-124.jpg")');
+ await writeFile("/tmp/playmemories-folder-navigation.png",(await window.webContents.capturePage()).toPNG());
+ await click(basename(root));
+ await wait('document.querySelectorAll(".media-card").length===24');
  await utimes(location.path, new Date(), new Date("2020-01-01T00:00:00Z"));
  await unlink(join(root, location.path.endsWith("image-001.jpg") ? "image-002.jpg" : "image-001.jpg"));
  await writeFile(join(root,"auto-added.jpg"),bytes);
@@ -510,6 +536,23 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("Anterior");
  await wait('document.querySelector(".viewer-caption")?.textContent.includes("24 de 48")');
  await click("Fechar imagem");
+ await click("+ Adicionar pastas");
+ await wait('document.querySelector(".folder-import-panel")?.textContent.includes("Subpasta de uma pasta já cadastrada")');
+ await click("Abrir pasta no catálogo");
+ await wait('document.querySelector(".folder-breadcrumb [aria-current]")?.textContent==="teste" && document.querySelectorAll(".media-card").length===1');
+ await click("Biblioteca");
+ await wait('document.querySelector(".view-toolbar h1")?.textContent==="Biblioteca" && document.querySelectorAll(".media-card").length===24');
+ await click("Álbuns");
+ for (const name of ["Viagens", "Favoritas de novembro", "Para imprimir"]) {
+   await wait('Array.from(document.querySelectorAll(".album-panel button")).some(button=>button.textContent==="Novo álbum" && !button.disabled)');
+   await click("Novo álbum");
+   await wait('!!document.querySelector(".album-panel input")');
+   await albumName(name);
+   await click("Criar álbum");
+   await wait(`Array.from(document.querySelectorAll(".album-panel .collection-card")).some(button=>button.textContent===${JSON.stringify(name)})`);
+ }
+ await writeFile("/tmp/playmemories-albums-navigation.png",(await window.webContents.capturePage()).toPNG());
+ console.log("SMOKE FOLDER NAVIGATION PASS: catalog subfolder, scoped gallery, breadcrumb, covered-folder shortcut, and global library");
  console.log("SMOKE VIEWER PAGINATION PASS: crossed the page boundary inside the selected folder and returned");
  console.log("SMOKE MANAGED PASS: automatic create/reopen; one native selection fixture; 125 images in two batches; no technical review; favorite survives restart; repeated folder adds zero; unrelated originals unchanged; explicit fixture rotation saved; native dialogs NOT TESTED");
 }

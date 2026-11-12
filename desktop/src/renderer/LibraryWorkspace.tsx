@@ -15,7 +15,16 @@ const messages: Record<string, string> = {
   internal_error: "Não foi possível concluir a operação. Você pode escolher outra biblioteca ou tentar reconectar.",
 };
 
-export function LibraryWorkspace({children}: {children: ReactNode}) {
+export function WorkspaceIdentity({displayName}: {displayName?: string}) {
+  return <div className="library-brand">
+    <span className="brand-mark" aria-hidden="true">PM</span>
+    <div className="library-identity"><span>PlayMemories</span>
+      {displayName && <strong>{displayName}</strong>}
+    </div>
+  </div>;
+}
+
+export function LibraryWorkspace({children, identityInWorkspace = false}: {children: ReactNode; identityInWorkspace?: boolean}) {
   const [library, setLibrary] = useState<LibraryState | null>(null);
   const [operation, setOperation] = useState<string | null>(null);
   const mounted = useRef(false);
@@ -57,18 +66,20 @@ export function LibraryWorkspace({children}: {children: ReactNode}) {
         <button disabled={!!operation || !library?.session} onClick={() => void act("Fechando biblioteca…", () => api.closeLibrary!(library!.session!.session_id))}>Fechar biblioteca</button>
         <button disabled={!!operation || !library} onClick={() => void act("Esquecendo seleção…", () => api.forgetLibrary!())}>Esquecer última biblioteca</button>
       </DesktopMenu>;
+  const hasWorkspaceIdentity = identityInWorkspace && library?.state === "active";
+  const showLibraryToolbar = !hasWorkspaceIdentity || !library?.folder_import_enabled
+    || operation || library?.warning || library?.error;
   return <div className="library-workspace">
-    <section className="library-toolbar" aria-label="Gerenciar biblioteca" aria-busy={operation !== null}>
-      <div className="library-identity"><strong>{library?.session?.display_name ?? "Nenhuma biblioteca ativa"}</strong>
-        {library?.session && <small>Biblioteca local</small>}</div>
+    {showLibraryToolbar && <section className="library-toolbar" aria-label="Gerenciar biblioteca" aria-busy={operation !== null}>
+      {!hasWorkspaceIdentity && <WorkspaceIdentity displayName={library?.session?.display_name ?? "Nenhuma biblioteca ativa"} />}
       {library?.state !== "active" && fileMenu}
       {!library?.folder_import_enabled && <label><input type="checkbox" checked={library?.reopen ?? false} disabled={!!operation || !library} onChange={(event) => { const checked = event.target.checked; void act("Salvando preferência…", () => api.setReopenLibrary!(checked)); }} /> Reabrir ao iniciar</label>}
       {operation && <p role="status">{operation}</p>}
       {library?.warning && <p role="alert">{library.warning === "previous_library_not_found" ? "O catálogo anterior não foi encontrado. A biblioteca principal está aberta; os dados do catálogo anterior não foram recuperados." : library.warning === "preference_invalid" ? "A preferência anterior não pôde ser lida. Escolha uma biblioteca." : "A biblioteca continua aberta, mas a preferência não foi salva."}</p>}
       {library?.error && <p role="alert">{messages[library.error] ?? messages.internal_error}</p>}
-    </section>
+    </section>}
     {library?.state === "active" && library.session
-      ? <LibrarySessionContext.Provider key={library.session.session_id} value={{sessionId: library.session.session_id, catalogingEnabled: !!library.cataloging_enabled, folderImportEnabled:!!library.folder_import_enabled, fileMenu}}>{children}</LibrarySessionContext.Provider>
+      ? <LibrarySessionContext.Provider key={library.session.session_id} value={{sessionId: library.session.session_id, displayName: library.session.display_name, catalogingEnabled: !!library.cataloging_enabled, folderImportEnabled:!!library.folder_import_enabled, fileMenu}}>{children}</LibrarySessionContext.Provider>
       : <section className="library-welcome" role="status"><h1>{library?.folder_import_enabled?"Não foi possível abrir sua biblioteca":library ? "Escolha uma biblioteca" : "Conectando ao backend local…"}</h1><p>{library?.folder_import_enabled?"Tente reconectar ou abra uma biblioteca existente pelo menu Arquivo. Nenhum catálogo existente será substituído.":"Crie ou abra um catálogo fora das pastas de fotografias. Nenhuma mídia será examinada nesta etapa."}</p>
         {library?.state === "unavailable" && <button className="primary-button" disabled={!!operation} onClick={() => void act("Reconectando…", async () => { try { await api.retryGallery(); } catch { /* A restart without an active library has no gallery. */ } return api.getLibraryState!(); })}>Reconectar backend</button>}
       </section>}

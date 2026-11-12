@@ -151,6 +151,7 @@ def _dispatch(
             "capture_period",
             "favorites_only",
             "root_id",
+            "folder_path",
             "album_id",
             "include_roots",
             "include_facets",
@@ -176,14 +177,16 @@ def _dispatch(
         if type(params.get("include_roots", False)) is not bool:
             raise BridgeRequestError("include_roots must be boolean")
         root_id = params.get("root_id")
+        queries = GalleryQueries(connection)
         page = asdict(
-            GalleryQueries(connection).list_assets(
+            queries.list_assets(
                 GalleryQuery(
                     page_size=page_size,
                     after=after,
                     capture_period=params.get("capture_period"),
                     favorites_only=params.get("favorites_only", False),
                     root_id=root_id,
+                    folder_path=params.get("folder_path"),
                     album_id=params.get("album_id"),
                     newest_first=root_id is not None,
                     keyword=params.get("keyword"),
@@ -195,6 +198,8 @@ def _dispatch(
                 )
             )
         )
+        if root_id is not None and params.get("folder_path") is not None and after is None:
+            page["subfolders"] = queries.list_subfolders(root_id, params["folder_path"])
         if params.get("include_roots"):
             page["roots"] = [
                 {"id": row[0], "name": row[1]}
