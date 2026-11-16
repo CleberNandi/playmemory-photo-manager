@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { GalleryItem } from "./types";
+import type { AssetDetails, GalleryItem } from "./types";
 let host: HTMLDivElement; let root: Root;
 const item = (id: string, folder: string, favorite: boolean): GalleryItem => ({asset_id: id, kind: "photo", media_type: "image/jpeg", created_at: "2026-01-01", availability: "available", annotation: {title: id, favorite, rating: null}, representative_location: {relative_path: `${id}.jpg`, root_display_name: folder}});
 beforeEach(() => {
@@ -106,6 +106,44 @@ it("reloads new catalog additions without clearing the selected image",async()=>
  await act(async()=>changed());expect(host.querySelectorAll(".media-card")).toHaveLength(3);expect(host.querySelector('[data-asset-id="first"]')?.getAttribute("aria-pressed")).toBe("true");
 });
 
+it("refreshes retained thumbnails and selected properties after a folder update",async()=>{
+ let changed!:()=>void;
+ window.photoManager!.onGalleryChanged=listener=>{changed=listener;return ()=>{};};
+ const png={media_type:"image/png",width:256,height:160,base64:"iVBORw0KGgo="};
+ window.photoManager!.getThumbnail=vi.fn().mockImplementation(()=>Promise.resolve(png));
+ window.photoManager!.getAssetDetails=vi.fn().mockResolvedValue({status:"not_found"});
+ await act(async()=>root.render(<App/>));
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="first"]')!.click());
+ const image=()=>host.querySelector('[data-asset-id="first"]')!.closest(".media-card")!.querySelector("img");
+ expect(image()?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
+ expect(window.photoManager!.getAssetDetails).toHaveBeenCalledTimes(1);
+ png.base64="iVBORw0KGgoA";
+ await act(async()=>changed());
+ expect(image()?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgoA");
+ expect(window.photoManager!.getAssetDetails).toHaveBeenCalledTimes(2);
+ expect(host.querySelector('[data-asset-id="first"]')?.getAttribute("aria-pressed")).toBe("true");
+});
+
+it("clears the selected properties only after confirming the removed item is missing",async()=>{
+ let changed!:()=>void;
+ window.photoManager!.onGalleryChanged=listener=>{changed=listener;return ()=>{};};
+ const details:AssetDetails={
+  asset:{id:"first",kind:"photo",media_type:"image/jpeg",byte_size:null,sha256:null,hash_state:"absent",status:"active",created_at:""},
+  capture:null,annotation:null,tags:[],metadata:[],metadata_state:"extracted",availability:"available",locations_truncated:false,
+  locations:[{id:"location",library_root_id:"root",root_display_name:"Synthetic",relative_path:"teste/first.jpg",entry_type:"file",availability:"present",root_availability:"available",observed_byte_size:null,observed_mtime_ns:null,last_seen_at:null}],
+ };
+ window.photoManager!.getAssetDetails=vi.fn().mockImplementation(()=>Promise.resolve({status:"ready",details}));
+ await act(async()=>root.render(<App/>));
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="first"]')!.click());
+ expect(host.querySelector(".asset-details")).not.toBeNull();
+ details.availability="unavailable";details.locations[0].availability="missing";
+ window.photoManager!.listGallery=vi.fn().mockResolvedValue({items:[item("second","Viagens",false)],has_more:false,next_cursor:null});
+ await act(async()=>changed());
+ expect(host.querySelector('[data-asset-id="first"]')).toBeNull();
+ expect(host.querySelector('[data-asset-id="second"]')).not.toBeNull();
+ expect(host.querySelector(".asset-details")).toBeNull();
+});
+
 it("selects a label beyond the initial filter options and keeps its name visible", async () => {
   const facets = {tags:[{id:"initial",name:"Primeiro"}], types:[], cameras:[], lenses:[], more:["tags" as const]};
   const page = {items:[], next_cursor:null, has_more:false, facets};
@@ -133,4 +171,44 @@ it("selects a label beyond the initial filter options and keeps its name visible
   expect(select.selectedOptions[0].textContent).toBe("Viagem");
   expect(host.querySelector(".facet-options")).toBeNull();
   expect(document.activeElement).toBe(select);
+});
+
+it("filters by creation and modification dates and shows top toast balloons on album actions", async () => {
+  const album = {id: "alb-1", name: "Favoritas"};
+  const details: AssetDetails = {
+    asset: {id: "first", kind: "photo", media_type: "image/jpeg", byte_size: null, sha256: null, hash_state: "absent", status: "active", created_at: ""},
+    capture: null, annotation: null, tags: [], albums: [], metadata: [], metadata_state: "extracted", availability: "available", locations_truncated: false, locations: [],
+  };
+  Object.assign(window.photoManager!, {
+    getLibraryState: vi.fn().mockResolvedValue({state: "active", session: {session_id: "A", library_handle: "h", generation: 1, display_name: "lab"}, reopen: false}),
+    getAssetDetails: vi.fn().mockImplementation(async () => ({status: "ready", details: {...details, albums: [...(details.albums ?? [])]}})),
+    listAlbums: vi.fn().mockResolvedValue({albums: [album], next_offset: null}),
+    createAlbum: vi.fn().mockResolvedValue(album),
+    changeAlbumMembership: vi.fn().mockImplementation(async () => {
+      details.albums = [album];
+      return {changed: true};
+    }),
+  });
+  await act(async () => root.render(<App />));
+  const createdInput = host.querySelector<HTMLInputElement>('[aria-label="Data de criação"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(createdInput, "2026-10-15");
+    createdInput.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+  expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize: 24, filters: {created_date: "2026-10-15"}});
+  const modifiedInput = host.querySelector<HTMLInputElement>('[aria-label="Data de modificação"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(modifiedInput, "2026-11-13");
+    modifiedInput.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+  expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize: 24, filters: {created_date: "2026-10-15", modified_date: "2026-11-13"}});
+
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-asset-id="first"]')!.click());
+  await click("Adicionar a álbum…");
+  await click("Favoritas");
+  const toast = host.querySelector(".action-toast");
+  expect(toast?.textContent).toContain("Item adicionado a “Favoritas”.");
+  expect(host.querySelector(".asset-details")?.textContent).toContain("Favoritas");
+  await act(async () => host.querySelector<HTMLButtonElement>(".toast-dismiss")!.click());
+  expect(host.querySelector(".action-toast")).toBeNull();
 });

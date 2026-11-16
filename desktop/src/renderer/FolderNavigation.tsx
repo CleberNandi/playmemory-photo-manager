@@ -22,6 +22,7 @@ export function FolderNavigation({roots, root, path, children, onBrowse, onList,
           : <button onClick={() => onBrowse(root.id, segments.slice(0, index + 1).join("/"))}>{name}</button>}
       </span>)}
     </nav>}
+    {root && !path && <p>Imagens desta pasta e de todas as subpastas.</p>}
     {!root && !folders.length && <><p>Nenhuma pasta cadastrada.</p>{onAdd && <button className="primary-button" onClick={onAdd}>Adicionar pasta</button>}</>}
     {folders.length > 0 && <>
       {root && <h2>Subpastas</h2>}

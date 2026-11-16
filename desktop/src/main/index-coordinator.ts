@@ -25,5 +25,5 @@ export class IndexCoordinator {
    return await action();
   }finally{this.holds--;}
  }
- async refresh(){const id=this.libraries.current().session?.session_id;if(!id)throw new Error("stale_session");await this.backend.request("index.refresh",{session_id:id});return this.current();}
+ async refresh(){const id=this.libraries.current().session?.session_id;if(!id)throw new Error("stale_session");await this.backend.request("index.refresh",{session_id:id});if(this.libraries.current().session?.session_id!==id)throw new Error("stale_session");this.changed();return this.current();}
 }

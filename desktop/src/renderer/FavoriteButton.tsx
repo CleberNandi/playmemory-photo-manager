@@ -16,5 +16,5 @@ export function FavoriteButton({assetId,favorite,onChanged}: {assetId:string;fav
     } catch {if(mounted.current)setFailed(true);}
     finally {inFlight.current=false;if(mounted.current)setPending(false);}
   };
-  return <span className="favorite-control"><button className="favorite-toggle" aria-pressed={favorite} aria-label={favorite?"Remover dos favoritos":"Adicionar aos favoritos"} disabled={pending} onClick={()=>void save()}>{pending?"Salvando…":favorite?"★ Favorito":"☆ Favoritar"}</button>{failed&&<span role="alert">Não foi possível confirmar o favorito. Reabra a biblioteca para conferir; nada será repetido automaticamente.</span>}</span>;
+  return <span className="favorite-control"><button className="favorite-toggle" aria-pressed={favorite} aria-label={favorite?"Remover dos favoritos":"Adicionar aos favoritos"} disabled={pending} onClick={()=>void save()}>{pending?"Salvando…":favorite?"★ Favorito":"☆ Favoritar"}</button>{failed&&<span className="action-toast action-toast-error" role="alert"><span>Não foi possível confirmar o favorito. Reabra a biblioteca para conferir; nada será repetido automaticamente.</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={()=>setFailed(false)}>×</button></span>}</span>;
 }

@@ -1,15 +1,15 @@
 import {useEffect, useState} from "react";
 const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 type Summary = {period: string | null; buckets: [string,number][]; undated:number; partial:number};
-export function CaptureCalendar({period, onPeriod, onBrowse}: {period:string | null; onPeriod:(period:string | null)=>void; onBrowse:(period:string)=>void}) {
+export function CaptureCalendar({period, onPeriod, onBrowse, onUndatedOnly}: {period:string | null; onPeriod:(period:string | null)=>void; onBrowse:(period:string)=>void; onUndatedOnly?:(period:"undated")=>void}) {
   const [result,setResult] = useState<{key:string|null;value:Summary} | null>(null);
   const [error,setError] = useState(false);
   const [attempt,setAttempt] = useState(0);
   useEffect(()=>{
     let active=true;
-    void window.photoManager!.getCalendar!(period).then(value=>{if(active){setResult({key:period,value});setError(false);}}).catch(()=>{if(active)setError(true);});
+    void window.photoManager!.getCalendar!(period).then(value=>{if(active){setResult({key:period,value});setError(false);if(period===null&&!value.buckets.length&&value.undated>0)onUndatedOnly?.("undated");}}).catch(()=>{if(active)setError(true);});
     return ()=>{active=false;};
-  },[period,attempt]);
+  },[period,attempt,onUndatedOnly]);
   const data=result?.key===period ? result.value : null;
   const counts = new Map(data?.buckets ?? []);
   const year = period ? Number(period.slice(0,4)) : 2000;
@@ -22,7 +22,7 @@ export function CaptureCalendar({period, onPeriod, onBrowse}: {period:string | n
     else if(year+delta>0&&year+delta<10000)onPeriod(String(year+delta).padStart(4,"0"));
   };
   return <section className="capture-calendar" aria-label="Calendário de captura">
-    <header className="calendar-heading"><div><h2>{!period ? "Anos de captura" : month ? `${months[month-1]} de ${year}` : `Capturas em ${year}`}</h2><p>Datas de captura do catálogo inteiro. A data de catalogação não é usada.</p></div>
+    <header className="calendar-heading"><div><h2>{!period ? "Anos de captura" : month ? `${months[month-1]} de ${year}` : `Capturas em ${year}`}</h2><p>Datas de captura do catálogo inteiro, com fallback para a data de modificação do arquivo quando a mídia não informa captura. A data de catalogação não é usada.</p></div>
       <div><button onClick={()=>onPeriod(null)}>Todos os anos</button>{!!month&&<button onClick={()=>onPeriod(period!.slice(0,4))}>Meses do ano</button>}{period&&<><button aria-label="Período anterior" onClick={()=>shift(-1)}>‹</button><button aria-label="Próximo período" onClick={()=>shift(1)}>›</button><button onClick={()=>onBrowse(period)}>Ver fotos do período</button></>}</div>
     </header>
     {error ? <div role="alert">Não foi possível consultar o calendário. <button onClick={()=>setAttempt(n=>n+1)}>Tentar calendário novamente</button></div> : !data ? <p role="status">Carregando datas…</p> : <>

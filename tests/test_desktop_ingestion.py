@@ -395,7 +395,7 @@ def test_multiformat_worker_calendar_and_image_jobs_through_authenticated_pipe(c
     context = {"session_id": scope["session_id"]}
     calendar = client.request("calendar.summary", context | {"period": "2024-02"})
     assert calendar["result"]["buckets"] == [["2024-02-29", 1]]
-    assert calendar["result"]["undated"] == 1
+    assert calendar["result"]["undated"] == 0
     gallery = client.request("gallery.list", context | {"capture_period": "2024-02-29"})["result"]
     asset_id = gallery["items"][0]["asset_id"]
     for method in ("thumbnail.get", "preview.get"):

@@ -5,10 +5,23 @@ A biblioteca verifica essas raízes ao abrir. No Linux, notificações inotify d
 verificação após agrupar eventos por 500 ms. Uma checagem a cada dez segundos recupera
 mudanças sem notificação. Não pesquisa outros diretórios do computador. Ao selecionar uma
 subpasta de uma raiz disponível já cadastrada, o desktop orienta atualizar a pasta principal.
-Os cartões mostram o nome da raiz e a subpasta de cada ocorrência.
+Os cartões mostram o nome da raiz e a subpasta de cada ocorrência. Basta adicionar a pasta pai:
+seus descendentes existentes e novos são acompanhados recursivamente, inclusive após reabrir
+o aplicativo. Em **Pastas → pasta pai**, a galeria inclui imagens de toda a árvore dessa raiz;
+abrir uma subpasta restringe a galeria aos arquivos diretamente nela e permite navegar às filhas.
 
 O indicador mostra andamento, novas imagens e falhas. **Atualizar pastas agora** antecipa a
-próxima checagem. A galeria é atualizada preservando a seleção e o visualizador aberto.
+próxima checagem e força uma nova consulta da tela, mesmo se a revisão do catálogo não mudou.
+A atualização renova miniaturas e Propriedades, preservando a seleção de arquivos existentes
+e o visualizador aberto. A seleção de um item que desapareceu só é limpa após confirmar que
+todas as suas localizações estão ausentes em raízes disponíveis.
+
+Excluir uma subpasta inteira é detectado mesmo sem novas imagens. Após uma observação completa,
+as ocorrências removidas passam a `missing`. A galeria normal e o Calendário deixam de mostrar
+Assets cujas ocorrências estão todas confirmadas ausentes em raízes disponíveis. Raízes offline,
+ocorrências sobreviventes, candidatos a movimento e Assets sem localização não são prova de
+exclusão e permanecem visíveis. O catálogo conserva UUIDs, metadata, anotações e álbuns; não há
+exclusão lógica nem escrita nos originais como efeito da atualização.
 
 ## Contrato
 
@@ -46,6 +59,17 @@ O monitor não grava na mídia. O SQLite continua na mesma versão de esquema.
 
 Na vista de uma pasta, o catálogo filtra pelo UUID da raiz antes de paginar e mostra adições
 recentes primeiro.
+Na página inicial da raiz, `gallery.list` recebe `root_id` sem `folder_path`: o filtro inclui
+todos os descendentes antes da paginação. A primeira página devolve também `subfolders`,
+considerando o caminho vazio quando `folder_path` não foi fornecido. Nas páginas de subpastas,
+`folder_path` continua explícito, com o contrato anterior de filhos imediatos. Não há novo
+parâmetro, migração ou raiz criada para cada subpasta.
+
+O desktop real envia `exclude_missing=true` em `gallery.list`, inclusive retry/paginação,
+e em `calendar.summary`. O filtro é aplicado antes da paginação, vincula o cursor ao escopo e
+usa a mesma política nas contagens anuais, mensais, diárias, parciais e sem data. A API Python
+mantém `exclude_missing=false` por padrão para leituras históricas. Ambos os métodos exigem
+booleano estrito. Miniaturas antigas não permanecem visíveis após mudar a disponibilidade.
 
 Testes usam árvores e imagens sintéticas: adição com sessão aberta, reinício, pasta vazia,
 subpastas inicialmente vazias, idempotência, raiz substituída, raiz indisponível, pausa antes de

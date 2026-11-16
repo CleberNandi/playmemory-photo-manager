@@ -5,9 +5,15 @@ Status: implementado. Continuação do menu contextual homologado pelo usuário 
 ## Comportamento
 
 O visualizador oferece Anterior/Próxima e setas esquerda/direita. A sequência inclui somente
-fotos carregadas e visíveis ao abrir o visualizador, na ordem da galeria. Atualizações da galeria
-continuam em segundo plano, e a sequência aberta permanece estável. O visualizador não busca o restante do catálogo
-nem carrega páginas automaticamente. Vídeos não entram nessa sequência. Os extremos desabilitam
+fotos carregadas, visíveis e disponíveis ao abrir o visualizador, na ordem da galeria. Cartões
+registrados como indisponíveis, offline ou sem localização têm abertura desabilitada e não
+entram na sequência/carrossel. Registros com todas as ocorrências confirmadas ausentes ficam
+fora da galeria normal, conservando seu histórico no catálogo; offline não é ausência. O mesmo
+filtro se aplica às páginas carregadas pela navegação. Um arquivo que deixa de estar acessível
+depois de abrir a sequência ainda pode produzir a mensagem de prévia indisponível, com retry.
+Atualizações da galeria continuam em segundo plano e preservam as entradas da sequência aberta.
+Ao usar Próxima no fim dos itens carregados, o visualizador pode buscar páginas adicionais com
+o mesmo filtro, ignorando fotos indisponíveis. Vídeos não entram nessa sequência. Os extremos desabilitam
 a navegação correspondente, sem circular para o início. Nome e posição deixam essa cobertura
 explícita. Uma imagem sem prévia não impede avançar para a seguinte.
 

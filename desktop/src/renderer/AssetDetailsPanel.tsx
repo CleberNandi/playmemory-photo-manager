@@ -70,7 +70,7 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
         {window.photoManager?.locateMedia&&<><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Abrir pasta que contém o arquivo</button><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId,true).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Localização completa…</button></>}
         {canPreviewRename && window.photoManager?.previewFileRename &&
           <RenamePreviewForm key={`${assetId}:${revision}`} details={value.details} />}
-        {locationError&&<p role="alert">Não foi possível localizar o arquivo. Ele pode estar offline, ter mudado ou não estar mais disponível.</p>}
+        {locationError&&<div className="action-toast action-toast-error" role="alert"><span>Não foi possível localizar o arquivo. Ele pode estar offline, ter mudado ou não estar mais disponível.</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={()=>setLocationError(false)}>×</button></div>}
       </section>
       <Fields values={{
         "Formato": value.details.asset.media_type?.split("/").at(-1)?.toUpperCase() ?? null,
@@ -80,6 +80,7 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
         "Data da captura": value.details.capture?.local_value.replace("T"," ") ?? null,
         "Câmera": value.details.metadata.find(m=>m.namespace==="exif"&&m.key==="Model")?.interpreted_value ?? null,
         "Lente": value.details.metadata.find(m=>m.namespace==="exif"&&m.key==="LensModel")?.interpreted_value ?? null,
+        "Álbuns": value.details.albums?.length ? value.details.albums.map(album=>album.name).join(", ") : null,
       }} />
       <AvailabilityIndicator availability={value.details.availability} />
       </details>

@@ -520,3 +520,123 @@ def test_folder_browser_queries_immediate_children_and_scopes_pagination(databas
         gallery.list_assets(GalleryQuery(root_id=root, folder_path="teste", after=cursor))
     with pytest.raises(InvalidGalleryQueryError):
         gallery.list_assets(GalleryQuery(root_id=root, folder_path="../outside"))
+
+
+def test_confirmed_missing_filter_precedes_pagination_and_preserves_offline_and_other_locations(
+    database,
+):
+    from playmemories_photo_manager.gallery.calendar import summary
+
+    online = _root(database, 930)
+    offline = _root(database, 931, availability="offline")
+    assets = [_asset(database, number) for number in range(1, 8)]
+    _location(database, 940, assets[0], online, availability="missing")
+    _location(database, 941, assets[1], offline, availability="missing")
+    _location(database, 942, assets[2], online)
+    _location(database, 943, assets[3], online, availability="offline")
+    # assets[4] has no location: absence has not been observed.
+    _location(database, 944, assets[5], online, availability="missing")
+    _location(database, 945, assets[5], offline)
+    _location(database, 946, assets[6], online, availability="moved_candidate")
+    gallery = GalleryQueries(database)
+    raw = gallery.list_assets(GalleryQuery(page_size=1))
+    assert raw.items[0].asset_id == assets[0]
+    cursor = None
+    seen = []
+    while True:
+        page = gallery.list_assets(GalleryQuery(page_size=1, after=cursor, exclude_missing=True))
+        seen.extend(item.asset_id for item in page.items)
+        if not page.has_more:
+            break
+        assert page.next_cursor
+        cursor = page.next_cursor
+    assert seen == assets[1:]
+    assert {
+        item.asset_id
+        for item in gallery.list_assets(GalleryQuery(root_id=online, exclude_missing=True)).items
+    } == {assets[2], assets[3], assets[6]}
+    assert {
+        item.asset_id
+        for item in gallery.list_assets(GalleryQuery(root_id=offline, exclude_missing=True)).items
+    } == {assets[1], assets[5]}
+    from playmemories_photo_manager.gallery.calendar import mtime_key
+
+    fallback_year = mtime_key(42)[:4]
+    assert summary(database, exclude_missing=True) == {
+        "period": None,
+        "buckets": [[fallback_year, 5]],
+        "undated": 1,
+        "partial": 0,
+    }
+    assert summary(database) == {
+        "period": None,
+        "buckets": [[fallback_year, 6]],
+        "undated": 1,
+        "partial": 0,
+    }
+    with pytest.raises(InvalidCursorError):
+        gallery.list_assets(GalleryQuery(after=raw.next_cursor, exclude_missing=True))
+    for invalid in (1, "true", None):
+        with pytest.raises(InvalidGalleryQueryError):
+            gallery.list_assets(GalleryQuery(exclude_missing=invalid))
+        with pytest.raises(ValueError):
+            summary(database, exclude_missing=invalid)
+
+
+def test_gallery_date_filters_and_asset_details_albums(database: sqlite3.Connection) -> None:
+    from playmemories_photo_manager.gallery.calendar import mtime_key
+
+    root_id = _root(database, 950)
+    asset_a = _asset(database, 951, created_at="2024-05-10T10:20:30.000Z")
+    asset_b = _asset(database, 952, created_at="2025-08-19T14:00:00.000Z")
+    database.execute(
+        """UPDATE asset SET captured_local_value = '2023-11-04T09:15:00',
+            captured_precision = 'second', captured_source_kind = 'manual',
+            captured_selection_reason = 'user_supplied' WHERE id = ?""",
+        (asset_a,),
+    )
+    _location(database, 960, asset_a, root_id, relative_path="a.jpg")
+    _location(database, 961, asset_b, root_id, relative_path="b.png")
+    mtime_ns = 1_729_000_000_000_000_000
+    database.execute(
+        "UPDATE file_location SET observed_mtime_ns = ? WHERE asset_id = ?",
+        (mtime_ns, asset_b),
+    )
+    album_z = _id(970)
+    album_a = _id(971)
+    database.execute("INSERT INTO album(id, name) VALUES (?, 'Viagem')", (album_z,))
+    database.execute("INSERT INTO album(id, name) VALUES (?, 'Arquivo')", (album_a,))
+    database.execute(
+        "INSERT INTO album_asset(album_id, asset_id) VALUES (?, ?), (?, ?)",
+        (album_z, asset_a, album_a, asset_a),
+    )
+
+    gallery = GalleryQueries(database)
+    assert [
+        item.asset_id for item in gallery.list_assets(GalleryQuery(created_date="2023-11-04")).items
+    ] == [asset_a]
+    assert [
+        item.asset_id for item in gallery.list_assets(GalleryQuery(created_date="2025-08-19")).items
+    ] == [asset_b]
+    mtime_day = mtime_key(mtime_ns)
+    assert mtime_day is not None
+    assert [
+        item.asset_id for item in gallery.list_assets(GalleryQuery(modified_date=mtime_day)).items
+    ] == [asset_b]
+    page = gallery.list_assets(GalleryQuery(page_size=1))
+    assert page.next_cursor is not None
+    with pytest.raises(InvalidCursorError):
+        gallery.list_assets(
+            GalleryQuery(page_size=1, after=page.next_cursor, created_date="2023-11-04")
+        )
+    with pytest.raises(InvalidGalleryQueryError):
+        gallery.list_assets(GalleryQuery(created_date="2023/11/04"))
+    with pytest.raises(InvalidGalleryQueryError):
+        gallery.list_assets(GalleryQuery(modified_date="invalid"))
+
+    details_a = gallery.get_asset_details(asset_a)
+    assert [(album.id, album.name) for album in details_a.albums] == [
+        (album_a, "Arquivo"),
+        (album_z, "Viagem"),
+    ]
+    assert gallery.get_asset_details(asset_b).albums == ()

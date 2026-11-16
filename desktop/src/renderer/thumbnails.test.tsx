@@ -42,3 +42,23 @@ it("keeps fallback on load failure and prevents a previous asset updating a reus
   expect(host.querySelector("img")).toBeNull();
   await act(async () => root.unmount()); delete window.photoManager;
 });
+
+it("clears a cached thumbnail when the same asset becomes unavailable", async () => {
+  Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT:true});
+  const host=document.createElement("div"), root=createRoot(host);
+  let finish!:(value:unknown)=>void;
+  const get=vi.fn().mockResolvedValueOnce(png).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  window.photoManager={getThumbnail:get,listGallery:vi.fn(),retryGallery:vi.fn()};
+  const item:GalleryItem={asset_id:"same",kind:"photo",media_type:"image/png",created_at:"",availability:"available",representative_location:null,annotation:{title:null,favorite:false,rating:null}};
+  try {
+    await act(async()=>root.render(<MediaCard item={item}/>));
+    expect(host.querySelector("img")).not.toBeNull();
+    await act(async()=>root.render(<MediaCard item={{...item,availability:"unavailable"}}/>));
+    expect(host.querySelector("img")).toBeNull();
+    expect(get).toHaveBeenCalledTimes(2);
+    await act(async()=>finish(null));
+    expect(host.querySelector("img")).toBeNull();
+  } finally {
+    await act(async()=>root.unmount());delete window.photoManager;
+  }
+});

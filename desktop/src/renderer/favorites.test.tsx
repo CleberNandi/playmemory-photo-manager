@@ -37,6 +37,8 @@ it("marks cards, queries beyond the first page and removes unfavorited cards",as
   setFavorite:vi.fn().mockImplementation((asset_id,favorite)=>{if(asset_id==="first")first=favorite;return Promise.resolve({asset_id,favorite});}),
  });
  await act(async()=>root.render(<App/>));await act(async()=>host.querySelector<HTMLButtonElement>(".favorite-toggle")!.click());expect(host.querySelector(".favorite-toggle")?.getAttribute("aria-pressed")).toBe("true");
+ expect(host.querySelector(".action-toast")?.textContent).toContain("Imagem adicionada aos favoritos.");
  await act(async()=>[...host.querySelectorAll("button")].find(b=>b.textContent==="☆ Favoritos")!.click());expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,favoritesOnly:true});expect(host.querySelectorAll(".media-card")).toHaveLength(2);expect(host.textContent).toContain("beyond-first-page");
  await act(async()=>host.querySelector<HTMLButtonElement>(".favorite-toggle")!.click());expect(host.querySelectorAll(".media-card")).toHaveLength(1);expect(host.querySelector(".media-card")?.textContent).toContain("beyond-first-page");expect(window.photoManager!.setFavorite).toHaveBeenLastCalledWith("first",false);
+ expect(host.querySelector(".action-toast")?.textContent).toContain("Imagem removida dos favoritos.");
 });

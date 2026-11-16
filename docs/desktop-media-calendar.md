@@ -10,13 +10,32 @@ páginas usam somente o primeiro quadro.
 O nome do cartão prioriza o nome do arquivo; o caminho relativo completo fica no tooltip e
 nas propriedades.
 
-Calendário/Ano apresenta os anos de captura do catálogo inteiro. Escolher um ano apresenta os
+Calendário/Ano apresenta os anos de captura do catálogo inteiro. Quando a imagem não possui data de
+captura extraída da metadata (`DateTimeOriginal` ou `DateTimeDigitized`), o Calendário usa como
+fallback de leitura a data de modificação física observada (`observed_mtime_ns`), conforme a ordem
+de precedência do ADR-002, mantendo `Data da captura` como **Não informado** nas propriedades para
+preservar a proveniência original. Escolher um ano apresenta os
 meses; escolher um mês apresenta os dias, inclusive anos bissextos. Escolher um dia consulta
 os itens daquele período, com paginação no backend e cursor vinculado ao filtro. Mês e Dia
-na barra abrem diretamente esses níveis. Sem data consulta os itens sem captura selecionada.
+na barra abrem diretamente esses níveis. Sem data consulta os itens sem captura nem data de
+modificação observada.
+Ao abrir um período ou Sem data, a galeria permanece no modo Calendário e oferece
+**Todos os anos** para voltar e **Limpar período** para retornar à biblioteca. Quando o catálogo
+não tem nenhum ano disponível, mas contém itens sem data, o Calendário abre automaticamente
+a galeria **Sem data de captura**, com uma explicação da ausência de datas. Uma biblioteca vazia
+continua mostrando o estado vazio. A data de catalogação (`created_at`) nunca é usada no Calendário.
+Na barra **Pesquisar**, além dos filtros de palavra-chave, equipamento, formato e rótulo, há
+filtros por **Data de criação** (`created_date`) e **Data de modificação** (`modified_date`),
+ambos vinculados ao cursor de paginação. Nas **Propriedades**, a seção **Resumo** exibe o campo
+**Álbuns** com os álbuns aos quais o item selecionado pertence. Mensagens de ação e erro aparecem
+como balão flutuante no topo da tela (`.action-toast`), e a ferramenta **Duplicatas exatas** fica
+na página **Ferramentas**.
 As contagens não dependem das 24 imagens inicialmente carregadas nem dos filtros locais de
 texto/favoritos/pasta. Datas parciais permanecem no nível de precisão conhecido; nunca recebem
 um dia artificial. Abrir calendário recolhe as propriedades para dar espaço à navegação.
+No desktop, contagens e galeria usam o mesmo filtro de ausência confirmada descrito no
+[acompanhamento de pastas](desktop-folder-monitor.md): fotos removidas deixam os grupos sem
+perder seu histórico no catálogo. Uma raiz offline não é tratada como uma exclusão de arquivos.
 
 ## Matriz deste incremento
 

@@ -1,4 +1,4 @@
-import {useRef, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import type {AnnotationField, AssetDetails} from "./types";
 
 export function AnnotationEditor({details, onUpdated}: {
@@ -14,6 +14,12 @@ export function AnnotationEditor({details, onUpdated}: {
   const pending = useRef(false);
   const rating = details.annotation?.rating ?? null;
 
+  useEffect(() => {
+    if (!message || failed) return;
+    const timer = setTimeout(() => setMessage(""), 4500);
+    return () => clearTimeout(timer);
+  }, [message, failed]);
+
   async function edit(field: AnnotationField, value: string | number | null) {
     if (pending.current || !window.photoManager?.editAnnotation) return;
     pending.current = true;
@@ -23,7 +29,17 @@ export function AnnotationEditor({details, onUpdated}: {
       await window.photoManager.editAnnotation(details.asset.id, field, value);
       if (field === "tag_add") setTag("");
       setFailed(false);
-      setMessage("Alteração salva no catálogo.");
+      setMessage(
+        field === "rating"
+          ? value ? `Classificação salva: ${value} estrela(s).` : "Classificação removida."
+          : field === "tag_add"
+            ? `Rótulo “${value}” adicionado.`
+            : field === "tag_remove"
+              ? "Rótulo removido."
+              : field === "title"
+                ? "Título salvo no catálogo."
+                : "Descrição salva no catálogo.",
+      );
       onUpdated(field, value);
     } catch {
       setFailed(true);
@@ -62,6 +78,9 @@ export function AnnotationEditor({details, onUpdated}: {
       <label>Descrição <textarea value={description} maxLength={2000} onChange={event => setDescription(event.target.value)} /></label>
       <button disabled={busy || description.trim() === (details.annotation?.description ?? "")}>Salvar descrição</button>
     </form>
-    {message && <p role={failed ? "alert" : "status"}>{message}</p>}
+    {message && <div className={`action-toast${failed ? " action-toast-error" : ""}`} role={failed ? "alert" : "status"}>
+      <span>{message}</span>
+      <button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={() => setMessage("")}>×</button>
+    </div>}
   </section>;
 }

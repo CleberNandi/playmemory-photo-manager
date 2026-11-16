@@ -22,7 +22,15 @@ from playmemories_photo_manager.catalog import (
     Tag,
 )
 
-from .calendar import capture_key, validate_period
+from .availability import EXCLUDE_MISSING_SQL
+from .calendar import (
+    EFFECTIVE_CAPTURE_SQL,
+    capture_key,
+    created_key,
+    mtime_key,
+    validate_date_filter,
+    validate_period,
+)
 from .errors import (
     AssetNotFoundError,
     CatalogReadError,
@@ -30,6 +38,7 @@ from .errors import (
     InvalidGalleryQueryError,
 )
 from .models import (
+    AlbumSummary,
     AnnotationSummary,
     AssetAvailability,
     AssetDetails,
@@ -63,6 +72,8 @@ class GalleryQueries:
     ) -> None:
         self._connection = connection
         connection.create_function("capture_bucket", 2, capture_key, deterministic=True)
+        connection.create_function("mtime_bucket", 1, mtime_key, deterministic=True)
+        connection.create_function("created_bucket", 1, created_key, deterministic=True)
         connection.create_function(
             "fold_text", 1, lambda value: (value or "").casefold(), deterministic=True
         )
@@ -114,16 +125,35 @@ class GalleryQueries:
                         ELSE 'no_location'
                     END AS projected_availability
                 FROM asset a
-                WHERE (? IS NULL OR a.kind = ?)
+                WHERE {EXCLUDE_MISSING_SQL}
+                  AND (? IS NULL OR a.kind = ?)
                   AND (? = 0 OR EXISTS (SELECT 1 FROM user_annotation ua
                     WHERE ua.asset_id=a.id AND ua.favorite=1))
                   AND (? IS NULL OR (? = 'undated' AND
-                    capture_bucket(captured_local_value,captured_precision) IS NULL)
+                    ({EFFECTIVE_CAPTURE_SQL}) IS NULL)
                     OR (? <> 'undated' AND
-                    substr(capture_bucket(captured_local_value,captured_precision),1,length(?))=?))
+                    substr({EFFECTIVE_CAPTURE_SQL},1,length(?))=?))
+                  AND (? IS NULL OR
+                    substr(COALESCE(
+                      capture_bucket(captured_local_value,captured_precision),
+                      created_bucket(created_at)
+                    ),1,length(?))=?
+                    OR (capture_bucket(captured_local_value,captured_precision) IS NULL
+                        AND substr(created_at,1,length(?))=?))
+                  AND (? IS NULL OR EXISTS (
+                      SELECT 1 FROM file_location fl
+                      WHERE fl.asset_id = a.id
+                        AND (? = 0 OR fl.availability <> 'missing' OR EXISTS (
+                            SELECT 1 FROM library_root lr WHERE lr.id = fl.library_root_id
+                            AND lr.availability = 'offline'))
+                        AND substr(mtime_bucket(fl.observed_mtime_ns),1,length(?))=?
+                  ))
                   AND (? IS NULL OR EXISTS (
                       SELECT 1 FROM file_location fl
                       WHERE fl.asset_id = a.id AND fl.library_root_id = ?
+                        AND (? = 0 OR fl.availability <> 'missing' OR EXISTS (
+                            SELECT 1 FROM library_root lr WHERE lr.id = fl.library_root_id
+                            AND lr.availability = 'offline'))
                         AND (? IS NULL OR (fl.availability <> 'missing'
                              AND media_parent(fl.normalized_relative_path) = ?))
                   ))
@@ -160,12 +190,25 @@ class GalleryQueries:
         """
         after_created, after_id = cursor_values or (None, None)
         parameters = (
+            normalized.exclude_missing,
             filters["kind"],
             filters["kind"],
             filters["favorites_only"],
-            *([filters["capture_period"]] * 5),
+            filters["capture_period"],
+            filters["capture_period"],
+            normalized.exclude_missing,
+            filters["capture_period"],
+            normalized.exclude_missing,
+            filters["capture_period"],
+            filters["capture_period"],
+            *([filters.get("created_date")] * 5),
+            filters.get("modified_date"),
+            normalized.exclude_missing,
+            filters.get("modified_date"),
+            filters.get("modified_date"),
             filters["root_id"],
             filters["root_id"],
+            normalized.exclude_missing,
             *([normalized.folder_path] * 2),
             *([filters.get("album_id")] * 2),
             *([filters.get("media_type")] * 2),
@@ -238,6 +281,12 @@ class GalleryQueries:
                 WHERE at.asset_id = ? ORDER BY t.id""",
                 (identifier,),
             ).fetchall()
+            album_rows = self._connection.execute(
+                """SELECT al.id, al.name
+                FROM album al JOIN album_asset aa ON aa.album_id = al.id
+                WHERE aa.asset_id = ? ORDER BY al.name COLLATE NOCASE, al.id""",
+                (identifier,),
+            ).fetchall()
             availability = self._asset_availability(identifier)
 
         projected_locations = tuple(
@@ -255,6 +304,7 @@ class GalleryQueries:
             locations=projected_locations,
             locations_truncated=len(location_rows) > MAX_DETAIL_LOCATIONS,
             availability=availability,
+            albums=tuple(AlbumSummary(id=item["id"], name=item["name"]) for item in album_rows),
         )
 
     @contextmanager
@@ -362,8 +412,12 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         raise InvalidGalleryQueryError("favorites_only must be boolean")
     if type(query.newest_first) is not bool:
         raise InvalidGalleryQueryError("newest_first must be boolean")
+    if type(query.exclude_missing) is not bool:
+        raise InvalidGalleryQueryError("exclude_missing must be boolean")
     try:
         period = validate_period(query.capture_period)
+        created_date = validate_date_filter(query.created_date)
+        modified_date = validate_date_filter(query.modified_date)
     except ValueError as error:
         raise InvalidGalleryQueryError("invalid capture period") from error
     for field in ("keyword", "media_type", "camera", "lens"):
@@ -390,6 +444,9 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         query.lens,
         _canonical_uuid(query.album_id, "album_id") if query.album_id is not None else None,
         folder,
+        query.exclude_missing,
+        created_date,
+        modified_date,
     )
 
 
@@ -406,10 +463,13 @@ def _filter_values(query: GalleryQuery) -> dict[str, str | int | bool | None]:
                 "lens",
                 "album_id",
                 "folder_path",
+                "created_date",
+                "modified_date",
             )
             if getattr(query, field) is not None
         },
         **({"newest_first": True} if query.newest_first else {}),
+        **({"exclude_missing": True} if query.exclude_missing else {}),
         "kind": query.kind.value if query.kind else None,
         "capture_period": query.capture_period,
         "favorites_only": query.favorites_only,

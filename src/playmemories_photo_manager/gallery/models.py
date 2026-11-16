@@ -57,6 +57,9 @@ class GalleryQuery:
     lens: str | None = None
     album_id: str | None = None
     folder_path: str | None = None
+    exclude_missing: bool = False
+    created_date: str | None = None
+    modified_date: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +160,12 @@ class MetadataObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class AlbumSummary:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class AssetDetails:
     asset: AssetSummary
     capture: CaptureProjection | None
@@ -167,6 +176,7 @@ class AssetDetails:
     locations: tuple[LocationSummary, ...]
     locations_truncated: bool
     availability: AssetAvailability
+    albums: tuple[AlbumSummary, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

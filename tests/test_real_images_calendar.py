@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 from test_scoped_application import prepare
 
-from playmemories_photo_manager.catalog import Catalog, initialize_database
+from playmemories_photo_manager.catalog import Catalog, LocationAvailability, initialize_database
 from playmemories_photo_manager.catalog_ingestion import (
     apply_scoped_ingestion,
     authorize_scoped_ingestion,
@@ -17,11 +17,12 @@ from playmemories_photo_manager.catalog_ingestion import (
 from playmemories_photo_manager.catalog_ingestion.media import _mount_id
 from playmemories_photo_manager.desktop.backfill_equipment import backfill_equipment
 from playmemories_photo_manager.desktop.bridge import BridgeRequestError, _dispatch
+from playmemories_photo_manager.desktop.media_location import reveal_location
 from playmemories_photo_manager.gallery import GalleryQueries, GalleryQuery
-from playmemories_photo_manager.gallery.calendar import capture_key, summary
+from playmemories_photo_manager.gallery.calendar import capture_key, mtime_key, summary
 from playmemories_photo_manager.gallery.errors import InvalidCursorError
 from playmemories_photo_manager.imaging.service import ImageService
-from playmemories_photo_manager.library import LibrarySession
+from playmemories_photo_manager.library import LibraryError, LibrarySession
 
 
 def raster(path, format="JPEG", **options):
@@ -128,15 +129,27 @@ def test_exif_provenance_and_calendar_across_pages(library):
         ).fetchone()[0]
         == "2024:02:29 23:30:00"
     )
-    assert summary(connection)["buckets"] == [["2024", 1]]
+    fallback_row = next(row for row in rows if not row["captured_local_value"])
+    fallback_day = mtime_key((root / "undated.png").stat().st_mtime_ns)
+    assert fallback_day is not None
+    expected_years = (
+        [["2024", 2]]
+        if fallback_day[:4] == "2024"
+        else sorted([["2024", 1], [fallback_day[:4], 1]], key=lambda bucket: bucket[0])
+    )
+    assert summary(connection)["buckets"] == expected_years
     assert summary(connection, "2024-02")["buckets"] == [["2024-02-29", 1]]
-    assert summary(connection)["undated"] == 1
+    assert summary(connection)["undated"] == 0
     queries = GalleryQueries(connection)
     assert (
         queries.list_assets(GalleryQuery(capture_period="2024-02-29")).items[0].asset_id
         == captured["id"]
     )
-    assert len(queries.list_assets(GalleryQuery(capture_period="undated")).items) == 1
+    assert (
+        queries.list_assets(GalleryQuery(capture_period=fallback_day)).items[0].asset_id
+        == fallback_row["id"]
+    )
+    assert len(queries.list_assets(GalleryQuery(capture_period="undated")).items) == 0
     all_page = queries.list_assets(GalleryQuery(page_size=1))
     assert all_page.next_cursor
     with pytest.raises(InvalidCursorError):
@@ -147,17 +160,105 @@ def test_exif_provenance_and_calendar_across_pages(library):
     assert summary(connection, "2024-03")["buckets"] == []
 
 
+@pytest.mark.parametrize("same_content", [False, True])
+def test_available_subfolder_photo_is_independent_of_missing_parent_namesake(library, same_content):
+    root, path, connection, root_id = library
+    nested = root / "teste"
+    nested.mkdir()
+    parent_photo = root / "photo (2).png"
+    photo = nested / parent_photo.name
+    Image.new("RGB", (80, 40), (180, 20, 30)).save(parent_photo)
+    Image.new("RGB", (80, 40), (25, 100, 210)).save(photo)
+    if same_content:
+        parent_photo.write_bytes(photo.read_bytes())
+    before = photo.read_bytes(), photo.stat().st_mtime_ns
+    apply(root, path, connection, root_id)
+    catalog = Catalog(connection)
+    locations = catalog.list_root_locations(root_id)
+    parent_location = next(loc for loc in locations if loc.normalized_relative_path == photo.name)
+    nested_location = next(
+        loc for loc in locations if loc.normalized_relative_path.startswith("teste/")
+    )
+    assert parent_location.asset_id != nested_location.asset_id
+    parent_photo.unlink()
+    catalog.reconcile_monitored_locations(
+        root_id,
+        expected_root_path=str(root),
+        expected=locations,
+        changes=[(parent_location, photo.name, LocationAvailability.MISSING)],
+        observed_at="2026-11-13T12:00:00Z",
+    )
+    queries = GalleryQueries(connection)
+    all_items = queries.list_assets().items
+    assert len(all_items) == 2
+    assert next(
+        item for item in all_items if item.asset_id == parent_location.asset_id
+    ).availability == ("unavailable")
+    catalog_before = path.read_bytes()
+    service = ImageService()
+    try:
+        root_page = _dispatch(connection, "gallery.list", {"root_id": root_id})
+        assert root_page["subfolders"] == ("teste",)
+        assert len(root_page["items"]) == 2
+        for query in (
+            GalleryQuery(),
+            GalleryQuery(root_id=root_id),
+            GalleryQuery(root_id=root_id, folder_path="teste"),
+        ):
+            items = queries.list_assets(query).items
+            available = next(item for item in items if item.availability == "available")
+            assert available.asset_id == nested_location.asset_id
+            assert available.representative_location.relative_path == "teste/photo (2).png"
+            assert reveal_location(connection, available.asset_id) == {"path": str(photo)}
+            details = queries.get_asset_details(available.asset_id)
+            assert details.locations[0].relative_path == "teste/photo (2).png"
+            assert details.capture is None
+            for variant in ("grid", "preview"):
+                value = wait_image(service, connection, available.asset_id, variant)
+                assert value is not None
+                with Image.open(io.BytesIO(base64.b64decode(value["base64"]))) as image:
+                    assert image.size == ((256, 160) if variant == "grid" else (80, 40))
+                    pixel = image.convert("RGB").getpixel((image.width // 2, image.height // 2))
+                    assert all(
+                        abs(actual - expected) <= 3
+                        for actual, expected in zip(pixel, (25, 100, 210), strict=True)
+                    )
+        assert wait_image(service, connection, parent_location.asset_id, "preview") is None
+        with pytest.raises(LibraryError):
+            reveal_location(connection, parent_location.asset_id)
+    finally:
+        close_images(service)
+    assert (photo.read_bytes(), photo.stat().st_mtime_ns) == before
+    assert path.read_bytes() == catalog_before
+    fallback_year = mtime_key(before[1])[:4]
+    assert summary(connection) == {
+        "period": None,
+        "buckets": [[fallback_year, 2]],
+        "undated": 0,
+        "partial": 0,
+    }
+
+
 def test_invalid_capture_preserved_without_import_date_fallback(library):
     root, path, connection, root_id = library
     exif = Image.Exif()
     exif[34665] = {36867: "2024:02:30 00:00:00", 36881: "+99:99"}
-    raster(root / "invalid.jpg", exif=exif)
+    invalid_path = root / "invalid.jpg"
+    raster(invalid_path, exif=exif)
+    os.utime(invalid_path, (1_623_758_400, 1_623_758_400))
     apply(root, path, connection, root_id)
     assert connection.execute("SELECT captured_local_value FROM asset").fetchone()[0] is None
     row = connection.execute(
         "SELECT raw_value,parse_error FROM metadata WHERE metadata_key='DateTimeOriginal'"
     ).fetchone()
     assert tuple(row) == ("2024:02:30 00:00:00", "invalid_capture_value")
+    assert summary(connection) == {
+        "period": None,
+        "buckets": [["2021", 1]],
+        "undated": 0,
+        "partial": 0,
+    }
+    connection.execute("UPDATE file_location SET observed_mtime_ns = NULL")
     assert summary(connection)["undated"] == 1
 
 

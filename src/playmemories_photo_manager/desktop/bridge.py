@@ -121,10 +121,14 @@ def _dispatch(
     if method == "calendar.summary":
         from ..gallery.calendar import summary
 
-        if not isinstance(params, dict) or set(params) - {"period"}:
+        if not isinstance(params, dict) or set(params) - {"period", "exclude_missing"}:
             raise BridgeRequestError("invalid calendar parameters")
         try:
-            return summary(connection, params.get("period"))
+            return summary(
+                connection,
+                params.get("period"),
+                exclude_missing=params.get("exclude_missing", False),
+            )
         except ValueError:
             raise BridgeRequestError("invalid calendar period") from None
     if method == "gallery.facets":
@@ -150,6 +154,7 @@ def _dispatch(
             "after",
             "capture_period",
             "favorites_only",
+            "exclude_missing",
             "root_id",
             "folder_path",
             "album_id",
@@ -161,6 +166,8 @@ def _dispatch(
             "media_type",
             "camera",
             "lens",
+            "created_date",
+            "modified_date",
         }
         if unknown:
             raise BridgeRequestError("unsupported gallery parameters")
@@ -185,6 +192,7 @@ def _dispatch(
                     after=after,
                     capture_period=params.get("capture_period"),
                     favorites_only=params.get("favorites_only", False),
+                    exclude_missing=params.get("exclude_missing", False),
                     root_id=root_id,
                     folder_path=params.get("folder_path"),
                     album_id=params.get("album_id"),
@@ -195,11 +203,13 @@ def _dispatch(
                     media_type=params.get("media_type"),
                     camera=params.get("camera"),
                     lens=params.get("lens"),
+                    created_date=params.get("created_date"),
+                    modified_date=params.get("modified_date"),
                 )
             )
         )
-        if root_id is not None and params.get("folder_path") is not None and after is None:
-            page["subfolders"] = queries.list_subfolders(root_id, params["folder_path"])
+        if root_id is not None and after is None:
+            page["subfolders"] = queries.list_subfolders(root_id, params.get("folder_path") or "")
         if params.get("include_roots"):
             page["roots"] = [
                 {"id": row[0], "name": row[1]}

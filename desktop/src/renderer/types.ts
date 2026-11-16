@@ -17,6 +17,8 @@ export type PhotoFilters = {
   media_type?: string;
   camera?: string;
   lens?: string;
+  created_date?: string;
+  modified_date?: string;
 };
 export type Facet = "tags" | "types" | "cameras" | "lenses";
 export type FilterOption = {id:string; name:string};
@@ -117,6 +119,7 @@ export interface AssetDetails {
   locations: {id: string; library_root_id: string; root_display_name: string; relative_path: string; entry_type: string; availability: string; root_availability: string; observed_byte_size: number | null; observed_mtime_ns: string | null; last_seen_at: string | null}[];
   locations_truncated: boolean;
   availability: Availability;
+  albums?: Album[];
 }
 export type DetailsResult = {status: "ready"; details: AssetDetails} | {status: "not_found" | "invalid_request" | "temporarily_unavailable" | "internal_error"};
 

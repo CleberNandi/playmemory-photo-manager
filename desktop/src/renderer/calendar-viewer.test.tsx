@@ -5,6 +5,7 @@ import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {App} from "./App";
 import {CaptureCalendar} from "./CaptureCalendar";
 import {ImageViewer,viewerGeometry} from "./ImageViewer";
+import type {AssetDetails, GalleryItem} from "./types";
 let host:HTMLDivElement;let root:Root;
 beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});host=document.createElement("div");document.body.append(host);root=createRoot(host);window.photoManager={listGallery:vi.fn().mockResolvedValue({items:[],has_more:false,next_cursor:null}),retryGallery:vi.fn(),getCalendar:vi.fn().mockResolvedValue({period:null,buckets:[["2024",3]],undated:4,partial:0})};HTMLDialogElement.prototype.showModal=vi.fn(function(this:HTMLDialogElement){this.setAttribute("open","");});});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();delete window.photoManager;vi.useRealTimers();});
@@ -14,6 +15,123 @@ async function openImageMenu(){
  await act(async()=>viewerPhoto().dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,button:2,clientX:40,clientY:60})));
 }
 async function chooseImageOption(text:string){await openImageMenu();await click(text);}
+
+it.each(["library", "folder"])("opens the available subfolder namesake by ID from %s", async (view) => {
+ const photo = (id: string, path: string, available: boolean): GalleryItem => ({
+  asset_id:id, kind:"photo", media_type:"image/png", created_at:"2026-11-13",
+  availability:available ? "available" : "unavailable",
+  annotation:{title:null, favorite:false, rating:null},
+  representative_location:{relative_path:path, root_display_name:"Synthetic"},
+ });
+ const missing = photo("parent", "photo (2).png", false);
+ const available = photo("nested", "teste/photo (2).png", true);
+ const details: AssetDetails = {
+  asset:{id:"nested", kind:"photo", media_type:"image/png", byte_size:null, sha256:null,
+   hash_state:"absent", status:"active", created_at:"2026-11-13"},
+  capture:null, annotation:null, tags:[], metadata:[], metadata_state:"extracted",
+  locations:[{id:"location", library_root_id:"root", root_display_name:"Synthetic",
+   relative_path:"teste/photo (2).png", entry_type:"file", availability:"present",
+   root_availability:"available", observed_byte_size:null, observed_mtime_ns:null, last_seen_at:null}],
+  locations_truncated:false, availability:"available",
+ };
+ window.photoManager!.listGallery = vi.fn().mockImplementation(params => Promise.resolve({
+  items:params?.folderPath === "teste" ? [available] : [missing,available],
+  roots:[{id:"root",name:"Synthetic"}], subfolders:params?.folderPath === "teste" ? [] : ["teste"],
+  has_more:false, next_cursor:null,
+ }));
+ window.photoManager!.getPreview = vi.fn().mockImplementation(id => Promise.resolve(
+  id === "nested" ? {media_type:"image/jpeg",base64:"/9j/AAAA"} : null));
+ window.photoManager!.getAssetDetails = vi.fn().mockImplementation(id => Promise.resolve(
+  id === "nested" ? {status:"ready",details} : {status:"not_found"}));
+ window.photoManager!.locateMedia = vi.fn().mockResolvedValue({status:"cancelled"});
+ await act(async()=>root.render(<App/>));
+ // An old selection must not decide which identically named card opens.
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="parent"]')!.click());
+ if(view === "folder") {
+  await click("Pastas"); await click("Synthetic");
+  expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,rootId:"root"});
+  expect(host.querySelector('[data-asset-id="nested"]')).not.toBeNull();
+  await click("teste");
+  expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,rootId:"root",folderPath:"teste"});
+ }
+ await act(async()=>host.querySelector('[data-asset-id="nested"]')!.closest(".media-card")!.querySelector<HTMLButtonElement>(".open-image")!.click());
+ expect(window.photoManager!.getPreview).toHaveBeenCalledWith("nested");
+ expect(window.photoManager!.getPreview).not.toHaveBeenCalledWith("parent");
+ expect(viewerPhoto().src).toBe("data:image/jpeg;base64,/9j/AAAA");
+ expect(host.querySelector('.viewer-caption')?.textContent).toContain("photo (2).png");
+ expect(host.querySelector('.viewer-caption')?.textContent).toContain("1 de 1");
+ await click("Fechar imagem");
+ expect(host.querySelector('.card-select[aria-pressed="true"]')?.getAttribute("data-asset-id")).toBe("nested");
+ expect(host.querySelector(".asset-origin")?.textContent).toContain("teste/photo (2).png");
+ await click("Localização completa…");
+ expect(window.photoManager!.locateMedia).toHaveBeenLastCalledWith("nested",true);
+});
+
+it("shows undated photos automatically when there are no capture years and keeps calendar navigation", async () => {
+ const undated = {asset_id:"png",kind:"photo",media_type:"image/png",created_at:"2026-11-13",
+  availability:"available",annotation:{title:"Undated PNG",favorite:false,rating:null},representative_location:null};
+ window.photoManager!.listGallery = vi.fn().mockImplementation(params=>Promise.resolve({
+  items:params?.capturePeriod === "undated" ? [undated] : [], has_more:false,next_cursor:null,
+ }));
+ window.photoManager!.getCalendar = vi.fn().mockResolvedValue({period:null,buckets:[],undated:1,partial:0});
+ await act(async()=>root.render(<App/>)); await click("Calendário");
+ expect(host.textContent).toContain("Sem data de captura");
+ expect([...host.querySelectorAll("button")].find(button=>button.textContent==="Calendário")?.getAttribute("aria-pressed")).toBe("true");
+ expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,capturePeriod:"undated"});
+ expect(host.querySelectorAll(".media-card")).toHaveLength(1);
+ expect(host.querySelector<HTMLElement>(".content")!.hidden).toBe(false);
+ expect(host.querySelector(".media-card")?.textContent).toContain("Undated PNG");
+ window.photoManager!.getCalendar = vi.fn().mockImplementation(period=>Promise.resolve({
+  period,buckets:period===null?[["2024",1]]:period==="2024"?[["2024-02",1]]:[["2024-02-29",1]],undated:1,partial:0,
+ }));
+ await click("Todos os anos"); await click("20241 foto(s)"); await click("Fevereiro1 foto(s)");
+ await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="2024-02-29: 1 foto(s)"]')!.click());
+ expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,capturePeriod:"2024-02-29"});
+ await click("Todos os anos");
+ expect(window.photoManager!.getCalendar).toHaveBeenLastCalledWith(null);
+ expect(host.querySelector(".calendar-years")?.textContent).toContain("2024");
+});
+
+it.each(["unavailable", "offline", "no_location"] as const)("does not open or include %s photos in the viewer", async availability => {
+ const photo = (id:string, state:GalleryItem["availability"]):GalleryItem => ({
+  asset_id:id,kind:"photo",media_type:"image/png",created_at:"2026-11-13",availability:state,
+  annotation:{title:null,rating:null,favorite:false},
+  representative_location:{relative_path:id==="missing"?"photo.png":"teste/photo.png",root_display_name:"Synthetic"},
+ });
+ window.photoManager!.listGallery=vi.fn().mockResolvedValue({items:[photo("missing",availability),photo("nested","available")],next_cursor:null,has_more:false});
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+ await act(async()=>root.render(<App/>));
+ const missing=host.querySelector('[data-asset-id="missing"]')!.closest(".media-card")!;
+ expect(missing.querySelector<HTMLButtonElement>(".open-image")!.disabled).toBe(true);
+ await act(async()=>missing.querySelector(".media-placeholder")!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
+ expect(host.querySelector(".image-viewer")).toBeNull();
+ expect(window.photoManager!.getPreview).not.toHaveBeenCalled();
+ await act(async()=>host.querySelector('[data-asset-id="nested"]')!.closest(".media-card")!.querySelector<HTMLButtonElement>(".open-image")!.click());
+ expect(host.querySelector(".viewer-caption")?.textContent).toContain("1 de 1");
+ await act(async()=>viewerPhoto().click());
+ expect(host.querySelectorAll(".viewer-filmstrip button")).toHaveLength(1);
+ expect(host.querySelector<HTMLButtonElement>('[aria-label="Próxima imagem"]')!.disabled).toBe(true);
+});
+
+it("skips unavailable photos while loading another viewer page", async () => {
+ const photo = (id:string,availability:GalleryItem["availability"]):GalleryItem => ({
+  asset_id:id,kind:"photo",media_type:"image/png",created_at:"2026-11-13",availability,
+  annotation:{title:id,rating:null,favorite:false},representative_location:null,
+ });
+ window.photoManager!.listGallery=vi.fn()
+  .mockResolvedValueOnce({items:[photo("first","available")],next_cursor:"page-2",has_more:true})
+  .mockResolvedValueOnce({items:[photo("missing","unavailable")],next_cursor:"page-3",has_more:true})
+  .mockResolvedValueOnce({items:[photo("last","available")],next_cursor:null,has_more:false});
+ window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
+ await act(async()=>root.render(<App/>)); await click("Abrir imagem"); await click("Próxima");
+ expect(window.photoManager!.listGallery).toHaveBeenNthCalledWith(2,{pageSize:24,after:"page-2"});
+ expect(window.photoManager!.listGallery).toHaveBeenNthCalledWith(3,{pageSize:24,after:"page-3"});
+ expect(window.photoManager!.getPreview).toHaveBeenCalledWith("last");
+ expect(window.photoManager!.getPreview).not.toHaveBeenCalledWith("missing");
+ expect(host.querySelector(".viewer-caption")?.textContent).toContain("2 de 2");
+ await act(async()=>viewerPhoto().click());
+ expect(host.querySelectorAll(".viewer-filmstrip button")).toHaveLength(2);
+});
 
 it("shows viewer commands only in the photo menu and keeps Escape local to it",async()=>{
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});

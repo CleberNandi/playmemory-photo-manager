@@ -178,14 +178,17 @@ button, summary { touch-action: manipulation; }
 .calendar-heading h2 { margin: 0 0 6px; }
 .calendar-heading p { color: var(--color-text-muted); max-width: 54ch; }
 .calendar-heading button, .undated-button { padding: 6px 9px; margin: 3px; }
-.calendar-years, .calendar-months { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 12px; }
-.calendar-years button, .calendar-months button { display: flex; flex-direction: column; gap: 12px; text-align: left; padding: 18px 12px; border: 1px solid var(--color-border); background: #f2f6f9; }
-.calendar-years strong { font-size: 25px; }
-.calendar-months button:disabled { background: #f5f5f5; color: #666; }
-.calendar-days { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 3px; }
-.calendar-days > strong { text-align: center; padding-block: 8px; font-size: 11px; }
-.calendar-days button { min-width: 0; min-height: 80px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 8px; background: #e2eef7; border: 1px solid #7298b3; }
-.calendar-days button:disabled { color: #68717b; background: #f3f3f3; border-color: var(--color-border); }
+.calendar-years, .calendar-months { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.calendar-years button, .calendar-months button { display: flex; flex-direction: column; gap: 10px; text-align: left; padding: 18px 14px; border: 1px solid #3b4d68; border-radius: 8px; background: #202938; color: var(--color-text); }
+.calendar-years button:hover:not(:disabled), .calendar-months button:hover:not(:disabled) { background: var(--color-sidebar-active); border-color: var(--color-accent-strong); }
+.calendar-years button span, .calendar-months button:not(:disabled) span, .calendar-days button:not(:disabled) span { color: var(--color-accent-strong); font-weight: 500; }
+.calendar-years strong { font-size: 25px; color: var(--color-text); }
+.calendar-months button:disabled { background: #141821; color: #687387; border-color: var(--color-border); }
+.calendar-days { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 4px; }
+.calendar-days > strong { text-align: center; padding-block: 8px; font-size: 11px; color: var(--color-text-muted); }
+.calendar-days button { min-width: 0; min-height: 80px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 8px; background: #203147; color: var(--color-text); border: 1px solid #4d739e; border-radius: 6px; }
+.calendar-days button:hover:not(:disabled) { background: #283e5a; border-color: var(--color-accent-strong); }
+.calendar-days button:disabled { color: #687387; background: #141821; border-color: var(--color-border); }
 .calendar-days span { font-size: 11px; overflow-wrap: anywhere; }
 .undated-button { margin-top: 24px; }
 .open-image { margin-top: 6px; padding: 3px 0; border: 0; background: transparent; text-decoration: underline; color: var(--color-accent-strong); }
@@ -415,3 +418,13 @@ button:disabled { opacity: .52; }
 .workspace-heading { grid-column: 1 / -1; padding: 10px 16px; background: #12151d; border-bottom: 1px solid var(--color-border); }
 .folder-import-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .folder-import-heading button { padding: 4px 8px; }
+.gallery-filters .date-filter { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-muted); }
+.gallery-filters input[type="date"] { padding: 4px 7px; min-height: 31px; }
+.action-toast {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 120;
+  display: inline-flex; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: 10px; border: 1px solid #3f6288;
+  background: #1b2a3d; color: var(--color-text); box-shadow: 0 10px 28px #000a;
+}
+.action-toast-error { border-color: #8c464f; background: #341c22; color: var(--color-danger); }
+.action-toast .toast-dismiss { padding: 2px 7px; line-height: 1.1; border-radius: 6px; }

@@ -111,6 +111,7 @@ app.whenReady().then(async () => {
   };
   const query = async (method: "gallery.list" | "gallery.facets" | "calendar.summary" | "preview.get" | "asset.details" | "thumbnail.get", id: unknown, params: Record<string, unknown>) => {
     if (recovering || libraries.isBusy) throw new Error("busy");
+    if (!demo && (method === "gallery.list" || method === "calendar.summary")) params = {...params, exclude_missing:true};
     return demo ? backend.request(method, params) : libraries.query(method, id, params);
   };
   const demoState = () => ({state: "demo", session: null, reopen: false});
@@ -176,6 +177,8 @@ app.whenReady().then(async () => {
           if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 5) throw new Error("invalid_request");
         } else if (key === "tag_id") {
           if (!canonicalId(value)) throw new Error("invalid_request");
+        } else if (key === "created_date" || key === "modified_date") {
+          if (typeof value !== "string" || !/^[0-9]{4}(-[0-9]{2}){0,2}$/.test(value)) throw new Error("invalid_request");
         } else if (!["keyword", "media_type", "camera", "lens"].includes(key)
           || typeof value !== "string" || value.length > 200 || value.includes("\0")) throw new Error("invalid_request");
         filters[key] = value;
@@ -371,7 +374,7 @@ app.whenReady().then(async () => {
   register("backend:retry", 0, async () => {
     if (recovering || libraries.isBusy) throw new Error("busy");
     if (!demo && libraries.current().state === "active") {
-      try { return await libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24, include_roots: true}); }
+      try { return await libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24, include_roots: true, exclude_missing: true}); }
       catch (error) { if ((error as {code?: string}).code) throw error; }
     }
     if (libraries.isBusy) throw new Error("busy");
@@ -381,7 +384,7 @@ app.whenReady().then(async () => {
       await backend.restart();
       if (!demo) await libraries.initialize();
       mainWindow?.webContents.send("backend:reset");
-      return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24, include_roots: true});
+      return demo ? backend.request("gallery.list", {page_size: 24}) : libraries.query("gallery.list", libraries.current().session?.session_id, {page_size: 24, include_roots: true, exclude_missing: true});
     } finally { recovering = false; }
   });
   if(managedMode){

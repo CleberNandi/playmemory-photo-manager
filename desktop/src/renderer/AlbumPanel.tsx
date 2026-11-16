@@ -24,6 +24,11 @@ export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename,
 
   useEffect(() => { if (picking) heading.current?.focus(); }, [picking]);
   useEffect(() => {
+    if (!feedback || feedback.error) return;
+    const timer = setTimeout(() => setFeedback(undefined), 4500);
+    return () => clearTimeout(timer);
+  }, [feedback]);
+  useEffect(() => {
     if (active) return;
     let live = true;
     api.listAlbums!(0).then(page => {
@@ -57,6 +62,7 @@ export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename,
     if (!value) return;
     if (action === "rename" && active) {
       onRename?.(await api.renameAlbum!(active.id, value));
+      setFeedback({text:"Álbum renomeado."});
     } else {
       const album = await api.createAlbum!(value);
       const page = await api.listAlbums!(0);
@@ -112,6 +118,9 @@ export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename,
       setAlbums(previous => [...new Map([...previous, ...page.albums].map(album => [album.id, album])).values()]);
       setOffset(page.next_offset);
     })}>Carregar mais álbuns</button>}
-    {feedback && <p role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
+    {feedback && <div className={`action-toast${feedback.error ? " action-toast-error" : ""}`} role={feedback.error ? "alert" : "status"}>
+      <span>{feedback.text}</span>
+      <button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={() => setFeedback(undefined)}>×</button>
+    </div>}
   </section>;
 }

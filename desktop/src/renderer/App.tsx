@@ -24,10 +24,10 @@ async function requestGallery(retry = false, capturePeriod: string | null = null
   const bridge = window.photoManager;
   if (!bridge) throw new Error("Desktop bridge unavailable");
   if (retry) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly&&!rootId&&!albumId&&!Object.keys(filters).length)return page;}
-  return bridge.listGallery({pageSize:24,...(albumId?{albumId}:{}),...(Object.keys(filters).length?{filters}:{}),...(rootId?{rootId,folderPath:folderPath??""}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
+  return bridge.listGallery({pageSize:24,...(albumId?{albumId}:{}),...(Object.keys(filters).length?{filters}:{}),...(rootId?{rootId,...(folderPath?{folderPath}:{})}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
 }
 
-type View = "gallery" | "duplicates" | "folders" | "albums";
+type View = "gallery" | "duplicates" | "folders" | "albums" | "tools";
 type IconName = "folder" | "library" | "album" | "tools" | "settings" | "photo" | "shield";
 
 export function App() {
@@ -36,7 +36,13 @@ export function App() {
 
 function GalleryApp() {
   const session = useLibrarySession();
-  const [actionError,setActionError]=useState(false);
+  const [toast,setToast]=useState<{text:string;error?:boolean}|null>(null);
+  useEffect(()=>{
+    if(!toast||toast.error)return;
+    const timer=setTimeout(()=>setToast(null),4500);
+    return ()=>clearTimeout(timer);
+  },[toast]);
+  const setActionError=(value:boolean)=>setToast(value?{text:"Não foi possível executar a ação. Confira se a imagem e a biblioteca continuam disponíveis.",error:true}:null);
   const [importSequence,setImportSequence]=useState(0);
   const [preparing, setPreparing] = useState(false);
   const [display, setDisplay] = useState<"thumbnails" | "details">("thumbnails");
@@ -99,7 +105,7 @@ function GalleryApp() {
           pageSize: 24, after,
           ...(album ? {albumId:album.id} : {}),
           ...(Object.keys(filters).length ? {filters} : {}),
-          ...(rootId ? {rootId, folderPath} : {}),
+          ...(rootId ? {rootId, ...(folderPath ? {folderPath} : {})} : {}),
           ...(captureFilter ? {capturePeriod:captureFilter} : {}),
           ...(favorites ? {favoritesOnly:true} : {}),
         });
@@ -108,7 +114,7 @@ function GalleryApp() {
         for (const item of page.items) loaded.set(item.asset_id, item);
         setState({kind:"ready", page:{...page, items:[...loaded.values()]}});
         if (!forViewer || navigation !== viewerNavigation.current) return;
-        const photos = page.items.filter(item => isVisible(item) && item.kind === "photo" && !seen.has(item.asset_id));
+        const photos = page.items.filter(item => isVisible(item) && item.kind === "photo" && item.availability === "available" && !seen.has(item.asset_id));
         if (photos.length) {
           setViewerItems([...viewerItems, ...photos]);
           showViewerAsset(photos[0].asset_id);
@@ -120,6 +126,7 @@ function GalleryApp() {
   };
   useEffect(()=>window.photoManager?.onGalleryChanged?.(()=>{
     galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setGalleryRevision(value=>value+1);
+    setMediaRevision(value=>value+1);setDetailsRevision(value=>value+1);
   }),[]);
   const load = () => {
     setSelected(null);
@@ -157,6 +164,18 @@ function GalleryApp() {
     (!folder || !!rootId || item.representative_location?.root_display_name === folder);
   const visible = items.filter(isVisible);
   useEffect(() => {
+    const get = window.photoManager?.getAssetDetails;
+    if (!get || !selected || viewer !== null || state.kind !== "ready"
+      || state.page.items.some(item => item.asset_id === selected)) return;
+    let active = true;
+    void get(selected).then(value => {
+      if (active && value.status === "ready" && value.details.locations.length > 0
+        && value.details.locations.every(location => location.availability === "missing"
+          && location.root_availability === "available")) setSelected(null);
+    }).catch(() => { /* A failed read does not prove absence. */ });
+    return () => { active = false; };
+  }, [selected, viewer, state]);
+  useEffect(() => {
     if (viewer === null) return;
     const button = [...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")]
       .find(candidate => candidate.dataset.assetId === viewer);
@@ -170,7 +189,7 @@ function GalleryApp() {
     setSelected(id);setPropertiesOpen(true);setViewer(id);
   };
   const openAsset=(id:string)=>{
-    const sequence = visible.filter(item => item.kind === "photo");
+    const sequence = visible.filter(item => item.kind === "photo" && item.availability === "available");
     if (!sequence.some(item => item.asset_id === id)) return;
     setViewerItems(sequence);
     showViewerAsset(id);
@@ -201,6 +220,7 @@ function GalleryApp() {
     setState(previous=>previous.kind!=="ready"?previous:{kind:"ready",page:{...previous.page,items:previous.page.items.map(item=>item.asset_id===id?{...item,annotation:{...item.annotation,favorite:value}}:item).filter(item=>!favorites||item.annotation.favorite)}});
     if(favorites&&value)setGalleryRevision(n=>n+1);
     setDetailsRevision(n=>n+1);
+    setToast({text:value?"Imagem adicionada aos favoritos.":"Imagem removida dos favoritos."});
   };
   const changeAlbum = (next: Album | null) => {
     if (next?.id === album?.id) return;
@@ -213,17 +233,17 @@ function GalleryApp() {
     setAlbum(next);
   };
   const openCalendar=(period:string|null)=>{browseAll(false);setPreparing(false);setPropertiesOpen(false);setCalendarPeriod(period);setCalendar(true);};
-  const browsePeriod=(period:string|null)=>{
+  const browsePeriod=useCallback((period:string|null)=>{
     galleryEpoch.current++; inFlight.current=false; setPaging(false);setPageError(false);setSelected(null);setState({kind:"loading"});
-    setCalendar(false);setCaptureFilter(period);setGalleryRevision(n=>n+1);
-  };
+    setCalendar(period!==null);setCaptureFilter(period);setGalleryRevision(n=>n+1);
+  },[setPaging,setPageError,setSelected,setState,setCalendar,setCaptureFilter,setGalleryRevision]);
   const resetScope = () => {
     if (calendar || captureFilter) browsePeriod(null);
     setSelected(null);
     setAlbumTarget(null);
     setCalendar(false);
   };
-  const showCollection = (next: "folders" | "albums") => {
+  const showCollection = (next: "folders" | "albums" | "tools") => {
     resetScope();
     setView(next);
   };
@@ -280,9 +300,11 @@ function GalleryApp() {
     setPaging(false);
     setPageError(false);
     setSelected(null);
+    setDetailsRevision(revision=>revision+1);
     setGalleryRevision(revision=>revision+1);
   };
   const title = view === "duplicates" ? "Duplicatas exatas"
+    : view === "tools" ? "Ferramentas"
     : view === "albums" ? "Álbuns" : view === "folders" ? "Pastas"
     : album?.name ?? (folderPath ? folderPath.split("/").at(-1) : activeRoot?.name)
       ?? (favorites ? "Favoritos" : "Biblioteca");
@@ -297,7 +319,7 @@ function GalleryApp() {
           <hr />
           <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
         </DesktopMenu>
-        <DesktopMenu label="Ferramentas">{session?.catalogingEnabled && <button onClick={()=>{setCalendar(false);setPreparing(true);}}>Preparação avançada</button>}<button onClick={navigateDuplicates}>Duplicatas exatas</button></DesktopMenu>
+        <DesktopMenu label="Ferramentas"><button onClick={() => showCollection("tools")}>Página de ferramentas</button>{session?.catalogingEnabled && <button onClick={()=>{setCalendar(false);setPreparing(true);}}>Preparação avançada</button>}<button onClick={navigateDuplicates}>Duplicatas exatas</button></DesktopMenu>
         <DesktopMenu label="Ajuda"><p>Operação local. Imagens só são alteradas ao salvar. Favoritos, período e pastas consultam o catálogo. A busca e os filtros consultam a biblioteca inteira.</p></DesktopMenu>
       </nav>
     <header className="workspace-heading"><WorkspaceIdentity displayName={session?.displayName} /></header>
@@ -305,7 +327,7 @@ function GalleryApp() {
       albumActive={!!album} albums={canManageAlbums ? () => showCollection("albums") : undefined}
       folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled}
       preparing={preparing} onPrepare={openFolderPicker} onFolders={() => showCollection("folders")}
-      onSource={(_id, favorite) => browseAll(favorite)} onNavigate={navigateDuplicates} />
+      onSource={(_id, favorite) => browseAll(favorite)} onNavigate={() => showCollection("tools")} />
     <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />
     <main className="workspace">
       <header className="view-toolbar">
@@ -322,9 +344,9 @@ function GalleryApp() {
         {view === "gallery" && selected && canManageAlbums && <button onClick={() => setAlbumTarget(selected)}>Adicionar a álbum…</button>}
       </header>
       {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor/>}
-      {actionError&&<p role="alert">Não foi possível executar a ação. Confira se a imagem e a biblioteca continuam disponíveis.</p>}
+      {toast&&<div className={`action-toast${toast.error?" action-toast-error":""}`} role={toast.error?"alert":"status"}><span>{toast.text}</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={()=>setToast(null)}>×</button></div>}
       {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onDismiss={() => setImportSequence(0)} onOpenFolder={(id,path)=>{setImportSequence(0);showFolder(id,path);}} onApplied={()=>{
-        galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setFilters({});setAlbum(null);setFolder(null);setFolderPath("");setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);
+        galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setFilters({});setAlbum(null);setFolder(null);setFolderPath("");setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);setToast({text:"Pasta verificada e catálogo atualizado."});
       }} />}
       {session?.catalogingEnabled && <section className="preparation-workflow" hidden={!preparing} aria-label="Adicionar pastas">
         <button className="workflow-close" onClick={() => setPreparing(false)}>Recolher preparação</button>
@@ -343,7 +365,13 @@ function GalleryApp() {
         }}
         period={captureFilter} onClearPeriod={()=>browsePeriod(null)}
       />}
-      {view === "gallery" && calendar && <CaptureCalendar key={galleryRevision} period={calendarPeriod} onPeriod={setCalendarPeriod} onBrowse={browsePeriod} />}
+      {view === "gallery" && calendar && !captureFilter && <CaptureCalendar key={galleryRevision} period={calendarPeriod} onPeriod={setCalendarPeriod} onBrowse={browsePeriod} onUndatedOnly={browsePeriod} />}
+      {view === "gallery" && calendar && captureFilter && <section className="calendar-heading" aria-label="Fotos do calendário">
+        <div><h2>{captureFilter === "undated" ? "Sem data de captura" : `Captura: ${captureFilter}`}</h2>
+          {captureFilter === "undated" && <p>Estas fotos não informam uma data de captura. Datas de modificação e catalogação não são usadas para agrupá-las.</p>}
+        </div>
+        <div><button onClick={()=>openCalendar(null)}>Todos os anos</button><button onClick={()=>browsePeriod(null)}>Limpar período</button></div>
+      </section>}
       {(view === "folders" || view === "gallery" && activeRoot && !calendar) && <FolderNavigation
         roots={folders} root={view === "gallery" ? activeRoot : undefined}
         path={folderPath} children={subfolders} onBrowse={showFolder}
@@ -351,13 +379,30 @@ function GalleryApp() {
         onAdd={session?.folderImportEnabled || session?.catalogingEnabled ? openFolderPicker : undefined} />}
       {view === "albums" && canManageAlbums && <AlbumPanel onOpen={openAlbum} />}
       {view === "gallery" && album && canManageAlbums && <AlbumPanel key={album.id}
-        active={album} selected={selected} onOpen={openAlbum} onRename={setAlbum}
+        active={album} selected={selected} onOpen={openAlbum} onRename={next => {setAlbum(next);setDetailsRevision(value=>value+1);}}
         onBack={() => showCollection("albums")} onRemoved={removeFromAlbum}
-        onDelete={() => {changeAlbum(null);showCollection("albums");}} />}
+        onDelete={() => {changeAlbum(null);setDetailsRevision(value=>value+1);showCollection("albums");setToast({text:"Álbum excluído."});}} />}
       {view === "gallery" && albumTarget && canManageAlbums && <AlbumPanel key={albumTarget}
         picking={albumTarget} onOpen={openAlbum} onBack={() => setAlbumTarget(null)}
-        onAdded={() => {if (album) setGalleryRevision(value=>value+1);}} />}
-      <div hidden={view !== "gallery" || calendar} className="content" aria-busy={state.kind === "loading" || paging}>
+        onAdded={() => {setDetailsRevision(value=>value+1);if (album) setGalleryRevision(value=>value+1);}} />}
+      {view === "tools" && <section className="collection-page tools-page" aria-label="Página de ferramentas">
+        <h2>Ferramentas da biblioteca</h2>
+        <ul className="collection-grid">
+          <li>
+            <button className="collection-card" type="button" aria-label="Duplicatas exatas" onClick={navigateDuplicates}>
+              <Icon name="tools" />
+              <span>Duplicatas exatas</span>
+            </button>
+          </li>
+          {session?.catalogingEnabled && <li>
+            <button className="collection-card" type="button" onClick={() => {setView("gallery"); setCalendar(false); setPreparing(true);}}>
+              <Icon name="folder" />
+              <span>Preparação avançada</span>
+            </button>
+          </li>}
+        </ul>
+      </section>}
+      <div hidden={view !== "gallery" || calendar && !captureFilter} className="content" aria-busy={state.kind === "loading" || paging}>
         {state.kind === "loading" && <Status icon="photo" title="Abrindo o catálogo…" body="Conectando ao backend local seguro. Seus arquivos permanecem inalterados." />}
         {state.kind === "error" && <Status icon="photo" title="Não foi possível abrir a biblioteca" body="O backend local não respondeu. Nenhum arquivo foi alterado e você pode tentar novamente." action={<button className="primary-button" onClick={load}>Tentar novamente</button>} tone="error" />}
         {state.kind === "ready" && state.page.items.length === 0 && <Status icon="photo" title={Object.keys(filters).length?"Nenhuma foto corresponde aos filtros":favorites?"Nenhum favorito encontrado":captureFilter?"Nenhuma imagem neste período":album?"Este álbum está vazio":folder?"Nenhuma mídia nesta pasta":"Sua biblioteca está vazia"} body={Object.keys(filters).length?"Altere ou limpe os filtros para ver mais fotos.":favorites?"Marque fotos como favoritas na biblioteca. Este filtro consulta todo o catálogo, respeitando o período selecionado.":album?"Selecione um item na biblioteca e use Adicionar a álbum.":folder?"Abra uma subpasta para ver seu conteúdo.":"O catálogo local está aberto e pronto. Use Adicionar pastas para escolher um diretório e carregar suas imagens."} note="Nada foi importado ou alterado nos seus arquivos." />}
@@ -405,8 +450,8 @@ export function Sidebar({canListDevices = false, view = "gallery", onNavigate, f
     </nav>
     <details className="sidebar-disclosure"><summary>Notificações</summary><p>{preparing ? "Consulte o andamento no painel central." : "O andamento aparece acima da galeria."}</p></details>
     {canListDevices && <details className="sidebar-disclosure"><summary>Câmeras e mídias</summary><MediaDevicesPanel /></details>}
-    <nav className="primary-nav sidebar-tools" aria-label="Ferramentas">
-      <NavItem icon="tools" label="Duplicatas exatas" active={view === "duplicates"} onClick={onNavigate} />
+    <nav className="primary-nav sidebar-tools" aria-label="Utilitários">
+      <NavItem icon="tools" label="Ferramentas" active={view === "tools" || view === "duplicates"} onClick={onNavigate} />
     </nav>
     <div className="sidebar-footer"><button className="nav-item" disabled={!canPrepare} onClick={onPrepare}>+ Adicionar pastas</button><p className="privacy-note"><Icon name="shield" /><span><strong>Local e offline</strong><br />Imagens só são alteradas ao salvar.</span></p></div>
   </aside>;

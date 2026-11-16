@@ -10,18 +10,19 @@ const item = (id: string): GalleryItem => ({asset_id: id, kind: "photo", media_t
 const details = (id: string): AssetDetails => ({asset: {id, kind: "photo", sha256: null, hash_state: "absent", byte_size: null, media_type: null, status: "active", created_at: "synthetic"}, capture: null, annotation: null, tags: [], metadata: [], metadata_state: "not_extracted", locations: [], locations_truncated: false, availability: "no_location"});
 beforeEach(() => { Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.photoManager; });
-const mount = async (getAssetDetails: (id: string) => Promise<DetailsResult>) => {
-  window.photoManager = {listGallery: vi.fn().mockResolvedValue({items: [item("first"), item("second")], next_cursor: "preserved", has_more: true}), retryGallery: vi.fn().mockResolvedValue({items: [], has_more: false, next_cursor: null}), getAssetDetails};
+const mount = async (getAssetDetails: (id: string) => Promise<DetailsResult>, availability: GalleryItem["availability"] = "no_location") => {
+  window.photoManager = {listGallery: vi.fn().mockResolvedValue({items: [item("first"), item("second")].map(item=>({...item,availability})), next_cursor: "preserved", has_more: true}), retryGallery: vi.fn().mockResolvedValue({items: [], has_more: false, next_cursor: null}), getAssetDetails};
   await act(async () => root.render(<App />));
 };
 const select = async (index = 0) => { await act(async () => host.querySelectorAll<HTMLButtonElement>(".card-select")[index].click()); };
 it("opens read-only details with visible selection, focuses close, and Escape restores origin", async () => {
-  await mount(async (id) => ({status: "ready", details: details(id)}));
+  await mount(async (id) => ({status: "ready", details: {...details(id), albums: [{id: "album-1", name: "Favoritas 2026"}, {id: "album-2", name: "Wallpapers"}]}}));
   await select();
   expect(host.querySelector('[aria-pressed="true"]')).not.toBeNull();
   const close = host.querySelector<HTMLButtonElement>(".asset-details button")!;
   expect(document.activeElement).toBe(close);
   expect(host.textContent).toContain("Metadata não extraída");
+  expect(host.textContent).toContain("Favoritas 2026, Wallpapers");
   expect(host.querySelectorAll(".media-card")).toHaveLength(2);
   expect(host.querySelector(".pagination button")?.textContent).toBe("Carregar mais");
   await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true})));
@@ -75,7 +76,7 @@ it("discards pending details after closing and reopening a different asset", asy
 
 it.each(["button","escape"])("keeps the opened asset selected and restores its card after viewer close via %s",async(mode)=>{
  HTMLDialogElement.prototype.showModal=vi.fn();
- await mount(async(id)=>({status:"ready",details:details(id)}));
+ await mount(async(id)=>({status:"ready",details:{...details(id),availability:"available"}}),"available");
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
  await act(async()=>root.render(<App/>));
  await select(0);

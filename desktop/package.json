@@ -12,6 +12,7 @@
     "start": "pnpm build && electron .",
     "test": "vitest run src",
     "smoke": "pnpm build && cross-env PLAYMEMORIES_DESKTOP_SMOKE=1 electron .",
+    "smoke:subfolder-calendar": "pnpm build && electron scripts/subfolder-calendar-smoke.mjs",
     "typecheck": "tsc -b",
     "lint": "eslint ."
   },

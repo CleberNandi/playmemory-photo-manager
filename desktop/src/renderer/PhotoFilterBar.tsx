@@ -110,6 +110,8 @@ export function PhotoFilterBar({filters, facets, favorites, onFavorites, onChang
         options={(facets?.[facet]??[]).map(value=>({id:value,name:value}))}
         more={facets?.more?.includes(facet)} open={openFacet===facet} onOpen={open=>setOpenFacet(open?facet:null)} onChange={value=>update(key,value)} />
     )}
+    <label>Data de criação <input type="date" aria-label="Data de criação" value={filters.created_date??""} onChange={e=>update("created_date",e.target.value)} /></label>
+    <label>Data de modificação <input type="date" aria-label="Data de modificação" value={filters.modified_date??""} onChange={e=>update("modified_date",e.target.value)} /></label>
     <form role="search" onSubmit={e=>{e.preventDefault();update("keyword",draft.trim());}}>
       <input type="search" aria-label="Palavra-chave" placeholder="Buscar na biblioteca…" maxLength={200}
         value={draft} onChange={e=>setDraft(e.target.value)} />

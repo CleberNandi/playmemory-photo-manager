@@ -13,7 +13,11 @@ beforeEach(() => {Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); h
 afterEach(async () => {await act(async () => root.unmount()); host.remove(); delete window.photoManager;});
 const mount = async () => {await act(async () => root.render(<App />));};
 const click = async (selector: string) => {await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click());};
-const navigate = async () => click('[aria-label="Duplicatas exatas"]');
+const navigate = async () => {
+  expect(host.querySelector('.sidebar [aria-label="Duplicatas exatas"]')).toBeNull();
+  await click('[aria-label="Ferramentas"]');
+  await click('[aria-label="Duplicatas exatas"]');
+};
 function bridge() {
   window.photoManager = {listGallery: vi.fn().mockResolvedValue({items: [], next_cursor: null, has_more: false}), retryGallery: vi.fn(), listDuplicates: vi.fn().mockResolvedValue({status: "ready", page: list()}), getDuplicateGroup: vi.fn().mockResolvedValue({status: "ready", page: members()})};
   return window.photoManager;

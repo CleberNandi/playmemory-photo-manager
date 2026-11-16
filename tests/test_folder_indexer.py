@@ -71,6 +71,138 @@ def test_restart_finds_files_added_while_application_was_closed(library):
     assert len(dispatcher.request("gallery.list", {"session_id": session})["items"]) == 2
 
 
+def test_parent_alone_monitors_new_descendants_and_reopens_with_their_capture_dates(library):
+    from PIL import Image
+
+    dispatcher, path, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    dispatcher.indexer.interval = 3600
+    dispatcher.indexer.due = time.monotonic() + 3600
+    nested = root / "teste" / "filha"
+    nested.mkdir(parents=True)
+    png = nested / "undated.png"
+    raster(png, "PNG")
+    exif = Image.Exif()
+    exif[34665] = {36867: "2024:02:29 23:30:00", 36881: "-03:00"}
+    raster(nested / "capture.jpg", exif=exif)
+    original = png.read_bytes(), png.stat().st_mtime_ns
+    dispatcher.indexer.last_check = None
+    result = settle(dispatcher, session, force=False)
+    assert result["error"] is None, result
+    assert result["added_count"] == 2
+    with connect(path) as connection:
+        roots = Catalog(connection).list_roots()
+        assert len(roots) == 1
+        assert roots[0].normalized_path == str(root)
+    root_page = dispatcher.request("gallery.list", {"session_id": session, "root_id": roots[0].id})
+    assert root_page["subfolders"] == ("teste",)
+    assert len(root_page["items"]) == 3
+    day = dispatcher.request(
+        "gallery.list", {"session_id": session, "capture_period": "2024-02-29"}
+    )
+    assert [item["representative_location"]["relative_path"] for item in day["items"]] == [
+        "teste/filha/capture.jpg"
+    ]
+    dispatcher.request("index.pulse", {"session_id": session, "allow": False})
+    dispatcher.request("library.close", {"session_id": session})
+    raster(nested / "while-closed.png", "PNG")
+    session = dispatcher.request(
+        "library.open", {"path": str(path), "library_handle": str(uuid4())}
+    )["session"]["session_id"]
+    assert settle(dispatcher, session)["error"] is None
+    assert len(dispatcher.request("gallery.list", {"session_id": session})["items"]) == 4
+    from playmemories_photo_manager.gallery.calendar import mtime_key
+
+    mtime_year = mtime_key(png.stat().st_mtime_ns)[:4]
+    expected_buckets = (
+        [["2024", 4]]
+        if mtime_year == "2024"
+        else sorted([["2024", 1], [mtime_year, 3]], key=lambda bucket: bucket[0])
+    )
+    assert dispatcher.request("calendar.summary", {"session_id": session}) == {
+        "period": None,
+        "buckets": expected_buckets,
+        "undated": 0,
+        "partial": 0,
+    }
+    assert (png.read_bytes(), png.stat().st_mtime_ns) == original
+
+
+@pytest.mark.parametrize("manual_refresh", [False, True])
+def test_deleted_subtree_without_additions_updates_views_and_retains_catalog_history(
+    library, manual_refresh
+):
+    import shutil
+
+    from PIL import Image
+
+    dispatcher, path, session, root, _ = library
+    assert settle(dispatcher, session)["error"] is None
+    nested = root / "teste" / "filha"
+    nested.mkdir(parents=True)
+    raster(nested / "undated.png", "PNG")
+    exif = Image.Exif()
+    exif[34665] = {36867: "2024:02:29 23:30:00"}
+    raster(nested / "capture.jpg", exif=exif)
+    before = settle(dispatcher, session)
+    assert before["error"] is None
+    remaining = root / "first.jpg"
+    original = remaining.read_bytes(), remaining.stat().st_mtime_ns
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        root_id = catalog.list_roots()[0].id
+        locations = catalog.list_root_locations(root_id)
+        deleted_ids = {
+            loc.asset_id for loc in locations if loc.normalized_relative_path.startswith("teste/")
+        }
+        selected_id = next(iter(deleted_ids))
+        catalog.set_favorite(selected_id, True)
+        album = catalog.create_album("Preservado")
+        catalog.add_asset_to_album(album.id, selected_id)
+    dispatcher.indexer.interval = 3600
+    dispatcher.indexer.due = time.monotonic() + 3600
+    shutil.rmtree(root / "teste")
+    dispatcher.indexer.last_check = None
+    after = settle(dispatcher, session, force=manual_refresh)
+    assert after["error"] is None, after
+    assert after["revision"] == before["revision"] + 1
+    assert after["added_count"] == before["added_count"]
+    page = dispatcher.request(
+        "gallery.list", {"session_id": session, "exclude_missing": True, "root_id": root_id}
+    )
+    assert len(page["items"]) == 1
+    assert page["items"][0]["representative_location"]["relative_path"] == "first.jpg"
+    assert page["subfolders"] == ()
+    from playmemories_photo_manager.gallery.calendar import mtime_key
+
+    remaining_year = mtime_key(original[1])[:4]
+    assert dispatcher.request(
+        "calendar.summary", {"session_id": session, "exclude_missing": True}
+    ) == {
+        "period": None,
+        "buckets": [[remaining_year, 1]],
+        "undated": 0,
+        "partial": 0,
+    }
+    for period in (None, "2024", "2024-02", "2024-02-29", "undated"):
+        page = dispatcher.request(
+            "gallery.list",
+            {"session_id": session, "exclude_missing": True, "capture_period": period},
+        )
+        assert not deleted_ids.intersection(item["asset_id"] for item in page["items"])
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        assert len(catalog.list_assets()) == 3
+        assert all(
+            loc.availability == "missing"
+            for loc in catalog.list_root_locations(root_id)
+            if loc.asset_id in deleted_ids
+        )
+        assert catalog.get_annotation(selected_id).favorite
+        assert [asset.id for asset in catalog.list_album_assets(album.id)] == [selected_id]
+    assert (remaining.read_bytes(), remaining.stat().st_mtime_ns) == original
+
+
 def test_root_replacement_is_not_silently_authorized(library):
     dispatcher, _, session, root, _ = library
     dispatcher.request("index.pulse", {"session_id": session, "allow": False})
@@ -367,6 +499,12 @@ def test_returning_to_the_original_path_restores_an_absent_location(library):
         assert (
             Catalog(connection).get_asset_locations(original.asset_id)[0].availability == "missing"
         )
+    assert (
+        dispatcher.request("gallery.list", {"session_id": session, "exclude_missing": True})[
+            "items"
+        ]
+        == ()
+    )
 
     detached.rename(root / "first.jpg")
     dispatcher.indexer.last_check = None
@@ -378,3 +516,9 @@ def test_returning_to_the_original_path_restores_an_absent_location(library):
         [location] = catalog.get_asset_locations(original.asset_id)
         assert (location.id, location.availability) == (original.id, "present")
         assert len(catalog.list_assets()) == 1
+    assert [
+        item["asset_id"]
+        for item in dispatcher.request(
+            "gallery.list", {"session_id": session, "exclude_missing": True}
+        )["items"]
+    ] == [original.asset_id]

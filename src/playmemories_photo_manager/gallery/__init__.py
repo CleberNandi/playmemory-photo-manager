@@ -14,6 +14,7 @@ from .errors import (
     UnsupportedThumbnailPlatformError,
 )
 from .models import (
+    AlbumSummary,
     AnnotationSummary,
     AssetAvailability,
     AssetDetails,
@@ -35,6 +36,7 @@ from .queries import MAX_DETAIL_LOCATIONS, MAX_PAGE_SIZE, GalleryQueries
 from .thumbnails import SyntheticThumbnailStore
 
 __all__ = [
+    "AlbumSummary",
     "AnnotationSummary",
     "AssetAvailability",
     "AssetDetails",

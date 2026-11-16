@@ -106,6 +106,8 @@ export async function smoke(window: BrowserWindow, backend: PythonBackend, media
   }
   // D03-01: real Electron/preload/IPC/Python, no substitute renderer bridge.
   window.setSize(1180, 760);
+  await evaluate(`document.querySelector('[aria-label="Ferramentas"]').click()`);
+  await waitFor(`!!document.querySelector('[aria-label="Duplicatas exatas"]')`);
   await evaluate(`document.querySelector('[aria-label="Duplicatas exatas"]').click()`);
   if (demo) {
     await waitFor('document.querySelectorAll(".group-select").length === 2');
@@ -309,7 +311,7 @@ async function smokeApplication(window: BrowserWindow, root: string): Promise<vo
   await waitFor('document.querySelectorAll(".calendar-days button").length === 29');
   await writeFile("/tmp/playmemories-capture-calendar.png", (await window.webContents.capturePage()).toPNG());
   await evaluate(`document.querySelector('[aria-label="2024-02-29: 2 foto(s)"]').click()`);
-  await waitFor('document.querySelectorAll(".media-card").length === 2 && document.querySelector(".gallery-filters").textContent.includes("2024-02-29")');
+  await waitFor('document.querySelectorAll(".media-card").length === 2 && document.querySelector(".calendar-heading")?.textContent.includes("2024-02-29")');
  await evaluate('document.querySelector(".favorite-toggle").click()');
   await waitFor('document.querySelector(".favorite-toggle").getAttribute("aria-pressed") === "true"');
   await click("☆ Favoritos");
@@ -379,7 +381,8 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await click("Adicionar a álbum…");
  await wait('!!document.querySelector(".album-panel .collection-card")');
  await click("Seleção de teste");
- await wait('document.querySelector(".album-panel")?.textContent.includes("Item adicionado")');
+ await wait('document.querySelector(".album-panel .action-toast")?.textContent.includes("Item adicionado")');
+ await wait('Array.from(document.querySelectorAll(".asset-details dt")).some(dt=>dt.textContent==="Álbuns"&&dt.nextElementSibling.textContent==="Seleção de teste")');
  await click("Fechar");
  await click("Álbuns");
  await wait('!!document.querySelector(".album-panel .collection-card")');
@@ -402,6 +405,7 @@ async function smokeManaged(window:BrowserWindow,backend:PythonBackend,root:stri
  await wait('document.querySelector(".view-toolbar h1")?.textContent==="Álbuns" && document.querySelector(".album-panel")?.textContent.includes("Nenhum álbum criado")');
  if (!(await readFile(location.path)).equals(originalBytes)) throw new Error("album changed original");
  console.log("SMOKE ALBUMS PASS: create, add, browse, rename, remove, cancel/confirm delete, and original bytes unchanged");
+ await click("Ferramentas");
  await click("Duplicatas exatas");
  await wait('document.querySelector(".duplicates-view")?.textContent.includes("Nenhuma mídia foi analisada")');
  await click("Buscar duplicatas");
