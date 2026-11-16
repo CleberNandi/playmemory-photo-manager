@@ -17,7 +17,7 @@ import { MediaDevicesPanel } from "./MediaDevicesPanel";
 import { FolderNavigation } from "./FolderNavigation";
 import { AlbumPanel } from "./AlbumPanel";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
-import type { Album, AnnotationField, GalleryItem, GalleryPage, PhotoFacets, PhotoFilters } from "./types";
+import type { Album, AnnotationField, GalleryItem, GalleryPage, MediaImportResult, PhotoFacets, PhotoFilters } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
 async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string, filters:PhotoFilters={}, albumId?:string, folderPath?:string): Promise<GalleryPage> {
@@ -404,7 +404,21 @@ function GalleryApp() {
       albumActive={!!album} albums={canManageAlbums ? () => showCollection("albums") : undefined}
       folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled}
       preparing={preparing} onPrepare={openFolderPicker} onFolders={() => showCollection("folders")}
-      onSource={(_id, favorite) => browseAll(favorite)} onNavigate={() => showCollection("tools")} />
+      onSource={(_id, favorite) => browseAll(favorite)} onNavigate={() => showCollection("tools")}
+      onDevicesImported={(imported) => {
+        if (imported.status !== "ready") return;
+        galleryEpoch.current++; inFlight.current = false; setPaging(false); setPageError(false);
+        setSelected(null); setFilters({}); setAlbum(null); setFolder(null); setFolderPath("");
+        setFavorites(false); setCaptureFilter(null); setCalendarPeriod(null); setCalendar(false);
+        setView("gallery"); setState({kind: "loading"}); setGalleryRevision((value) => value + 1);
+        setToast({
+          text: imported.copiedCount > 0
+            ? `Importação concluída: ${imported.copiedCount} arquivo(s) copiado(s) e ${imported.catalogedCount} catalogado(s).`
+            : imported.skippedCount > 0
+              ? `Nenhuma foto nova para importar (${imported.skippedCount} já existente(s)).`
+              : "Nenhuma imagem compatível encontrada na origem.",
+        });
+      }} />
     <PanelResize label="Largura da navegação" value={leftWidth} min={170} max={300} onChange={setLeftWidth} />
     <main className="workspace">
       <header className="view-toolbar">
@@ -430,7 +444,7 @@ function GalleryApp() {
           <button type="button" disabled={batchBusy} onClick={() => setBatchSelected([])}>Limpar seleção</button>
         </div>
       </section>}
-      {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor/>}
+      {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor onNotice={setToast}/>}
       {toast&&<div className={`action-toast${toast.error?" action-toast-error":""}`} role={toast.error?"alert":"status"}><span>{toast.text}</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={()=>setToast(null)}>×</button></div>}
       {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onDismiss={() => setImportSequence(0)} onOpenFolder={(id,path)=>{setImportSequence(0);showFolder(id,path);}} onApplied={()=>{
         galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);setSelected(null);setFilters({});setAlbum(null);setFolder(null);setFolderPath("");setFavorites(false);setCaptureFilter(null);setCalendarPeriod(null);setCalendar(false);setView("gallery");setState({kind:"loading"});setGalleryRevision(value=>value+1);setToast({text:"Pasta verificada e catálogo atualizado."});
@@ -540,11 +554,11 @@ function GalleryApp() {
   </div>;
 }
 
-export function Sidebar({canListDevices = false, view = "gallery", onNavigate, folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource, onFolders, albums, albumActive = false}: {
+export function Sidebar({canListDevices = false, view = "gallery", onNavigate, folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource, onFolders, albums, albumActive = false, onDevicesImported}: {
   albums?: () => void; albumActive?: boolean; canListDevices?: boolean; view?: View;
   onNavigate?: () => void; folder?: string | null; favorites?: boolean; canPrepare?: boolean;
   preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void;
-  onFolders?: () => void;
+  onFolders?: () => void; onDevicesImported?: (result: MediaImportResult) => void;
 }) {
   return <aside className="sidebar">
     <nav className="primary-nav" aria-label="Principal">
@@ -554,7 +568,7 @@ export function Sidebar({canListDevices = false, view = "gallery", onNavigate, f
       <NavItem icon="album" label="Álbuns" active={view === "albums" || view === "gallery" && albumActive} disabled={!albums} onClick={albums} />
     </nav>
     <details className="sidebar-disclosure"><summary>Notificações</summary><p>{preparing ? "Consulte o andamento no painel central." : "O andamento aparece acima da galeria."}</p></details>
-    {canListDevices && <details className="sidebar-disclosure"><summary>Câmeras e mídias</summary><MediaDevicesPanel /></details>}
+    {canListDevices && <details className="sidebar-disclosure"><summary>Câmeras e mídias</summary><MediaDevicesPanel onImported={onDevicesImported} /></details>}
     <nav className="primary-nav sidebar-tools" aria-label="Utilitários">
       <NavItem icon="tools" label="Ferramentas" active={view === "tools" || view === "duplicates"} onClick={onNavigate} />
     </nav>

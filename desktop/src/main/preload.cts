@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("photoManager", {
   applyFileRename: (assetId: string, locationId: string, stem: string) =>
     scoped("rename:apply", {assetId, locationId, stem}),
   listMediaDevices: () => scoped("devices:list", null),
+  importMediaFromDevice: (deviceId: string | null = null) => scoped("devices:import", {deviceId}),
   startDuplicateScan: () => scoped("duplicates:start", {}),
   listDuplicates: (params: {pageSize?: number; after?: string | null} = {}) => scoped("duplicates:list", params),
   getDuplicateGroup: (params: {snapshotId: string; groupKey: string; pageSize?: number; after?: string | null}) => scoped("duplicates:group", params),

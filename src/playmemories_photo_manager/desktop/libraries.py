@@ -246,6 +246,7 @@ class LibraryDispatcher:
             "duplicates.decide",
             "duplicates.remove",
             "devices.list",
+            "devices.import",
             "duplicates.list",
             "duplicates.group",
         ):
@@ -270,6 +271,18 @@ class LibraryDispatcher:
         if method in ("duplicates.start", "duplicates.decide", "duplicates.remove"):
             return self.duplicate_scan.request(
                 active, method, {key: value for key, value in params.items() if key != "session_id"}
+            )
+        if method == "devices.import":
+            from .device_import import import_from_media
+
+            if not set(params) <= {"session_id", "device_id", "source_path", "destination_path"}:
+                raise LibraryError("invalid_request")
+            return import_from_media(
+                active,
+                device_id=params.get("device_id"),
+                source_path=params.get("source_path"),
+                destination_path=params.get("destination_path"),
+                protected_paths=self.protected_paths,
             )
         if method == "asset.reveal":
             from .media_location import reveal_location

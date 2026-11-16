@@ -85,6 +85,7 @@ declare global {
       previewFileRename?(assetId: string, locationId: string, stem: string): Promise<RenamePreview>;
       applyFileRename?(assetId: string, locationId: string, stem: string): Promise<RenamePreview>;
       listMediaDevices?(): Promise<MediaDevices>;
+      importMediaFromDevice?(deviceId?: string | null): Promise<MediaImportResult>;
       startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
       getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;
@@ -158,6 +159,11 @@ export type Album = {id: string; name: string};
 
 export type MediaDevices = {status: "ready"; devices: {id: string; name: string; kind: "imaging" | "storage"}[]; total_count: number}
   | {status: "unsupported" | "unavailable"};
+
+export type MediaImportResult =
+  | {status: "ready"; copiedCount: number; skippedCount: number; excludedCount: number; catalogedCount: number}
+  | {status: "cancelled"}
+  | {status: "error"; error: string; copiedCount?: number; skippedCount?: number; excludedCount?: number; catalogedCount?: number};
 
 export type RenamePreview = {status: "ready" | "applied"; current_relative_path: string; proposed_relative_path: string}
   | {status: "invalid_name" | "same_name" | "name_taken" | "source_unavailable"};

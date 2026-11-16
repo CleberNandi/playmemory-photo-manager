@@ -33,6 +33,15 @@ export class FolderImportController {
     void this.run(job);
     return structuredClone(job);
   }
+  async runPath(session:unknown,path:string):Promise<FolderImportJob>{
+    const id=this.require(session);
+    if(this.busy)return failure("busy");
+    this.stopped=false;
+    const job:FolderImportJob={job_id:randomUUID(),session_id:id,state:"scanning",added_count:0,excluded_count:0,error:null};
+    this.job=job;
+    await this.run(job,path);
+    return structuredClone(job);
+  }
   status(session:unknown,id:unknown):FolderImportJob{
     this.require(session);
     if(!canonicalId(id)||this.job?.job_id!==id||this.job.session_id!==session)return failure("not_found");
@@ -45,10 +54,10 @@ export class FolderImportController {
     this.require(job.session_id);
     return value;
   }
-  private async run(job:FolderImportJob){
+  private async run(job:FolderImportJob,fixedPath?:string){
     let applying=false;
     try{
-      const path=await this.choose();
+      const path=fixedPath??await this.choose();
       this.require(job.session_id);
       if(path===null){job.state="cancelled";return;}
       const binding=await this.identity(path);

@@ -100,7 +100,7 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","duplicates:start","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","duplicates:start","devices:import","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
       const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
@@ -322,6 +322,63 @@ app.whenReady().then(async () => {
     const {sessionId, params} = envelope(raw);
     if (demo || params !== null) throw new Error("invalid_request");
     return libraries.query("devices.list", sessionId, {});
+  });
+  register("devices:import", 1, async (raw) => {
+    const {sessionId, params} = envelope(raw);
+    if (demo || recovering || libraries.isBusy || folderImports?.busy || imageEdits?.busy) throw new Error("busy");
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
+    const keys = Object.keys(params);
+    if (keys.some(key => key !== "deviceId")) throw new Error("invalid_request");
+    const deviceId = (params as {deviceId?: unknown}).deviceId ?? null;
+    if (deviceId !== null && (typeof deviceId !== "string" || deviceId.length === 0 || deviceId.length > 128 || deviceId.includes("\0"))) {
+      throw new Error("invalid_request");
+    }
+    if (!mainWindow || !canonicalId(sessionId)) throw new Error("stale_session");
+    const pickDirectory = async (title: string, create = false): Promise<string | null> => {
+      if (!mainWindow) return null;
+      const selected = await dialog.showOpenDialog(mainWindow, {
+        title,
+        properties: create ? ["openDirectory", "createDirectory"] : ["openDirectory"],
+      });
+      if (selected.canceled || selected.filePaths.length !== 1) return null;
+      return nativePath(selected.filePaths[0], create);
+    };
+    let sourcePath: string | null = null;
+    if (deviceId === null || deviceId.startsWith("imaging:")) {
+      sourcePath = await pickDirectory("Escolher pasta da câmera ou mídia");
+      if (sourcePath === null) return {status: "cancelled"};
+    }
+    const destinationPath = await pickDirectory("Escolher pasta de destino na biblioteca", true);
+    if (destinationPath === null) return {status: "cancelled"};
+    let copyResult = await libraries.query("devices.import", sessionId, {
+      ...(sourcePath ? {source_path: sourcePath} : {device_id: deviceId}),
+      destination_path: destinationPath,
+    }) as {status: string; copied_count?: number; skipped_count?: number; excluded_count?: number; destination_path?: string};
+    if (copyResult.status === "source_not_mounted") {
+      sourcePath = await pickDirectory("Dispositivo não montado — escolher pasta de origem");
+      if (sourcePath === null) return {status: "cancelled"};
+      copyResult = await libraries.query("devices.import", sessionId, {
+        source_path: sourcePath,
+        destination_path: destinationPath,
+      }) as typeof copyResult;
+    }
+    if (copyResult.status !== "ready") return copyResult;
+    const copiedCount = copyResult.copied_count ?? 0;
+    const skippedCount = copyResult.skipped_count ?? 0;
+    const excludedCount = copyResult.excluded_count ?? 0;
+    let catalogedCount = 0;
+    if ((copiedCount > 0 || skippedCount > 0) && copyResult.destination_path) {
+      const job = await folderImports.runPath(sessionId, copyResult.destination_path);
+      if (job.error === "covered_subfolder") {
+        await indexer?.refresh();
+        catalogedCount = copiedCount;
+      } else if (job.state === "completed") {
+        catalogedCount = job.added_count;
+      } else if (job.error) {
+        return {status: "error", error: job.error, copiedCount, skippedCount, excludedCount, catalogedCount};
+      }
+    }
+    return {status: "ready", copiedCount, skippedCount, excludedCount, catalogedCount};
   });
   for (const [channel, method] of [["duplicates:start", "duplicates.start"], ["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"], ["duplicates:decide", "duplicates.decide"], ["duplicates:remove", "duplicates.remove"]] as const) {
     register(channel, 1, (raw) => {
