@@ -3,8 +3,8 @@ import type {Album} from "./types";
 
 export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename, onDelete, onAdded, onRemoved}: {
   active?: Album;
-  selected?: string | null;
-  picking?: string;
+  selected?: string | string[] | null;
+  picking?: string | string[];
   onOpen: (album: Album) => void;
   onBack?: () => void;
   onRename?: (album: Album) => void;
@@ -13,6 +13,8 @@ export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename,
   onRemoved?: () => void;
 }) {
   const api = window.photoManager!;
+  const pickingIds = !picking ? [] : Array.isArray(picking) ? picking : [picking];
+  const selectedIds = !selected ? [] : Array.isArray(selected) ? selected : [selected];
   const [albums, setAlbums] = useState<Album[]>([]);
   const [offset, setOffset] = useState<number | null>(null);
   const [action, setAction] = useState<"create" | "rename" | "delete" | null>(null);
@@ -73,16 +75,16 @@ export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename,
     setAction(null);
   }
 
-  return <section className={active ? "album-panel album-actions" : "album-panel collection-page"} aria-label={picking ? "Adicionar a álbum" : "Gerenciar álbuns"} aria-busy={busy}>
+  return <section className={active ? "album-panel album-actions" : "album-panel collection-page"} aria-label={pickingIds.length ? "Adicionar a álbum" : "Gerenciar álbuns"} aria-busy={busy}>
     <div className="collection-actions">
-      {picking && <h2 ref={heading} tabIndex={-1}>Adicionar a álbum</h2>}
-      {onBack && <button className="primary-button" onClick={onBack}>{picking ? "Fechar" : "Voltar aos álbuns"}</button>}
+      {pickingIds.length > 0 && <h2 ref={heading} tabIndex={-1}>{pickingIds.length > 1 ? `Adicionar ${pickingIds.length} itens a álbum` : "Adicionar a álbum"}</h2>}
+      {onBack && <button className="primary-button" onClick={onBack}>{pickingIds.length ? "Fechar" : "Voltar aos álbuns"}</button>}
       {!active && action !== "create" && <button className="primary-button" disabled={busy} onClick={() => start("create")}>Novo álbum</button>}
       {active && api.renameAlbum && <button className="primary-button" disabled={busy} onClick={() => start("rename")}>Renomear álbum</button>}
-      {active && selected && <button className="primary-button" disabled={busy} onClick={() => void run(async () => {
-        await api.changeAlbumMembership!(active.id, selected, "remove");
+      {active && selectedIds.length > 0 && <button className="primary-button" disabled={busy} onClick={() => void run(async () => {
+        for (const id of selectedIds) await api.changeAlbumMembership!(active.id, id, "remove");
         onRemoved?.();
-        setFeedback({text:"Item removido do álbum."});
+        setFeedback({text: selectedIds.length > 1 ? `${selectedIds.length} itens removidos do álbum.` : "Item removido do álbum."});
       })}>Remover do álbum</button>}
       {active && api.deleteAlbum && <button className="primary-button" disabled={busy} onClick={() => start("delete")}>Excluir álbum</button>}
     </div>
@@ -103,11 +105,23 @@ export function AlbumPanel({active, selected, picking, onOpen, onBack, onRename,
     {!active && albums.length > 0 && <ul className="collection-grid">
       {albums.map(album => <li key={album.id}>
         <button className="collection-card" disabled={busy} onClick={() => {
-          if (!picking) {onOpen(album);return;}
+          if (!pickingIds.length) {onOpen(album);return;}
           void run(async () => {
-            const result = await api.changeAlbumMembership!(album.id, picking, "add");
+            let changedCount = 0;
+            for (const id of pickingIds) {
+              const result = await api.changeAlbumMembership!(album.id, id, "add");
+              if (result.changed) changedCount++;
+            }
             onAdded?.();
-            setFeedback({text:result.changed ? `Item adicionado a “${album.name}”.` : `O item já está em “${album.name}”.`});
+            setFeedback({
+              text: pickingIds.length === 1
+                ? (changedCount > 0 ? `Item adicionado a “${album.name}”.` : `O item já está em “${album.name}”.`)
+                : changedCount === pickingIds.length
+                  ? `${changedCount} itens adicionados a “${album.name}”.`
+                  : changedCount > 0
+                    ? `${changedCount} de ${pickingIds.length} itens adicionados a “${album.name}”.`
+                    : `Os ${pickingIds.length} itens já estão em “${album.name}”.`,
+            });
           });
         }}>{album.name}</button>
       </li>)}

@@ -212,3 +212,34 @@ it("filters by creation and modification dates and shows top toast balloons on a
   await act(async () => host.querySelector<HTMLButtonElement>(".toast-dismiss")!.click());
   expect(host.querySelector(".action-toast")).toBeNull();
 });
+
+it("selects multiple photos in batch, favorites them, and adds them to an album", async () => {
+  const album = {id: "alb-batch", name: "Lote"};
+  const setFavorite = vi.fn().mockImplementation(async (asset_id: string, favorite: boolean) => ({asset_id, favorite}));
+  const changeAlbumMembership = vi.fn().mockResolvedValue({changed: true});
+  Object.assign(window.photoManager!, {
+    getLibraryState: vi.fn().mockResolvedValue({state: "active", session: {session_id: "A", library_handle: "h", generation: 1, display_name: "lab"}, reopen: false}),
+    setFavorite,
+    listAlbums: vi.fn().mockResolvedValue({albums: [album], next_offset: null}),
+    createAlbum: vi.fn().mockResolvedValue(album),
+    changeAlbumMembership,
+  });
+  await act(async () => root.render(<App />));
+  await click("Selecionar visíveis");
+  expect(host.querySelector(".batch-toolbar")?.textContent).toContain("2 itens marcados");
+  expect(host.querySelector(".workspace-status")?.textContent).toContain("2 selecionados");
+
+  await click("☆ Favoritar marcados");
+  expect(setFavorite).toHaveBeenCalledWith("first", true);
+  expect(setFavorite).toHaveBeenCalledWith("second", true);
+  expect(host.querySelector(".action-toast")?.textContent).toContain("2 imagens adicionadas aos favoritos.");
+
+  await click("Adicionar marcados a álbum…");
+  await click("Lote");
+  expect(changeAlbumMembership).toHaveBeenCalledWith("alb-batch", "first", "add");
+  expect(changeAlbumMembership).toHaveBeenCalledWith("alb-batch", "second", "add");
+  expect(host.querySelector(".album-panel .action-toast")?.textContent).toContain("2 itens adicionados a “Lote”.");
+
+  await click("Limpar seleção");
+  expect(host.querySelector(".batch-toolbar")).toBeNull();
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import {FolderMonitor} from "./FolderMonitor";
 import { FolderImportPanel } from "./FolderImportPanel";
 import { FavoriteButton } from "./FavoriteButton";
@@ -55,7 +55,10 @@ function GalleryApp() {
   const [filters, setFilters] = useState<PhotoFilters>({});
   const [facets, setFacets] = useState<PhotoFacets>();
   const [album, setAlbum] = useState<Album | null>(null);
-  const [albumTarget, setAlbumTarget] = useState<string | null>(null);
+  const [albumTarget, setAlbumTarget] = useState<string | string[] | null>(null);
+  const [batchSelected, setBatchSelected] = useState<string[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const lastBatchAnchor = useRef<string | null>(null);
   const canManageAlbums = !!session && !!window.photoManager?.listAlbums && !!window.photoManager?.createAlbum && !!window.photoManager?.changeAlbumMembership;
   const [favorites, setFavorites] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);
@@ -181,7 +184,17 @@ function GalleryApp() {
       .find(candidate => candidate.dataset.assetId === viewer);
     if (button) origin.current = button;
   }, [viewer, state]);
-  const selectAsset = (id: string, button: HTMLButtonElement) => { origin.current = button; setSelected(id); setPropertiesOpen(true); };
+  const selectAsset = (id: string, button: HTMLButtonElement, event?: MouseEvent<HTMLButtonElement>) => {
+    origin.current = button;
+    if ((canManageAlbums || canEditFavorites) && event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+      const currentlyChecked = batchSelected.includes(id);
+      toggleBatch(id, !currentlyChecked, event.shiftKey);
+    } else {
+      lastBatchAnchor.current = id;
+    }
+    setSelected(id);
+    setPropertiesOpen(true);
+  };
   const showViewerAsset=(id:string)=>{
     viewerNavigation.current++;
     const button=[...document.querySelectorAll<HTMLButtonElement>("[data-asset-id]")].find(candidate=>candidate.dataset.assetId===id);
@@ -208,12 +221,73 @@ function GalleryApp() {
   };
   const viewerIndex=viewerItems.findIndex(item=>item.asset_id===viewer);
   const viewerName=viewerItems[viewerIndex]?.representative_location?.relative_path.split("/").pop()??"Imagem selecionada";
-  const resetSelection = () => setSelected(null);
+  const resetSelection = () => { setSelected(null); setBatchSelected([]); lastBatchAnchor.current = null; };
   const canEditFavorites=!!session && !!window.photoManager?.setFavorite;
+  const canBatchSelect = canManageAlbums || canEditFavorites;
+  const activeBatch = batchSelected.filter(id => visible.some(item => item.asset_id === id));
+  const toggleBatch = (id: string, checked: boolean, shiftKey = false) => {
+    const anchor = lastBatchAnchor.current ?? selected;
+    if (shiftKey && anchor && anchor !== id) {
+      const start = visible.findIndex(item => item.asset_id === anchor);
+      const end = visible.findIndex(item => item.asset_id === id);
+      if (start >= 0 && end >= 0) {
+        const rangeIds = visible.slice(Math.min(start, end), Math.max(start, end) + 1).map(item => item.asset_id);
+        setBatchSelected(previous => checked ? [...new Set([...previous, ...rangeIds])] : previous.filter(item => !rangeIds.includes(item)));
+        lastBatchAnchor.current = id;
+        return;
+      }
+    }
+    setBatchSelected(previous => checked ? (previous.includes(id) ? previous : [...previous, id]) : previous.filter(item => item !== id));
+    lastBatchAnchor.current = id;
+  };
+  const batchFavorite = async (value: boolean) => {
+    if (batchBusy || !activeBatch.length || !window.photoManager?.setFavorite) return;
+    setBatchBusy(true);
+    const updated = new Set<string>();
+    let failed = false;
+    try {
+      for (const id of activeBatch) {
+        try {
+          const result = await window.photoManager.setFavorite(id, value);
+          if (result.asset_id === id && result.favorite === value) updated.add(id);
+          else failed = true;
+        } catch {
+          failed = true;
+        }
+      }
+      if (updated.size > 0) {
+        galleryEpoch.current++;
+        inFlight.current = false;
+        setPaging(false);
+        setState(previous => previous.kind !== "ready" ? previous : {
+          kind: "ready",
+          page: {
+            ...previous.page,
+            items: previous.page.items
+              .map(item => updated.has(item.asset_id) ? {...item, annotation: {...item.annotation, favorite: value}} : item)
+              .filter(item => !favorites || item.annotation.favorite),
+          },
+        });
+        if (favorites && value) setGalleryRevision(n => n + 1);
+        setDetailsRevision(n => n + 1);
+      }
+      if (failed) {
+        setToast({text: "Não foi possível atualizar todos os favoritos selecionados.", error: true});
+      } else {
+        setToast({
+          text: updated.size === 1
+            ? (value ? "Imagem adicionada aos favoritos." : "Imagem removida dos favoritos.")
+            : (value ? `${updated.size} imagens adicionadas aos favoritos.` : `${updated.size} imagens removidas dos favoritos.`),
+        });
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  };
   const changeFavorites=(value:boolean)=>{
     if(value===favorites)return;
     galleryEpoch.current++;inFlight.current=false;setPaging(false);setPageError(false);
-    setSelected(null);setState({kind:"loading"});setFavorites(value);
+    setSelected(null);setBatchSelected([]);setState({kind:"loading"});setFavorites(value);
   };
   const favoriteChanged=(id:string,value:boolean)=>{
     galleryEpoch.current++;inFlight.current=false;setPaging(false);
@@ -240,6 +314,8 @@ function GalleryApp() {
   const resetScope = () => {
     if (calendar || captureFilter) browsePeriod(null);
     setSelected(null);
+    setBatchSelected([]);
+    lastBatchAnchor.current = null;
     setAlbumTarget(null);
     setCalendar(false);
   };
@@ -300,6 +376,7 @@ function GalleryApp() {
     setPaging(false);
     setPageError(false);
     setSelected(null);
+    setBatchSelected([]);
     setDetailsRevision(revision=>revision+1);
     setGalleryRevision(revision=>revision+1);
   };
@@ -341,8 +418,18 @@ function GalleryApp() {
         {view === "gallery" && !calendar && <button aria-pressed={searchOpen} onClick={() => setSearchOpen(open=>!open)}>Pesquisar</button>}
         {view === "gallery" && !calendar && display === "thumbnails" && <label className="thumbnail-range">Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>}
         <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
-        {view === "gallery" && selected && canManageAlbums && <button onClick={() => setAlbumTarget(selected)}>Adicionar a álbum…</button>}
+        {view === "gallery" && (selected || activeBatch.length > 0) && canManageAlbums && <button onClick={() => setAlbumTarget(activeBatch.length > 0 ? activeBatch : selected)}>Adicionar a álbum…</button>}
+        {view === "gallery" && !calendar && canBatchSelect && visible.length > 0 && <button type="button" onClick={() => setBatchSelected(activeBatch.length === visible.length ? [] : visible.map(item => item.asset_id))}>{activeBatch.length === visible.length ? "Desmarcar visíveis" : "Selecionar visíveis"}</button>}
       </header>
+      {view === "gallery" && !calendar && activeBatch.length > 0 && <section className="batch-toolbar" aria-label="Ações em lote">
+        <strong>{activeBatch.length === 1 ? "1 item marcado" : `${activeBatch.length} itens marcados`}</strong>
+        <div className="batch-actions">
+          {canEditFavorites && <button type="button" className="primary-button" disabled={batchBusy} onClick={() => void batchFavorite(true)}>☆ Favoritar marcados</button>}
+          {canEditFavorites && <button type="button" className="primary-button" disabled={batchBusy} onClick={() => void batchFavorite(false)}>Remover favorito</button>}
+          {canManageAlbums && <button type="button" className="primary-button" disabled={batchBusy} onClick={() => setAlbumTarget(activeBatch)}>Adicionar marcados a álbum…</button>}
+          <button type="button" disabled={batchBusy} onClick={() => setBatchSelected([])}>Limpar seleção</button>
+        </div>
+      </section>}
       {session?.folderImportEnabled&&window.photoManager?.getIndexStatus&&<FolderMonitor/>}
       {toast&&<div className={`action-toast${toast.error?" action-toast-error":""}`} role={toast.error?"alert":"status"}><span>{toast.text}</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={()=>setToast(null)}>×</button></div>}
       {session?.folderImportEnabled && importSequence>0 && <FolderImportPanel key={importSequence} sessionId={session.sessionId} onDismiss={() => setImportSequence(0)} onOpenFolder={(id,path)=>{setImportSequence(0);showFolder(id,path);}} onApplied={()=>{
@@ -379,10 +466,10 @@ function GalleryApp() {
         onAdd={session?.folderImportEnabled || session?.catalogingEnabled ? openFolderPicker : undefined} />}
       {view === "albums" && canManageAlbums && <AlbumPanel onOpen={openAlbum} />}
       {view === "gallery" && album && canManageAlbums && <AlbumPanel key={album.id}
-        active={album} selected={selected} onOpen={openAlbum} onRename={next => {setAlbum(next);setDetailsRevision(value=>value+1);}}
+        active={album} selected={activeBatch.length > 0 ? activeBatch : selected} onOpen={openAlbum} onRename={next => {setAlbum(next);setDetailsRevision(value=>value+1);}}
         onBack={() => showCollection("albums")} onRemoved={removeFromAlbum}
         onDelete={() => {changeAlbum(null);setDetailsRevision(value=>value+1);showCollection("albums");setToast({text:"Álbum excluído."});}} />}
-      {view === "gallery" && albumTarget && canManageAlbums && <AlbumPanel key={albumTarget}
+      {view === "gallery" && albumTarget && canManageAlbums && <AlbumPanel key={Array.isArray(albumTarget) ? albumTarget.join(",") : albumTarget}
         picking={albumTarget} onOpen={openAlbum} onBack={() => setAlbumTarget(null)}
         onAdded={() => {setDetailsRevision(value=>value+1);if (album) setGalleryRevision(value=>value+1);}} />}
       {view === "tools" && <section className="collection-page tools-page" aria-label="Página de ferramentas">
@@ -409,8 +496,8 @@ function GalleryApp() {
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
           {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
-          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={`${item.asset_id}:${mediaRevision}`} item={item} onAddToAlbum={canManageAlbums?()=>setAlbumTarget(item.asset_id):undefined} selected={selected === item.asset_id} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(item.asset_id,value):undefined} onOpen={window.photoManager?.getPreview ? ()=>openAsset(item.asset_id) : undefined} onSelect={(button) => selectAsset(item.asset_id, button)} />)}</div>
-            : <div className="gallery-table"><table><thead><tr><th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th><th>Favorito</th></tr></thead><tbody>{visible.map((item) => <tr key={item.asset_id} onContextMenu={event=>void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true),canManageAlbums?()=>setAlbumTarget(item.asset_id):undefined)} onKeyDown={event=>{if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true),canManageAlbums?()=>setAlbumTarget(item.asset_id):undefined);}}><td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget)}>{item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td><td>{canEditFavorites?<FavoriteButton assetId={item.asset_id} favorite={item.annotation.favorite} onChanged={(value)=>favoriteChanged(item.asset_id,value)}/>:item.annotation.favorite?"★":"—"}</td></tr>)}</tbody></table></div>}
+          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={`${item.asset_id}:${mediaRevision}`} item={item} batchSelected={activeBatch.includes(item.asset_id)} onToggleBatch={canBatchSelect ? (checked, shiftKey) => toggleBatch(item.asset_id, checked, shiftKey) : undefined} onAddToAlbum={canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined} selected={selected === item.asset_id} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(item.asset_id,value):undefined} onOpen={window.photoManager?.getPreview ? ()=>openAsset(item.asset_id) : undefined} onSelect={(button, event) => selectAsset(item.asset_id, button, event)} />)}</div>
+            : <div className="gallery-table"><table><thead><tr>{canBatchSelect && <th>Sel.</th>}<th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th><th>Favorito</th></tr></thead><tbody>{visible.map((item) => {const rowName = item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"; return <tr key={item.asset_id} onContextMenu={event=>void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true),canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined)} onKeyDown={event=>{if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true),canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined);}}>{canBatchSelect && <td><input type="checkbox" className="batch-checkbox" aria-label={`Marcar ${rowName}`} checked={activeBatch.includes(item.asset_id)} onChange={event => toggleBatch(item.asset_id, event.currentTarget.checked, (event.nativeEvent as globalThis.MouseEvent).shiftKey === true)} /></td>}<td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget, event)}>{rowName}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td><td>{canEditFavorites?<FavoriteButton assetId={item.asset_id} favorite={item.annotation.favorite} onChanged={(value)=>favoriteChanged(item.asset_id,value)}/>:item.annotation.favorite?"★":"—"}</td></tr>;})}</tbody></table></div>}
           <div className="pagination">
             {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
             {state.page.has_more ? <button className="primary-button" disabled={paging} onClick={() => void more()}>{paging ? "Carregando…" : pageError ? "Tentar carregar novamente" : "Carregar mais"}</button> : <p role="status">Fim da biblioteca</p>}
@@ -431,7 +518,7 @@ function GalleryApp() {
         ? ()=>showViewerAsset(viewerItems[viewerIndex+1].asset_id)
         : state.kind==="ready" && state.page.next_cursor ? ()=>void more(true) : undefined}
       loadingNext={paging} nextError={pageError && viewerIndex===viewerItems.length-1} onSaved={()=>{setMediaRevision(value=>value+1);setDetailsRevision(value=>value+1);setGalleryRevision(value=>value+1);}} restoreFocus={restoreViewerFocus} onClose={()=>{viewerNavigation.current++;setViewer(null);}} />}
-    <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : title} · {selected ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Edições somente ao salvar</span></footer>
+    <footer className="workspace-status" role="status"><span>{view === "gallery" ? `${formatItemCount(items.length)} · ${visible.length} visíveis` : title} · {activeBatch.length > 1 ? `${activeBatch.length} selecionados` : (selected || activeBatch.length === 1) ? "1 selecionado" : "Nenhum selecionado"}</span><span>Operação local · Edições somente ao salvar</span></footer>
   </div>;
 }
 

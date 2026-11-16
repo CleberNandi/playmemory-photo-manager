@@ -428,3 +428,13 @@ button:disabled { opacity: .52; }
 }
 .action-toast-error { border-color: #8c464f; background: #341c22; color: var(--color-danger); }
 .action-toast .toast-dismiss { padding: 2px 7px; line-height: 1.1; border-radius: 6px; }
+.media-card-header { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+.media-card-header h3 { margin: 0; min-width: 0; flex: 1 1 auto; }
+.batch-checkbox { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; cursor: pointer; }
+.media-card.is-batch-selected { border-color: #679ad6; background: #1d2b3e; }
+.batch-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 8px 14px; border-bottom: 1px solid #355070; background: #182435;
+}
+.batch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.batch-actions button { padding: 5px 10px; }
