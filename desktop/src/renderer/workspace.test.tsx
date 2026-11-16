@@ -243,3 +243,37 @@ it("selects multiple photos in batch, favorites them, and adds them to an album"
   await click("Limpar seleção");
   expect(host.querySelector(".batch-toolbar")).toBeNull();
 });
+
+it("previews and applies a file rename from asset properties", async () => {
+  const details: AssetDetails = {
+    asset: {id: "first", kind: "photo", media_type: "image/jpeg", byte_size: null, sha256: null, hash_state: "absent", status: "active", created_at: ""},
+    capture: null, annotation: null, tags: [], albums: [], metadata: [], metadata_state: "extracted", availability: "available", locations_truncated: false,
+    locations: [{id: "loc-1", library_root_id: "root", root_display_name: "Natureza", relative_path: "first.jpg", entry_type: "file", availability: "present", root_availability: "available", observed_byte_size: 120, observed_mtime_ns: null, last_seen_at: null}],
+  };
+  const previewFileRename = vi.fn().mockResolvedValue({status: "ready", current_relative_path: "first.jpg", proposed_relative_path: "renomeada.jpg"});
+  const applyFileRename = vi.fn().mockImplementation(async () => {
+    details.locations = [{...details.locations[0], relative_path: "renomeada.jpg"}];
+    return {status: "applied", current_relative_path: "first.jpg", proposed_relative_path: "renomeada.jpg"};
+  });
+  Object.assign(window.photoManager!, {
+    getLibraryState: vi.fn().mockResolvedValue({state: "active", session: {session_id: "A", library_handle: "h", generation: 1, display_name: "lab"}, reopen: false}),
+    getAssetDetails: vi.fn().mockImplementation(async () => ({status: "ready", details: {...details, locations: [...details.locations]}})),
+    previewFileRename,
+    applyFileRename,
+  });
+  await act(async () => root.render(<App />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-asset-id="first"]')!.click());
+  const stemInput = host.querySelector<HTMLInputElement>(".rename-preview input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(stemInput, "renomeada");
+    stemInput.dispatchEvent(new Event("input", {bubbles: true}));
+  });
+  await click("Verificar nome");
+  expect(previewFileRename).toHaveBeenCalledWith("first", "loc-1", "renomeada");
+  expect(host.querySelector(".rename-preview")?.textContent).toContain("Proposto: renomeada.jpg");
+
+  await click("Confirmar renomeação");
+  expect(applyFileRename).toHaveBeenCalledWith("first", "loc-1", "renomeada");
+  expect(host.querySelector(".action-toast")?.textContent).toContain("Arquivo renomeado para “renomeada.jpg”.");
+  expect(host.querySelector(".asset-origin")?.textContent).toContain("renomeada.jpg");
+});

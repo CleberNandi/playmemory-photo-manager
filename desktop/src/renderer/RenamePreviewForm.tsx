@@ -8,7 +8,7 @@ const messages = {
   source_unavailable: "A localização está indisponível ou mudou desde a catalogação.",
 };
 
-export function RenamePreviewForm({details}: {details: AssetDetails}) {
+export function RenamePreviewForm({details, onRenamed}: {details: AssetDetails; onRenamed?: (proposedRelativePath: string) => void}) {
   const locations = details.locations.filter(location =>
     location.entry_type === "file" && location.availability === "present" && location.root_availability === "available");
   const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
@@ -27,6 +27,26 @@ export function RenamePreviewForm({details}: {details: AssetDetails}) {
     setError(false);
     try {
       setResult(await window.photoManager!.previewFileRename!(details.asset.id, selected.id, stem));
+    } catch {
+      setError(true);
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function apply() {
+    if (!selected || pending.current || result?.status !== "ready" || !window.photoManager?.applyFileRename) return;
+    pending.current = true;
+    setBusy(true);
+    setError(false);
+    try {
+      const outcome = await window.photoManager.applyFileRename(details.asset.id, selected.id, stem);
+      setResult(outcome);
+      if (outcome.status === "applied") {
+        setStem("");
+        onRenamed?.(outcome.proposed_relative_path);
+      }
     } catch {
       setError(true);
     } finally {
@@ -58,7 +78,11 @@ export function RenamePreviewForm({details}: {details: AssetDetails}) {
       <p>Atual: {result.current_relative_path}</p>
       <p>Proposto: {result.proposed_relative_path}</p>
       <p>Prévia concluída. O arquivo continua com o nome atual.</p>
+      {window.photoManager?.applyFileRename && <button type="button" className="primary-button" disabled={busy} onClick={() => void apply()}>Confirmar renomeação</button>}
     </div>}
-    {result && result.status !== "ready" && <p role="status">{messages[result.status]}</p>}
+    {result?.status === "applied" && <div role="status">
+      <p>Renomeado para: {result.proposed_relative_path}</p>
+    </div>}
+    {result && result.status !== "ready" && result.status !== "applied" && <p role="status">{messages[result.status]}</p>}
   </details>;
 }

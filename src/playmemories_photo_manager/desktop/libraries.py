@@ -234,6 +234,7 @@ class LibraryDispatcher:
             "annotation.favorite",
             "annotation.edit",
             "rename.preview",
+            "rename.apply",
             "album.action",
             "gallery.list",
             "gallery.facets",
@@ -281,6 +282,17 @@ class LibraryDispatcher:
                 raise LibraryError("invalid_request")
             return preview_rename(
                 active.query_connection,
+                _uuid(params["asset_id"]),
+                _uuid(params["location_id"]),
+                params["stem"],
+            )
+        if method == "rename.apply":
+            from .rename_preview import apply_rename
+
+            if set(params) != {"session_id", "asset_id", "location_id", "stem"}:
+                raise LibraryError("invalid_request")
+            return apply_rename(
+                active,
                 _uuid(params["asset_id"]),
                 _uuid(params["location_id"]),
                 params["stem"],

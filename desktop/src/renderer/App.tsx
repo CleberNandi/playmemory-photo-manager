@@ -509,7 +509,18 @@ function GalleryApp() {
     </main>
     {propertiesOpen && <>
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />
-      {selected ? <AssetDetailsPanel canPreviewRename={!!session && view === "gallery"} suspended={viewer!==null} assetId={selected} onClose={closeDetails} revision={detailsRevision} onAnnotationChanged={session?(field,value)=>annotationChanged(selected,field,value):undefined} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(selected,value):undefined} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
+      {selected ? <AssetDetailsPanel canPreviewRename={!!session && view === "gallery"} suspended={viewer!==null} assetId={selected} onClose={closeDetails} revision={detailsRevision} onAnnotationChanged={session?(field,value)=>annotationChanged(selected,field,value):undefined} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(selected,value):undefined} onFileRenamed={proposed => {
+        setState(previous => previous.kind !== "ready" ? previous : {
+          kind: "ready",
+          page: {
+            ...previous.page,
+            items: previous.page.items.map(item => item.asset_id === selected && item.representative_location
+              ? {...item, representative_location: {...item.representative_location, relative_path: proposed}}
+              : item),
+          },
+        });
+        setToast({text: `Arquivo renomeado para “${proposed.split("/").pop()}”.`});
+      }} /> : <aside className="properties-empty"><h2>Propriedades</h2><p>Selecione uma foto ou vídeo para consultar seus dados.</p><p>Somente leitura</p></aside>}
     </>}
     {viewer && <ImageViewer assetId={viewer}
       frames={viewerItems.map(item=>({id:item.asset_id,

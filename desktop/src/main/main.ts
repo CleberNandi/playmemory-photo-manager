@@ -305,17 +305,19 @@ app.whenReady().then(async () => {
     try { return await query("thumbnail.get", sessionId, {asset_id: assetId}); }
     finally { thumbnailRequests--; }
   });
-  register("rename:preview", 1, (raw) => {
-    const {sessionId, params} = envelope(raw);
-    if (demo || !params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const input = params as Record<string, unknown>;
-    if (Object.keys(input).sort().join() !== "assetId,locationId,stem" ||
-        !canonicalId(input.assetId) || !canonicalId(input.locationId) ||
-        typeof input.stem !== "string" || [...input.stem].length > 255) throw new Error("invalid_request");
-    return libraries.query("rename.preview", sessionId, {
-      asset_id: input.assetId, location_id: input.locationId, stem: input.stem,
+  for (const [channel, method] of [["rename:preview", "rename.preview"], ["rename:apply", "rename.apply"]] as const) {
+    register(channel, 1, (raw) => {
+      const {sessionId, params} = envelope(raw);
+      if (demo || (method === "rename.apply" && (folderImports?.busy || imageEdits?.busy)) || !params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
+      const input = params as Record<string, unknown>;
+      if (Object.keys(input).sort().join() !== "assetId,locationId,stem" ||
+          !canonicalId(input.assetId) || !canonicalId(input.locationId) ||
+          typeof input.stem !== "string" || [...input.stem].length > 255) throw new Error("invalid_request");
+      return libraries.query(method, sessionId, {
+        asset_id: input.assetId, location_id: input.locationId, stem: input.stem,
+      });
     });
-  });
+  }
   register("devices:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (demo || params !== null) throw new Error("invalid_request");

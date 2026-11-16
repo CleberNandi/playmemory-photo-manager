@@ -20,7 +20,7 @@ function formatModified(value?: string | null) {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString("pt-BR");
 }
 
-export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, onAnnotationChanged, suspended=false, canPreviewRename=false}: {canPreviewRename?: boolean; assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void; onAnnotationChanged?:(field:AnnotationField, value:string|number|null)=>void}) {
+export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChanged, onAnnotationChanged, onFileRenamed, suspended=false, canPreviewRename=false}: {canPreviewRename?: boolean; assetId: string; onClose: () => void; revision?:number; suspended?:boolean; onFavoriteChanged?:(favorite:boolean)=>void; onAnnotationChanged?:(field:AnnotationField, value:string|number|null)=>void; onFileRenamed?:(proposedRelativePath:string)=>void}) {
   const [result, setResult] = useState<{id: string; value: DetailsResult} | null>(null);
   const [locationError,setLocationError]=useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -69,7 +69,10 @@ export function AssetDetailsPanel({assetId, onClose, revision=0, onFavoriteChang
         {value.details.locations.length?value.details.locations.slice(0,1).map(location=><div key={location.id}><strong>{location.relative_path.split("/").pop()}</strong><p>Pasta: {location.root_display_name}</p>{location.relative_path.includes("/") && <p className="preserve-text">{location.relative_path}</p>}</div>):<p>Sem localização conhecida.</p>}
         {window.photoManager?.locateMedia&&<><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Abrir pasta que contém o arquivo</button><button onClick={()=>{setLocationError(false);void window.photoManager!.locateMedia!(assetId,true).then(result=>setLocationError(result.status==="unavailable")).catch(()=>setLocationError(true));}}>Localização completa…</button></>}
         {canPreviewRename && window.photoManager?.previewFileRename &&
-          <RenamePreviewForm key={`${assetId}:${revision}`} details={value.details} />}
+          <RenamePreviewForm key={`${assetId}:${revision}`} details={value.details} onRenamed={proposed => {
+            setAttempt(n => n + 1);
+            onFileRenamed?.(proposed);
+          }} />}
         {locationError&&<div className="action-toast action-toast-error" role="alert"><span>Não foi possível localizar o arquivo. Ele pode estar offline, ter mudado ou não estar mais disponível.</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={()=>setLocationError(false)}>×</button></div>}
       </section>
       <Fields values={{

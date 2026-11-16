@@ -120,3 +120,48 @@ def test_rename_preview_checks_the_selected_location_and_never_writes(source):
     assert not (root / "Férias.jpg").exists()
     image.write_bytes(b"changed")
     assert preview("New") == {"status": "source_unavailable"}
+
+
+def test_rename_apply_renames_in_place_updates_catalog_and_blocks_conflicts(source):
+    dispatcher, path, session, root, image, asset = source
+    with connect(path) as connection:
+        catalog = Catalog(connection)
+        location = catalog.get_asset_locations(asset)[0]
+    original_bytes = image.read_bytes()
+    original_stat = image.stat()
+
+    def apply(stem, **params):
+        return dispatcher.request(
+            "rename.apply",
+            {"session_id": session, "asset_id": asset, "location_id": location.id, "stem": stem}
+            | params,
+        )
+
+    (root / "occupied.jpg").write_bytes(b"keep")
+    assert apply("occupied") == {"status": "name_taken"}
+    assert (root / "occupied.jpg").read_bytes() == b"keep"
+    assert apply("../outside") == {"status": "invalid_name"}
+
+    hardlink = root / "hardlink.jpg"
+    hardlink.hardlink_to(image)
+    assert apply("Férias") == {"status": "source_unavailable"}
+    hardlink.unlink()
+
+    assert apply("Férias") == {
+        "status": "applied",
+        "current_relative_path": "synthetic.jpg",
+        "proposed_relative_path": "Férias.jpg",
+    }
+    renamed = root / "Férias.jpg"
+    assert not image.exists()
+    assert renamed.exists()
+    assert renamed.read_bytes() == original_bytes
+    assert (renamed.stat().st_ino, renamed.stat().st_mtime_ns) == (
+        original_stat.st_ino,
+        original_stat.st_mtime_ns,
+    )
+    details = dispatcher.request("asset.details", {"session_id": session, "asset_id": asset})
+    assert details["locations"][0]["relative_path"] == "Férias.jpg"
+    assert dispatcher.request("asset.reveal", {"session_id": session, "asset_id": asset}) == {
+        "path": str(renamed)
+    }
