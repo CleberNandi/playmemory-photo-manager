@@ -127,15 +127,24 @@ it("reopens a stale snapshot without mixing its pages", async () => {
 it("starts a real scan on demand and reviews the photo and its catalog location", async () => {
   const b = bridge();
   const observed = {source: "catalog_scan", observed_at: "2026-11-11T12:00:00Z", freshness: "point_in_time"} as const;
-  const detail = members();
+  const detail = members("one", ["first", "second"]);
   b.listDuplicates = vi.fn().mockResolvedValueOnce({status: "analysis_not_available"})
     .mockResolvedValueOnce({status: "scanning"})
     .mockResolvedValue({status: "ready", page: {...list(), ...observed}});
   b.startDuplicateScan = vi.fn().mockResolvedValue({status: "scanning"});
   b.getDuplicateGroup = vi.fn().mockResolvedValue({status: "ready", page: {
-    ...detail, ...observed, members: detail.members.map(member => ({...member, location_source: "catalog", relative_path: "cópias/foto.jpg"})),
+    ...detail, ...observed, members: detail.members.map((member, index) => ({...member, hardlinked: false, identity_conflict: false, blocks: [], location_source: "catalog", relative_path: index === 0 ? "cópias/foto.jpg" : "novo teste/foto.jpg"})),
   }});
   b.getThumbnail = vi.fn().mockResolvedValue({media_type: "image/png", width: 256, height: 160, base64: "iVBORw0KGgo="});
+  b.saveDuplicateDecision = vi.fn().mockResolvedValue({
+    status: "ready",
+    group: {
+      ...group(),
+      plan_state: "ready",
+      review: {decision_id: "dec-1", status: "current", keep_location_id: "first", reason: "Cópia principal escolhida na revisão"},
+    },
+  });
+  b.removeDuplicateCopy = vi.fn().mockResolvedValue({status: "ready", resolved: true, group: null});
   await act(async () => root.render(<DuplicatesView canScan onAsset={vi.fn()} detailsOpen={false} onClearAsset={vi.fn()} />));
   expect(b.startDuplicateScan).not.toHaveBeenCalled();
   await click(".duplicate-start");
@@ -147,4 +156,24 @@ it("starts a real scan on demand and reviews the photo and its catalog location"
   expect(host.querySelector(".duplicate-group")?.textContent).toContain("cópias/foto.jpg");
   expect(host.querySelector(".duplicate-thumbnail")).not.toBeNull();
   expect(b.getThumbnail).toHaveBeenCalledWith("first");
+  await click(".member-keep");
+  expect(b.saveDuplicateDecision).toHaveBeenCalledWith({
+    snapshotId: "session",
+    groupKey: "one",
+    keepLocationId: "first",
+    reason: "Cópia principal escolhida na revisão",
+  });
+  expect(host.querySelector(".action-toast")?.textContent).toContain("Decisão salva: manter “cópias/foto.jpg”.");
+  expect(host.querySelector(".member-keep")?.textContent).toBe("★ Mantida");
+
+  await click(".member-remove");
+  expect(host.querySelector(".duplicate-remove-confirm")?.textContent).toContain("novo teste/foto.jpg");
+  await click(".confirm-member-remove");
+  expect(b.removeDuplicateCopy).toHaveBeenCalledWith({
+    snapshotId: "session",
+    groupKey: "one",
+    removeLocationId: "second",
+  });
+  expect(host.querySelector(".action-toast")?.textContent).toContain("Cópia duplicada “novo teste/foto.jpg” excluída.");
+  expect(host.querySelector(".duplicate-group")).toBeNull();
 });

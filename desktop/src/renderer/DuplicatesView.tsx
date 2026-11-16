@@ -25,7 +25,7 @@ function Summary({group: g, synthetic}: {group: DuplicateGroup; synthetic: boole
   return <><p>{g.occurrence_count} ocorrências · {g.physical_copy_count} cópias físicas independentes{synthetic && " (simuladas)"}</p>
     <p className="duplicate-digest">{synthetic ? "SHA-256 simulado" : "SHA-256"}: {g.sha256}</p><p>{synthetic ? "Tamanho simulado" : "Tamanho"}: {g.byte_size} bytes</p>
     <Blocks values={g.blocks} />
-    {synthetic && (g.review ? <div className="duplicate-notice"><p>Revisão histórica {g.review.status === "stale" ? "desatualizada" : "registrada"}; sem revalidação.</p><p>{g.review.reason}</p></div> : <p>Revisão desconhecida · Estado do plano não conhecido</p>)}
+    {synthetic ? (g.review ? <div className="duplicate-notice"><p>Revisão histórica {g.review.status === "stale" ? "desatualizada" : "registrada"}; sem revalidação.</p><p>{g.review.reason}</p></div> : <p>Revisão desconhecida · Estado do plano não conhecido</p>) : g.review && <div className="duplicate-notice"><p>Decisão de revisão {g.review.status === "stale" ? "histórica desatualizada" : "atual registrada"}</p><p>Motivo: {g.review.reason}</p></div>}
   </>;
 }
 const issueNames: Record<string, string> = {
@@ -43,13 +43,19 @@ export function Coverage({page}: {page: DuplicateListPage | DuplicateGroupPage})
     {issueCount > 0 && <details><summary>Ver {issueCount} {issueCount === 1 ? "impedimento" : "impedimentos"}{issueCount > page.issues.length && " · amostra"}</summary><ul>{page.issues.map((issue, i) => <li key={i}>{issueNames[issue.kind] ?? issue.kind} · {issue.relative_path}</li>)}</ul></details>}
   </div>;
 }
-export function DuplicatesView({canScan = false, onAsset, detailsOpen, onClearAsset}: {canScan?: boolean; onAsset: (id: string, button: HTMLButtonElement) => void; detailsOpen: boolean; onClearAsset: () => void}) {
+export function DuplicatesView({canScan = false, onAsset, detailsOpen, onClearAsset, onChanged}: {canScan?: boolean; onAsset: (id: string, button: HTMLButtonElement) => void; detailsOpen: boolean; onClearAsset: () => void; onChanged?: () => void}) {
   const [page, setPage] = useState<DuplicateListPage | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [paging, setPaging] = useState(false);
   const [selection, setSelection] = useState<DuplicateGroup | null>(null);
+  const [toast, setToast] = useState<{text: string; error?: boolean} | null>(null);
+  useEffect(() => {
+    if (!toast || toast.error) return;
+    const timer = setTimeout(() => setToast(null), 4500);
+    return () => clearTimeout(timer);
+  }, [toast]);
   const alive = useRef(false);
   const generation = useRef(0);
   const inFlight = useRef(false);
@@ -114,6 +120,7 @@ export function DuplicatesView({canScan = false, onAsset, detailsOpen, onClearAs
   const close = () => { onClearAsset(); setSelection(null); origin.current?.focus(); };
   return <section className="duplicates-view" aria-labelledby="duplicates-heading">
     <h2 ref={heading} tabIndex={-1} id="duplicates-heading">Grupos de duplicatas exatas</h2>
+    {toast && <div className={`action-toast${toast.error ? " action-toast-error" : ""}`} role={toast.error ? "alert" : "status"}><span>{toast.text}</span><button type="button" className="toast-dismiss" aria-label="Fechar mensagem" onClick={() => setToast(null)}>×</button></div>}
     {canScan && window.photoManager?.startDuplicateScan && <button className="primary-button duplicate-start"
       disabled={scanning || paging || (!page && !failure)} onClick={() => void start()}>
       {page ? "Buscar novamente" : "Buscar duplicatas"}
@@ -134,15 +141,30 @@ export function DuplicatesView({canScan = false, onAsset, detailsOpen, onClearAs
         </article>)}
         <div className="pagination">{page.next_cursor ? <button className="primary-button more-groups" disabled={paging} onClick={() => void more()}>{paging ? "Carregando grupos…" : "Carregar mais grupos"}</button> : <p role="status">Fim dos grupos</p>}</div>
       </div>
-      {selection && <GroupPanel key={selection.group_key} synthetic={page.source === "synthetic_fixture"} snapshotId={page.snapshot_id} group={selection} onClose={close} onAsset={onAsset} detailsOpen={detailsOpen} reopen={reopen} />}
+      {selection && <GroupPanel key={selection.group_key} synthetic={page.source === "synthetic_fixture"} snapshotId={page.snapshot_id} group={selection} onClose={close} onAsset={onAsset} detailsOpen={detailsOpen} reopen={reopen} onToast={setToast} onGroupUpdated={(updated) => {
+        setSelection(updated);
+        setPage(previous => previous ? {...previous, groups: previous.groups.map(item => item.group_key === updated.group_key ? updated : item)} : previous);
+      }} onGroupResolved={(resolvedKey) => {
+        onClearAsset();
+        setSelection(null);
+        setPage(previous => previous ? {
+          ...previous,
+          total_count: Math.max(0, previous.total_count - 1),
+          groups: previous.groups.filter(item => item.group_key !== resolvedKey),
+        } : previous);
+        onChanged?.();
+      }} onCopyRemoved={() => onChanged?.()} />}
       </div></>}
   </section>;
 }
-function GroupPanel({synthetic, snapshotId, group, onClose, onAsset, detailsOpen, reopen}: {synthetic: boolean; snapshotId: string; group: DuplicateGroup; onClose: () => void; onAsset: (id: string, button: HTMLButtonElement) => void; detailsOpen: boolean; reopen: () => void}) {
+function GroupPanel({synthetic, snapshotId, group, onClose, onAsset, detailsOpen, reopen, onToast, onGroupUpdated, onGroupResolved, onCopyRemoved}: {synthetic: boolean; snapshotId: string; group: DuplicateGroup; onClose: () => void; onAsset: (id: string, button: HTMLButtonElement) => void; detailsOpen: boolean; reopen: () => void; onToast?: (toast: {text: string; error?: boolean} | null) => void; onGroupUpdated?: (group: DuplicateGroup) => void; onGroupResolved?: (groupKey: string) => void; onCopyRemoved?: () => void}) {
   const [page, setPage] = useState<DuplicateGroupPage | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [paging, setPaging] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [reason, setReason] = useState(group.review?.reason ?? "");
+  const [saving, setSaving] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<{locationId: string; relativePath: string} | null>(null);
   const alive = useRef(false);
   const generation = useRef(0);
   const inFlight = useRef(false);
@@ -178,20 +200,105 @@ function GroupPanel({synthetic, snapshotId, group, onClose, onAsset, detailsOpen
     } catch { if (alive.current && epoch === generation.current) setFailure({status: "temporarily_unavailable"}); }
     finally { inFlight.current = false; if (alive.current && epoch === generation.current) setPaging(false); }
   };
+  const decide = async (keepLocationId: string, relativePath: string) => {
+    if (saving || !window.photoManager?.saveDuplicateDecision) return;
+    const chosenReason = reason.trim() || "Cópia principal escolhida na revisão";
+    setSaving(true);
+    onToast?.(null);
+    try {
+      const outcome = await window.photoManager.saveDuplicateDecision({
+        snapshotId,
+        groupKey: group.group_key,
+        keepLocationId,
+        reason: chosenReason,
+      });
+      if (!alive.current) return;
+      if (outcome.status === "ready") {
+        setPage(previous => previous ? {...previous, group: outcome.group} : previous);
+        onGroupUpdated?.(outcome.group);
+        onToast?.({text: `Decisão salva: manter “${relativePath}”.`});
+      } else if (outcome.status === "stale_snapshot") {
+        setFailure({status: "stale_snapshot"});
+      } else {
+        onToast?.({text: "Não foi possível salvar a decisão de revisão.", error: true});
+      }
+    } catch {
+      if (alive.current) onToast?.({text: "Não foi possível salvar a decisão de revisão.", error: true});
+    } finally {
+      if (alive.current) setSaving(false);
+    }
+  };
+  const removeCopy = async (removeLocationId: string, relativePath: string) => {
+    if (saving || !window.photoManager?.removeDuplicateCopy) return;
+    setSaving(true);
+    onToast?.(null);
+    try {
+      const outcome = await window.photoManager.removeDuplicateCopy({
+        snapshotId,
+        groupKey: group.group_key,
+        removeLocationId,
+      });
+      if (!alive.current) return;
+      if (outcome.status === "ready") {
+        setConfirmRemove(null);
+        onToast?.({text: `Cópia duplicada “${relativePath}” excluída.`});
+        if (outcome.resolved || !outcome.group) {
+          onGroupResolved?.(group.group_key);
+        } else {
+          const updatedGroup = outcome.group;
+          setPage(previous => previous ? {
+            ...previous,
+            group: updatedGroup,
+            total_count: Math.max(0, previous.total_count - 1),
+            members: previous.members.filter(item => item.location_id !== removeLocationId),
+          } : previous);
+          onGroupUpdated?.(updatedGroup);
+          onCopyRemoved?.();
+        }
+      } else if (outcome.status === "stale_snapshot") {
+        setFailure({status: "stale_snapshot"});
+      } else {
+        onToast?.({text: "Não foi possível excluir a cópia duplicada.", error: true});
+      }
+    } catch {
+      if (alive.current) onToast?.({text: "Não foi possível excluir a cópia duplicada.", error: true});
+    } finally {
+      if (alive.current) setSaving(false);
+    }
+  };
+  const currentGroup = page?.group ?? group;
   return <section className="duplicate-group" aria-labelledby="group-heading" aria-busy={!page && !failure || paging}>
     <header><h3 id="group-heading">Membros do grupo</h3><button ref={close} className="primary-button close-group" onClick={onClose}>Fechar grupo</button></header>
-    <Summary group={group} synthetic={synthetic} />
+    <Summary group={currentGroup} synthetic={synthetic} />
+    {!synthetic && window.photoManager?.saveDuplicateDecision && <label className="duplicate-reason-field">Motivo da decisão <input value={reason} maxLength={200} placeholder="Cópia principal escolhida na revisão" onChange={event => setReason(event.target.value)} /></label>}
     {!page && !failure && <p role="status">Carregando membros…</p>}
     {failure && <DuplicateFailure value={failure} retry={page ? () => void more() : () => {setFailure(null); setAttempt((a) => a + 1);}} reopen={reopen} />}
-    {page && <><p role="status">{page.members.length} de {page.total_count} membros carregados</p><ul className="duplicate-members">{page.members.map((m) => <li key={m.location_id}>
-      {!synthetic && <DuplicateThumbnail assetId={m.asset_id} />}
-      <p><strong>{m.root_display_name}</strong></p><p>{m.relative_path}</p>
-      {synthetic && <><p>{m.location_source === "projection_fixture" ? "Ocorrência simulada somente nesta projeção; não consta nas localizações do catálogo." : "Localização da fixture do catálogo; evidência de duplicação simulada."}</p>
-      <p>Asset: {m.asset_id}</p><p>Localização: {m.location_id}</p>
-      <p>{m.hardlinked ? "Hardlink simulado" : "Sem hardlink no cenário"} · {m.identity_conflict ? "Conflito de identidade" : "Sem conflito no cenário"}</p>
-      <p>Proteção: {m.protected === null ? "desconhecida" : m.protected ? "protegido no cenário" : "não protegido no cenário"}</p></>}<Blocks values={m.blocks} />
-      <button className="primary-button member-details" onClick={(event) => onAsset(m.asset_id, event.currentTarget)}>Detalhes do Asset</button>
-    </li>)}</ul>
+    {page && <><p role="status">{page.members.length} de {page.total_count} membros carregados</p><ul className="duplicate-members">{page.members.map((m) => {
+      const kept = currentGroup.review?.keep_location_id === m.location_id && currentGroup.review.status === "current";
+      const canRemove = !synthetic && !!window.photoManager?.removeDuplicateCopy && currentGroup.review?.status === "current" && !kept && !m.hardlinked && !m.identity_conflict;
+      return <li key={m.location_id}>
+        {!synthetic && <DuplicateThumbnail assetId={m.asset_id} />}
+        <p><strong>{m.root_display_name}</strong></p><p>{m.relative_path}</p>
+        {!synthetic && currentGroup.review?.keep_location_id === m.location_id && <p className="duplicate-keep-status"><strong>{kept ? "★ Cópia escolhida para manter" : "Escolha anterior (desatualizada)"}</strong></p>}
+        {synthetic && <><p>{m.location_source === "projection_fixture" ? "Ocorrência simulada somente nesta projeção; não consta nas localizações do catálogo." : "Localização da fixture do catálogo; evidência de duplicação simulada."}</p>
+        <p>Asset: {m.asset_id}</p><p>Localização: {m.location_id}</p>
+        <p>{m.hardlinked ? "Hardlink simulado" : "Sem hardlink no cenário"} · {m.identity_conflict ? "Conflito de identidade" : "Sem conflito no cenário"}</p>
+        <p>Proteção: {m.protected === null ? "desconhecida" : m.protected ? "protegido no cenário" : "não protegido no cenário"}</p></>}<Blocks values={m.blocks} />
+        <div className="duplicate-member-actions">
+          <button className="primary-button member-details" onClick={(event) => onAsset(m.asset_id, event.currentTarget)}>Detalhes do Asset</button>
+          {!synthetic && window.photoManager?.saveDuplicateDecision && <button type="button" className="primary-button member-keep" disabled={saving || kept} onClick={() => void decide(m.location_id, m.relative_path)}>{kept ? "★ Mantida" : "Manter esta cópia"}</button>}
+          {canRemove && confirmRemove?.locationId !== m.location_id && <button type="button" className="primary-button member-remove" disabled={saving} onClick={() => setConfirmRemove({locationId: m.location_id, relativePath: m.relative_path})}>Excluir cópia duplicada…</button>}
+        </div>
+        {canRemove && confirmRemove?.locationId === m.location_id && <fieldset disabled={saving} className="duplicate-remove-confirm">
+          <legend>Excluir a cópia duplicada “{m.relative_path}”?</legend>
+          <p>A cópia escolhida para manter será verificada antes de remover este arquivo do disco.</p>
+          <div className="duplicate-member-actions">
+            <button type="button" className="primary-button confirm-member-remove" onClick={() => void removeCopy(m.location_id, m.relative_path)}>Confirmar exclusão da cópia</button>
+            <button type="button" className="primary-button" onClick={() => setConfirmRemove(null)}>Cancelar</button>
+          </div>
+        </fieldset>}
+      </li>;
+    })}</ul>
     <div className="pagination">{page.next_cursor ? <button className="primary-button more-members" disabled={paging} onClick={() => void more()}>{paging ? "Carregando membros…" : "Carregar mais membros"}</button> : <p>Todos os membros carregados</p>}</div></>}
   </section>;
 }

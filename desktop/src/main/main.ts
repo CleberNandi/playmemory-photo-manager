@@ -323,12 +323,12 @@ app.whenReady().then(async () => {
     if (demo || params !== null) throw new Error("invalid_request");
     return libraries.query("devices.list", sessionId, {});
   });
-  for (const [channel, method] of [["duplicates:start", "duplicates.start"], ["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"]] as const) {
+  for (const [channel, method] of [["duplicates:start", "duplicates.start"], ["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"], ["duplicates:decide", "duplicates.decide"], ["duplicates:remove", "duplicates.remove"]] as const) {
     register(channel, 1, (raw) => {
       const {sessionId, params} = envelope(raw);
       const scoped = {request: (m: Parameters<PythonBackend["request"]>[0], p: Record<string, unknown> = {}) => {
-        if (m !== "duplicates.start" && m !== "duplicates.list" && m !== "duplicates.group") throw new Error("invalid_request");
-        if (demo && m === "duplicates.start") return Promise.resolve({status: "invalid_request"});
+        if (m !== "duplicates.start" && m !== "duplicates.list" && m !== "duplicates.group" && m !== "duplicates.decide" && m !== "duplicates.remove") throw new Error("invalid_request");
+        if (demo && (m === "duplicates.start" || m === "duplicates.decide" || m === "duplicates.remove")) return Promise.resolve({status: "invalid_request"});
         return demo ? backend.request(m, p) : libraries.query(m, sessionId, p);
       }};
       return duplicatesRequest(scoped, method, params);

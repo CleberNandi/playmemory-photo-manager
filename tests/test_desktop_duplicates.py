@@ -299,8 +299,16 @@ def test_real_bridge_scans_catalogued_jpegs_and_pages_their_locations(tmp_path):
             root = catalog.register_root("Fotos de teste", str(media))
             for name in (*files, "missing.jpg"):
                 asset = catalog.create_asset("photo")
+                file_path = media / name
+                info = file_path.stat() if file_path.exists() else None
                 catalog.register_location(
-                    asset.id, root.id, name, last_seen_at="2026-11-11T00:00:00Z"
+                    asset.id,
+                    root.id,
+                    name,
+                    filesystem_id=f"scanner:{info.st_dev}:{info.st_ino}" if info else None,
+                    observed_byte_size=info.st_size if info else None,
+                    observed_mtime_ns=info.st_mtime_ns if info else None,
+                    last_seen_at="2026-11-11T00:00:00Z",
                 )
         catalog_bytes = catalog_path.read_bytes()
 
@@ -345,6 +353,52 @@ def test_real_bridge_scans_catalogued_jpegs_and_pages_their_locations(tmp_path):
         assert call("duplicates.group", **params) == {"status": "stale_snapshot"}
         assert catalog_path.read_bytes() == catalog_bytes
         assert {name: (media / name).read_bytes() for name in files} == files
+
+        latest = completed()
+        decided = call(
+            "duplicates.decide",
+            snapshot_id=latest["snapshot_id"],
+            group_key=group["group_key"],
+            keep_location_id=members[0]["location_id"],
+            reason="Manter cópia principal",
+        )
+        assert decided["status"] == "ready"
+        assert decided["group"]["review"] == {
+            "decision_id": decided["group"]["review"]["decision_id"],
+            "status": "current",
+            "keep_location_id": members[0]["location_id"],
+            "reason": "Manter cópia principal",
+        }
+        assert call("duplicates.start") == {"status": "scanning"}
+        rescanned = completed()
+        assert rescanned["groups"][0]["review"]["keep_location_id"] == members[0]["location_id"]
+        assert rescanned["groups"][0]["review"]["status"] == "current"
+        assert {name: (media / name).read_bytes() for name in files} == files
+
+        assert (
+            call(
+                "duplicates.remove",
+                snapshot_id=rescanned["snapshot_id"],
+                group_key=group["group_key"],
+                remove_location_id=members[0]["location_id"],
+            )["status"]
+            == "invalid_request"
+        )
+        removed = call(
+            "duplicates.remove",
+            snapshot_id=rescanned["snapshot_id"],
+            group_key=group["group_key"],
+            remove_location_id=members[1]["location_id"],
+        )
+        assert removed == {"status": "ready", "resolved": True, "group": None}
+        assert (media / "copies/photo.jpg").read_bytes() == duplicate
+        assert not (media / "photo.jpg").exists()
+
+        assert call("duplicates.start") == {"status": "scanning"}
+        after_remove = completed()
+        assert after_remove["groups"] == []
+        assert after_remove["issue_count"] == 1
+        assert [issue["relative_path"] for issue in after_remove["issues"]] == ["missing.jpg"]
 
         call("library.close")
         session = client.request("library.open", selection)["result"]["session"]["session_id"]

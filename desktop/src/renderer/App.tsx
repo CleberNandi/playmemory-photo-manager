@@ -505,7 +505,14 @@ function GalleryApp() {
           </div>
         </section>}
       </div>
-      {view === "duplicates" && <DuplicatesView key={generation} canScan={!!session} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={selectAsset} />}
+      {view === "duplicates" && <DuplicatesView key={generation} canScan={!!session} detailsOpen={selected !== null} onClearAsset={() => setSelected(null)} onAsset={selectAsset} onChanged={() => {
+        galleryEpoch.current++;
+        inFlight.current = false;
+        setPaging(false);
+        setPageError(false);
+        setDetailsRevision(value => value + 1);
+        setGalleryRevision(value => value + 1);
+      }} />}
     </main>
     {propertiesOpen && <>
       <PanelResize label="Largura das propriedades" value={rightWidth} min={240} max={420} reverse onChange={setRightWidth} />

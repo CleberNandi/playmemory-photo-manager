@@ -438,3 +438,7 @@ button:disabled { opacity: .52; }
 }
 .batch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .batch-actions button { padding: 5px 10px; }
+.duplicate-reason-field { display: grid; gap: 4px; margin: 10px 0; max-width: 420px; }
+.duplicate-member-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.duplicate-keep-status { color: var(--color-success); margin: 4px 0; }
+.duplicate-remove-confirm { margin-top: 8px; padding: 10px; border: 1px solid #8c464f; border-radius: 7px; background: #26181e; }

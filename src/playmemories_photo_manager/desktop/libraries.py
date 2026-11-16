@@ -243,6 +243,8 @@ class LibraryDispatcher:
             "thumbnail.get",
             "preview.get",
             "duplicates.start",
+            "duplicates.decide",
+            "duplicates.remove",
             "devices.list",
             "duplicates.list",
             "duplicates.group",
@@ -265,7 +267,7 @@ class LibraryDispatcher:
             self.ingestion.preparation.busy or self.ingestion.commands.busy
         ):
             raise LibraryError("busy")  # Do not block the monitor on SQLite/media metadata.
-        if method == "duplicates.start":
+        if method in ("duplicates.start", "duplicates.decide", "duplicates.remove"):
             return self.duplicate_scan.request(
                 active, method, {key: value for key, value in params.items() if key != "session_id"}
             )

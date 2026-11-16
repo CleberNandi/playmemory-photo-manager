@@ -88,6 +88,8 @@ declare global {
       startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
       getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;
+      saveDuplicateDecision?(params: {snapshotId: string; groupKey: string; keepLocationId: string; reason: string}): Promise<{status: "ready"; group: DuplicateGroup} | Exclude<DuplicateResult<never>, {status: "ready"}>>;
+      removeDuplicateCopy?(params: {snapshotId: string; groupKey: string; removeLocationId: string}): Promise<{status: "ready"; resolved: boolean; group: DuplicateGroup | null} | Exclude<DuplicateResult<never>, {status: "ready"}>>;
       onBackendReset?(listener: () => void): () => void;
       retryGallery(): Promise<GalleryPage>;
     };

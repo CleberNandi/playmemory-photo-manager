@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld("photoManager", {
   startDuplicateScan: () => scoped("duplicates:start", {}),
   listDuplicates: (params: {pageSize?: number; after?: string | null} = {}) => scoped("duplicates:list", params),
   getDuplicateGroup: (params: {snapshotId: string; groupKey: string; pageSize?: number; after?: string | null}) => scoped("duplicates:group", params),
+  saveDuplicateDecision: (params: {snapshotId: string; groupKey: string; keepLocationId: string; reason: string}) => scoped("duplicates:decide", params),
+  removeDuplicateCopy: (params: {snapshotId: string; groupKey: string; removeLocationId: string}) => scoped("duplicates:remove", params),
   chooseMediaRoot: (id: string) => ipcRenderer.invoke("ingestion:select", id),
   prepareCataloging: (id: string, grant: string, recursive: boolean) => ipcRenderer.invoke("ingestion:prepare", id, grant, recursive),
   getPreparationStatus: (id: string, operation: string) => ipcRenderer.invoke("ingestion:status", id, operation),

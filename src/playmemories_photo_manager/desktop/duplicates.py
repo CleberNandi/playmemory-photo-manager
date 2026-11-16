@@ -156,10 +156,15 @@ def synthetic_groups(connection: sqlite3.Connection) -> tuple[list[dict], list[d
 
 
 def observed_presentation(
-    result: ExactDuplicateResult, root_names: dict[str, str]
+    result: ExactDuplicateResult,
+    root_names: dict[str, str],
+    decisions: dict[tuple[str, int], object] | None = None,
 ) -> DuplicatePresentation:
+    from playmemories_photo_manager.duplicates.review import evidence_fingerprint
+
     groups = []
     for group in result.groups:
+        fingerprint = evidence_fingerprint(group.members)
         assets_by_identity: dict[tuple[int, int], set[str]] = defaultdict(set)
         for member in group.members:
             assets_by_identity[member.physical_identity].add(member.asset_id)
@@ -189,17 +194,37 @@ def observed_presentation(
         blocks = {block for member in members for block in member["blocks"]}
         if result.coverage != Coverage.COMPLETE:
             blocks.add(Block.INCOMPLETE_COVERAGE)
+        sorted_blocks = sorted(blocks)
+        decision = decisions.get((group.sha256, group.byte_size)) if decisions else None
+        plan_state = None
+        review = None
+        if decision is not None:
+            is_current = (
+                decision.status == Decision.CURRENT
+                and decision.evidence_fingerprint == fingerprint
+                and decision.keep_location_id in {m.location_id for m in group.members}
+            )
+            review_status = Decision.CURRENT if is_current else Decision.STALE
+            plan_state = (
+                (Plan.BLOCKED if sorted_blocks else Plan.READY) if is_current else Plan.STALE
+            )
+            review = dict(
+                decision_id=decision.id,
+                status=review_status,
+                keep_location_id=decision.keep_location_id,
+                reason=decision.reason,
+            )
         groups.append(
             dict(
                 group_key=f"{group.sha256}:{group.byte_size}",
                 sha256=group.sha256,
                 byte_size=str(group.byte_size),
-                evidence_fingerprint=None,
+                evidence_fingerprint=fingerprint if decision is not None else None,
                 occurrence_count=len(members),
                 physical_copy_count=group.physical_copy_count,
-                blocks=sorted(blocks),
-                plan_state=None,
-                review=None,
+                blocks=sorted_blocks,
+                plan_state=plan_state,
+                review=review,
                 members=members,
             )
         )
@@ -256,6 +281,40 @@ class DuplicatePresentation:
             return self._request(method, params)
         except PresentationError as error:
             return {"status": str(error)}
+
+    def apply_decision(
+        self,
+        group_key: str,
+        decision_id: str,
+        keep_location_id: str,
+        reason: str,
+        fingerprint: str,
+    ) -> dict:
+        group = next((g for g in self.groups if g["group_key"] == group_key), None)
+        if group is None:
+            raise PresentationError("not_found")
+        group["evidence_fingerprint"] = fingerprint
+        group["plan_state"] = Plan.BLOCKED if group["blocks"] else Plan.READY
+        group["review"] = dict(
+            decision_id=decision_id,
+            status=Decision.CURRENT,
+            keep_location_id=keep_location_id,
+            reason=reason,
+        )
+        return {k: v for k, v in group.items() if k != "members"}
+
+    def remove_member(self, group_key: str, location_id: str) -> dict | None:
+        group = next((g for g in self.groups if g["group_key"] == group_key), None)
+        if group is None:
+            raise PresentationError("not_found")
+        remaining = [m for m in group["members"] if m["location_id"] != location_id]
+        if len(remaining) < 2:
+            self.groups = [g for g in self.groups if g["group_key"] != group_key]
+            return None
+        group["members"] = remaining
+        group["occurrence_count"] = len(remaining)
+        group["physical_copy_count"] = max(1, group["physical_copy_count"] - 1)
+        return {k: v for k, v in group.items() if k != "members"}
 
     def _request(self, method: str, params: object) -> dict:
         group_method = method == "duplicates.group"
