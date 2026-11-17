@@ -35,13 +35,14 @@ it("lists connected devices and imports media from a device or folder", async ()
     catalogedCount: 3,
   }));
   const onImported = vi.fn();
+  const onNotice = vi.fn();
   (window as { photoManager?: unknown }).photoManager = {
     listMediaDevices,
     importMediaFromDevice,
   };
 
   await act(async () => {
-    root!.render(<MediaDevicesPanel onImported={onImported} />);
+    root!.render(<MediaDevicesPanel onImported={onImported} onNotice={onNotice} />);
   });
 
   const detectButton = Array.from(container.querySelectorAll("button")).find(
@@ -53,13 +54,20 @@ it("lists connected devices and imports media from a device or folder", async ()
   expect(listMediaDevices).toHaveBeenCalledTimes(1);
   expect(container.textContent).toContain("Sony SD Card");
 
+  const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  expect(checkbox.checked).toBe(false);
+  await act(async () => {
+    checkbox.click();
+  });
+  expect(checkbox.checked).toBe(true);
+
   const deviceImportButton = Array.from(container.querySelectorAll("button")).find(
     (btn) => btn.textContent === "Importar…",
   )!;
   await act(async () => {
     deviceImportButton.click();
   });
-  expect(importMediaFromDevice).toHaveBeenCalledWith("storage:sdb");
+  expect(importMediaFromDevice).toHaveBeenCalledWith("storage:sdb", true);
   expect(onImported).toHaveBeenCalledWith({
     status: "ready",
     copiedCount: 3,
@@ -67,7 +75,7 @@ it("lists connected devices and imports media from a device or folder", async ()
     excludedCount: 0,
     catalogedCount: 3,
   });
-  expect(container.textContent).toContain("3 arquivo(s) copiado(s) · 3 catalogado(s).");
+  expect(onNotice).toHaveBeenCalledWith({ text: "Importando mídia para a biblioteca…", error: false, persistent: true });
 
   const folderImportButton = Array.from(container.querySelectorAll("button")).find(
     (btn) => btn.textContent === "Importar de pasta/câmera…",
@@ -76,6 +84,6 @@ it("lists connected devices and imports media from a device or folder", async ()
   await act(async () => {
     folderImportButton.click();
   });
-  expect(importMediaFromDevice).toHaveBeenLastCalledWith(null);
-  expect(container.textContent).toContain("Importação cancelada.");
+  expect(importMediaFromDevice).toHaveBeenLastCalledWith(null, true);
+  expect(onNotice).toHaveBeenLastCalledWith({ text: "Importação cancelada.", error: false, persistent: false });
 });

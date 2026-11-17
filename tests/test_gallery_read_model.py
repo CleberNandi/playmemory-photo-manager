@@ -640,3 +640,55 @@ def test_gallery_date_filters_and_asset_details_albums(database: sqlite3.Connect
         (album_z, "Viagem"),
     ]
     assert gallery.get_asset_details(asset_b).albums == ()
+
+
+def test_gallery_sort_by_date_and_name_paginates(tmp_path):
+    from playmemories_photo_manager.catalog import Catalog
+    from playmemories_photo_manager.catalog.database import apply_migrations, connect
+
+    connection = connect(tmp_path / "sort.sqlite3")
+    apply_migrations(connection)
+    catalog = Catalog(connection)
+    root = catalog.register_root("Fotos", "/photos")
+    a_id = catalog.create_asset("photo").id
+    b_id = catalog.create_asset("photo").id
+    c_id = catalog.create_asset("photo").id
+    catalog.register_location(
+        a_id,
+        root.id,
+        "2015/01/charlie.jpg",
+        observed_mtime_ns=1_420_070_400_000_000_000,
+        last_seen_at="2026-11-17T00:00:00Z",
+    )
+    catalog.register_location(
+        b_id,
+        root.id,
+        "2018/09/alpha.jpg",
+        observed_mtime_ns=1_535_760_000_000_000_000,
+        last_seen_at="2026-11-17T00:00:00Z",
+    )
+    catalog.register_location(
+        c_id,
+        root.id,
+        "2015/12/bravo.jpg",
+        observed_mtime_ns=1_448_928_000_000_000_000,
+        last_seen_at="2026-11-17T00:00:00Z",
+    )
+
+    gallery = GalleryQueries(connection)
+    page1 = gallery.list_assets(GalleryQuery(page_size=2, sort_by="captured_desc"))
+    page2 = gallery.list_assets(
+        GalleryQuery(page_size=2, after=page1.next_cursor, sort_by="captured_desc")
+    )
+    assert [item.asset_id for item in (*page1.items, *page2.items)] == [b_id, c_id, a_id]
+    assert [
+        item.asset_id for item in gallery.list_assets(GalleryQuery(sort_by="captured_asc")).items
+    ] == [a_id, c_id, b_id]
+    assert [
+        item.asset_id for item in gallery.list_assets(GalleryQuery(sort_by="name_asc")).items
+    ] == [b_id, c_id, a_id]
+    assert [
+        item.asset_id for item in gallery.list_assets(GalleryQuery(sort_by="name_desc")).items
+    ] == [a_id, c_id, b_id]
+    with pytest.raises(InvalidGalleryQueryError):
+        gallery.list_assets(GalleryQuery(sort_by="invalid"))

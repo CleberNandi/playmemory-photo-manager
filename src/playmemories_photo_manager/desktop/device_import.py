@@ -6,9 +6,11 @@ import hashlib
 import os
 import stat
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
+from ..catalog_ingestion.capture import extract_capture
 from ..catalog_ingestion.images import EXTENSIONS, MAX_BYTES
 from ..catalog_ingestion.media import _Directories
 from ..catalog_ingestion.root_grants import _HeldRoot
@@ -93,6 +95,18 @@ def _choose_target_name(
     raise LibraryError("resource_limit")
 
 
+def _date_folder_for_file(file_fd: int, mtime_ns: int) -> PurePosixPath:
+    os.lseek(file_fd, 0, os.SEEK_SET)
+    with os.fdopen(os.dup(file_fd), "rb", closefd=True) as stream:
+        observations = extract_capture(stream)
+    for priority in ("DateTimeOriginal", "DateTimeDigitized"):
+        for name, _raw, local, *_ in observations:
+            if name == priority and isinstance(local, str) and len(local) >= 7:
+                return PurePosixPath(local[:4]) / local[5:7]
+    dt = datetime.fromtimestamp(mtime_ns // 1_000_000_000, tz=UTC).astimezone()
+    return PurePosixPath(f"{dt.year:04d}") / f"{dt.month:02d}"
+
+
 def _copy_file_atomic(
     source_fd: int,
     source_info: os.stat_result,
@@ -137,9 +151,12 @@ def import_from_media(
     device_id: object = None,
     source_path: object = None,
     destination_path: object = None,
+    organize_by_date: object = False,
     protected_paths: tuple[Path, ...] = (),
 ) -> dict:
     """Copy eligible media from a mounted device or folder into destination_path."""
+    if type(organize_by_date) is not bool:
+        raise LibraryError("invalid_request")
     dest_str = _valid_path_arg(destination_path)
     if dest_str is None:
         raise LibraryError("invalid_request")
@@ -232,7 +249,12 @@ def import_from_media(
                         excluded_count += 1
                         continue
                     digest = _sha256_fd(file_fd)
-                    dest_dir_fd = _ensure_dest_dir(dest_root, dest_dirs, rel_dir)
+                    target_rel_dir = (
+                        _date_folder_for_file(file_fd, actual_info.st_mtime_ns)
+                        if organize_by_date
+                        else rel_dir
+                    )
+                    dest_dir_fd = _ensure_dest_dir(dest_root, dest_dirs, target_rel_dir)
                     target_name = _choose_target_name(
                         dest_dir_fd,
                         name,

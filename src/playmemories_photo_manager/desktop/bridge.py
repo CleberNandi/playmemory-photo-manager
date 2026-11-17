@@ -168,6 +168,7 @@ def _dispatch(
             "lens",
             "created_date",
             "modified_date",
+            "sort_by",
         }
         if unknown:
             raise BridgeRequestError("unsupported gallery parameters")
@@ -205,6 +206,7 @@ def _dispatch(
                     lens=params.get("lens"),
                     created_date=params.get("created_date"),
                     modified_date=params.get("modified_date"),
+                    sort_by=params.get("sort_by"),
                 )
             )
         )

@@ -160,8 +160,9 @@ app.whenReady().then(async () => {
   register("gallery:list", 1, (raw) => {
     const {sessionId, params} = envelope(raw);
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
-    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; folderPath?: unknown; albumId?: unknown; filters?: unknown};
-    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "folderPath", "albumId", "filters"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    const p = params as {pageSize?: unknown; after?: unknown; capturePeriod?: unknown; favoritesOnly?: unknown; rootId?: unknown; folderPath?: unknown; albumId?: unknown; filters?: unknown; sortBy?: unknown};
+    if (Object.keys(p).some((key) => !["pageSize", "after", "capturePeriod", "favoritesOnly", "rootId", "folderPath", "albumId", "filters", "sortBy"].includes(key)) || (p.pageSize !== undefined && (!Number.isInteger(p.pageSize) || Number(p.pageSize) < 1 || Number(p.pageSize) > 50)) || (p.after !== undefined && p.after !== null && (typeof p.after !== "string" || p.after.length > 2048))) throw new Error("invalid_request");
+    if (p.sortBy !== undefined && p.sortBy !== null && !["captured_desc", "captured_asc", "name_asc", "name_desc"].includes(String(p.sortBy))) throw new Error("invalid_request");
     if (p.capturePeriod !== undefined && p.capturePeriod !== null && (typeof p.capturePeriod !== "string" || !/^(undated|[0-9]{4}(-[0-9]{2}){0,2})$/.test(p.capturePeriod))) throw new Error("invalid_request");
     if (p.favoritesOnly !== undefined && typeof p.favoritesOnly !== "boolean") throw new Error("invalid_request");
     if (p.rootId !== undefined && (typeof p.rootId !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(p.rootId))) throw new Error("invalid_request");
@@ -184,7 +185,7 @@ app.whenReady().then(async () => {
         filters[key] = value;
       }
     }
-    return query("gallery.list", sessionId, {...filters, ...(p.albumId ? {album_id:p.albumId} : {}), include_facets:!p.after, include_roots:!p.after, ...(p.folderPath !== undefined ? {folder_path:p.folderPath} : {}), ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {})});
+    return query("gallery.list", sessionId, {...filters, ...(p.albumId ? {album_id:p.albumId} : {}), include_facets:!p.after, include_roots:!p.after, ...(p.folderPath !== undefined ? {folder_path:p.folderPath} : {}), ...(p.rootId ? {root_id:p.rootId} : {}), page_size: p.pageSize ?? 24, after: p.after ?? null, ...(p.capturePeriod ? {capture_period:p.capturePeriod} : {}), ...(p.favoritesOnly !== undefined ? {favorites_only:p.favoritesOnly} : {}), ...(p.sortBy ? {sort_by:p.sortBy} : {})});
   });
   imageEdits=new ImageEdits(libraries,async(source,angle)=>{
     if(managedSmoke&&smokeDirectory&&ingestionSmokeRoot&&dirname(source)===ingestionSmokeRoot)return join(dirname(source),basename(source,extname(source))+"-rotacionada"+extname(source));
@@ -328,8 +329,10 @@ app.whenReady().then(async () => {
     if (demo || recovering || libraries.isBusy || folderImports?.busy || imageEdits?.busy) throw new Error("busy");
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("invalid_request");
     const keys = Object.keys(params);
-    if (keys.some(key => key !== "deviceId")) throw new Error("invalid_request");
+    if (keys.some(key => key !== "deviceId" && key !== "organizeByDate")) throw new Error("invalid_request");
     const deviceId = (params as {deviceId?: unknown}).deviceId ?? null;
+    const organizeByDate = (params as {organizeByDate?: unknown}).organizeByDate ?? false;
+    if (typeof organizeByDate !== "boolean") throw new Error("invalid_request");
     if (deviceId !== null && (typeof deviceId !== "string" || deviceId.length === 0 || deviceId.length > 128 || deviceId.includes("\0"))) {
       throw new Error("invalid_request");
     }
@@ -353,6 +356,7 @@ app.whenReady().then(async () => {
     let copyResult = await libraries.query("devices.import", sessionId, {
       ...(sourcePath ? {source_path: sourcePath} : {device_id: deviceId}),
       destination_path: destinationPath,
+      organize_by_date: organizeByDate,
     }) as {status: string; copied_count?: number; skipped_count?: number; excluded_count?: number; destination_path?: string};
     if (copyResult.status === "source_not_mounted") {
       sourcePath = await pickDirectory("Dispositivo não montado — escolher pasta de origem");
@@ -360,6 +364,7 @@ app.whenReady().then(async () => {
       copyResult = await libraries.query("devices.import", sessionId, {
         source_path: sourcePath,
         destination_path: destinationPath,
+        organize_by_date: organizeByDate,
       }) as typeof copyResult;
     }
     if (copyResult.status !== "ready") return copyResult;

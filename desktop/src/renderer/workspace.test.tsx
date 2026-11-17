@@ -225,6 +225,7 @@ it("selects multiple photos in batch, favorites them, and adds them to an album"
     changeAlbumMembership,
   });
   await act(async () => root.render(<App />));
+  await click("Selecionar vários");
   await click("Selecionar visíveis");
   expect(host.querySelector(".batch-toolbar")?.textContent).toContain("2 itens marcados");
   expect(host.querySelector(".workspace-status")?.textContent).toContain("2 selecionados");

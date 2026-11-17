@@ -78,6 +78,12 @@ class GalleryQueries:
             "fold_text", 1, lambda value: (value or "").casefold(), deterministic=True
         )
         connection.create_function("media_parent", 1, _media_parent, deterministic=True)
+        connection.create_function(
+            "media_basename",
+            1,
+            lambda path: path.rsplit("/", 1)[-1].casefold() if path else "",
+            deterministic=True,
+        )
         self._thumbnail_store = thumbnail_store
 
     def list_subfolders(self, root_id: str, folder_path: str) -> tuple[str, ...]:
@@ -101,10 +107,34 @@ class GalleryQueries:
         normalized = _validate_query(query)
         filters = _filter_values(normalized)
         cursor_values = _decode_cursor(normalized.after, filters) if normalized.after else None
-        comparison, direction = ("<", "DESC") if normalized.newest_first else (">", "ASC")
+        sort_by = normalized.sort_by
+        if sort_by in ("captured_desc", "captured_asc"):
+            sort_expr = """COALESCE(
+                a.captured_local_value,
+                (SELECT mtime_bucket(fl.observed_mtime_ns) FROM file_location fl
+                 WHERE fl.asset_id = a.id AND fl.availability <> 'missing'
+                   AND fl.observed_mtime_ns IS NOT NULL
+                 ORDER BY fl.library_root_id, fl.normalized_relative_path LIMIT 1),
+                a.created_at
+            )"""
+            comparison, direction = ("<", "DESC") if sort_by == "captured_desc" else (">", "ASC")
+        elif sort_by in ("name_asc", "name_desc"):
+            sort_expr = """lower(coalesce(
+                nullif(trim((SELECT ua.title FROM user_annotation ua
+                             WHERE ua.asset_id = a.id)), ''),
+                (SELECT media_basename(fl.normalized_relative_path) FROM file_location fl
+                 WHERE fl.asset_id = a.id AND fl.availability <> 'missing'
+                 ORDER BY fl.library_root_id, fl.normalized_relative_path LIMIT 1),
+                a.id
+            ))"""
+            comparison, direction = ("<", "DESC") if sort_by == "name_desc" else (">", "ASC")
+        else:
+            sort_expr = "a.created_at"
+            comparison, direction = ("<", "DESC") if normalized.newest_first else (">", "ASC")
         sql = f"""
             WITH candidates AS (
                 SELECT a.*,
+                    {sort_expr} AS sort_key,
                     CASE
                         WHEN EXISTS (
                             SELECT 1 FROM file_location fl
@@ -184,8 +214,8 @@ class GalleryQueries:
             )
             SELECT * FROM candidates
             WHERE (? IS NULL OR projected_availability = ?)
-              AND (? IS NULL OR (created_at, id) {comparison} (?, ?))
-            ORDER BY created_at {direction}, id {direction}
+              AND (? IS NULL OR (sort_key, id) {comparison} (?, ?))
+            ORDER BY sort_key {direction}, id {direction}
             LIMIT ?
         """
         after_created, after_id = cursor_values or (None, None)
@@ -245,7 +275,7 @@ class GalleryQueries:
         next_cursor = None
         if has_more and visible:
             last = visible[-1]
-            next_cursor = _encode_cursor(last["created_at"], last["id"], filters)
+            next_cursor = _encode_cursor(last["sort_key"], last["id"], filters)
         return GalleryPage(items=items, next_cursor=next_cursor, has_more=has_more)
 
     def get_asset_details(self, asset_id: str) -> AssetDetails:
@@ -426,6 +456,13 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
             raise InvalidGalleryQueryError("invalid text filter")
     if query.rating is not None and (type(query.rating) is not int or not 1 <= query.rating <= 5):
         raise InvalidGalleryQueryError("invalid rating")
+    if query.sort_by is not None and query.sort_by not in (
+        "captured_desc",
+        "captured_asc",
+        "name_asc",
+        "name_desc",
+    ):
+        raise InvalidGalleryQueryError("invalid sort_by")
     tag_id = _canonical_uuid(query.tag_id, "tag_id") if query.tag_id is not None else None
     return GalleryQuery(
         query.page_size,
@@ -447,6 +484,7 @@ def _validate_query(query: GalleryQuery) -> GalleryQuery:
         query.exclude_missing,
         created_date,
         modified_date,
+        query.sort_by,
     )
 
 
@@ -470,6 +508,7 @@ def _filter_values(query: GalleryQuery) -> dict[str, str | int | bool | None]:
         },
         **({"newest_first": True} if query.newest_first else {}),
         **({"exclude_missing": True} if query.exclude_missing else {}),
+        **({"sort_by": query.sort_by} if query.sort_by is not None else {}),
         "kind": query.kind.value if query.kind else None,
         "capture_period": query.capture_period,
         "favorites_only": query.favorites_only,

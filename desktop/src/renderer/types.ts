@@ -10,6 +10,8 @@ export interface GalleryItem {
   representative_location: { relative_path: string; root_display_name: string } | null;
 }
 
+export type GallerySort = "captured_desc" | "captured_asc" | "name_asc" | "name_desc";
+
 export type PhotoFilters = {
   keyword?: string;
   tag_id?: string;
@@ -71,7 +73,7 @@ declare global {
       renameAlbum?(albumId: string, name: string): Promise<Album>;
       deleteAlbum?(albumId: string): Promise<{changed: boolean}>;
       changeAlbumMembership?(albumId: string, assetId: string, action: "add" | "remove"): Promise<{changed: boolean}>;
-      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; folderPath?: string; albumId?: string; filters?: PhotoFilters }): Promise<GalleryPage>;
+      listGallery(params?: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; folderPath?: string; albumId?: string; filters?: PhotoFilters; sortBy?: GallerySort }): Promise<GalleryPage>;
       saveRotation?(assetId:string,angle:number,mode:"replace"|"copy"):Promise<ImageSaveJob>;
       getImageSaveStatus?(jobId:string):Promise<ImageSaveJob>;
       showMediaMenu?(assetId:string):Promise<"view"|"properties"|"favorite"|"add-to-album"|null>;
@@ -85,7 +87,7 @@ declare global {
       previewFileRename?(assetId: string, locationId: string, stem: string): Promise<RenamePreview>;
       applyFileRename?(assetId: string, locationId: string, stem: string): Promise<RenamePreview>;
       listMediaDevices?(): Promise<MediaDevices>;
-      importMediaFromDevice?(deviceId?: string | null): Promise<MediaImportResult>;
+      importMediaFromDevice?(deviceId?: string | null, organizeByDate?: boolean): Promise<MediaImportResult>;
       removeLibraryRoot?(rootId: string): Promise<{status: "removed"; root_id: string}>;
       startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;

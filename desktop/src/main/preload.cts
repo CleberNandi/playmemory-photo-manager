@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld("photoManager", {
   deleteAlbum: (albumId: string) => scoped("album:action", {action:"delete", album_id:albumId}),
   changeAlbumMembership: (albumId: string, assetId: string, action: "add" | "remove") =>
     scoped("album:action", {action, album_id:albumId, asset_id:assetId}),
-  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; folderPath?: string; albumId?: string; filters?: Record<string, string | number> } = {}) =>
+  listGallery: (params: { pageSize?: number; after?: string | null; capturePeriod?: string | null; favoritesOnly?: boolean; rootId?: string; folderPath?: string; albumId?: string; filters?: Record<string, string | number>; sortBy?: string | null } = {}) =>
     scoped("gallery:list", params),
   saveRotation:(assetId:string,angle:number,mode:"replace"|"copy")=>scoped("image:save",{assetId,angle,mode}),
   getImageSaveStatus:(jobId:string)=>scoped("image:save-status",jobId),
@@ -42,7 +42,8 @@ contextBridge.exposeInMainWorld("photoManager", {
   applyFileRename: (assetId: string, locationId: string, stem: string) =>
     scoped("rename:apply", {assetId, locationId, stem}),
   listMediaDevices: () => scoped("devices:list", null),
-  importMediaFromDevice: (deviceId: string | null = null) => scoped("devices:import", {deviceId}),
+  importMediaFromDevice: (deviceId: string | null = null, organizeByDate = false) =>
+    scoped("devices:import", {deviceId, organizeByDate}),
   removeLibraryRoot: (rootId: string) => scoped("root:remove", {rootId}),
   startDuplicateScan: () => scoped("duplicates:start", {}),
   listDuplicates: (params: {pageSize?: number; after?: string | null} = {}) => scoped("duplicates:list", params),

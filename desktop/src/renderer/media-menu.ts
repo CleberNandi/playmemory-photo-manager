@@ -1,5 +1,5 @@
 import type {KeyboardEvent,MouseEvent} from "react";
-export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTMLElement>,assetId:string,onSelect?:(button:HTMLButtonElement)=>void,onOpen?:(rotation?:number)=>void,onError?:()=>void,onAddToAlbum?:()=>void){
+export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTMLElement>,assetId:string,onSelect?:(button:HTMLButtonElement)=>void,onOpen?:(rotation?:number)=>void,onError?:()=>void,onAddToAlbum?:()=>void,favorite?:{current:boolean;onChanged:(value:boolean)=>void}){
  if(!window.photoManager?.showMediaMenu)return;
  event.preventDefault();event.stopPropagation();
  const host=event.currentTarget;
@@ -12,7 +12,14 @@ export async function mediaMenu(event:MouseEvent<HTMLElement>|KeyboardEvent<HTML
   if(action==="view")onOpen?.();
   else if(action==="properties"){if(button)onSelect?.(button);}
   else if(action==="add-to-album"){onAddToAlbum?.();return;}
-  else if(action==="favorite")host.querySelector<HTMLButtonElement>(".favorite-toggle")?.click();
+  else if(action==="favorite"){
+   const toggle=host.querySelector<HTMLButtonElement>(".favorite-toggle");
+   if(toggle)toggle.click();
+   else if(favorite&&window.photoManager?.setFavorite){
+    const ack=await window.photoManager.setFavorite(assetId,!favorite.current);
+    if(host.isConnected&&ack.asset_id===assetId)favorite.onChanged(ack.favorite);
+   }
+  }
   if(action!=="view"&&action!=="properties")button?.focus({preventScroll:true});
  }catch{if(host.isConnected)onError?.();}
 }

@@ -197,3 +197,36 @@ def test_devices_import_copies_safely_preserves_mtime_and_never_overwrites(tmp_p
                 )
     finally:
         dispatcher.close()
+
+
+def test_devices_import_organize_by_date_uses_mtime_fallback(tmp_path):
+    source = tmp_path / "card"
+    source.mkdir()
+    photo = source / "IMG_0001.jpg"
+    photo.write_bytes(b"\xff\xd8\xff\xe0synthetic")
+    # 2024-06-15T12:00:00Z
+    os.utime(photo, ns=(1_718_452_800_000_000_000, 1_718_452_800_000_000_000))
+    destination = tmp_path / "dest"
+    destination.mkdir()
+    catalog_dir = tmp_path / "catalog_home"
+    catalog_dir.mkdir()
+    dispatcher = LibraryDispatcher()
+    try:
+        state = dispatcher.request(
+            "library.create",
+            {"path": str(catalog_dir / "cat.sqlite3"), "library_handle": str(uuid4())},
+        )
+        session_id = state["session"]["session_id"]
+        result = dispatcher.request(
+            "devices.import",
+            {
+                "session_id": session_id,
+                "source_path": str(source),
+                "destination_path": str(destination),
+                "organize_by_date": True,
+            },
+        )
+        assert result["copied_count"] == 1
+        assert (destination / "2024/06/IMG_0001.jpg").read_bytes() == b"\xff\xd8\xff\xe0synthetic"
+    finally:
+        dispatcher.close()

@@ -23,6 +23,6 @@ it("distinguishes matching names in the root and a subfolder", () => {
   const atRoot = renderToStaticMarkup(<MediaCard item={{
     ...item, representative_location: {root_display_name: "Fixtures", relative_path: "retrato.jpg"},
   }} />);
-  expect(nested).toContain(">Fixtures / fixtures</p>");
-  expect(atRoot).toContain(">Fixtures</p>");
+  expect(nested).toContain('title="fixtures/retrato.jpg"');
+  expect(atRoot).toContain('title="retrato.jpg"');
 });

@@ -80,7 +80,7 @@ it.each(["button","escape"])("keeps the opened asset selected and restores its c
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
  await act(async()=>root.render(<App/>));
  await select(0);
- await act(async()=>host.querySelectorAll<HTMLButtonElement>(".open-image")[1].click());
+ await act(async()=>host.querySelectorAll<HTMLButtonElement>(".card-select")[1].dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
  expect(host.querySelector('.card-select[aria-pressed="true"]')?.getAttribute("data-asset-id")).toBe("second");
  const dialog=host.querySelector("dialog")!;
  expect(host.querySelector(".technical-properties dl")?.textContent).toContain("second");

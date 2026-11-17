@@ -17,14 +17,14 @@ import { MediaDevicesPanel } from "./MediaDevicesPanel";
 import { FolderNavigation } from "./FolderNavigation";
 import { AlbumPanel } from "./AlbumPanel";
 import { AvailabilityIndicator } from "./AvailabilityIndicator";
-import type { Album, AnnotationField, GalleryItem, GalleryPage, MediaImportResult, PhotoFacets, PhotoFilters } from "./types";
+import type { Album, AnnotationField, GalleryItem, GalleryPage, GallerySort, MediaImportResult, PhotoFacets, PhotoFilters } from "./types";
 
 type State = { kind: "loading" } | { kind: "ready"; page: GalleryPage } | { kind: "error" };
-async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string, filters:PhotoFilters={}, albumId?:string, folderPath?:string): Promise<GalleryPage> {
+async function requestGallery(retry = false, capturePeriod: string | null = null, favoritesOnly=false, rootId?: string, filters:PhotoFilters={}, albumId?:string, folderPath?:string, sortBy?:GallerySort): Promise<GalleryPage> {
   const bridge = window.photoManager;
   if (!bridge) throw new Error("Desktop bridge unavailable");
-  if (retry) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly&&!rootId&&!albumId&&!Object.keys(filters).length)return page;}
-  return bridge.listGallery({pageSize:24,...(albumId?{albumId}:{}),...(Object.keys(filters).length?{filters}:{}),...(rootId?{rootId,...(folderPath?{folderPath}:{})}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{})});
+  if (retry && !sortBy) {const page=await bridge.retryGallery();if(!capturePeriod&&!favoritesOnly&&!rootId&&!albumId&&!Object.keys(filters).length)return page;}
+  return bridge.listGallery({pageSize:24,...(albumId?{albumId}:{}),...(Object.keys(filters).length?{filters}:{}),...(rootId?{rootId,...(folderPath?{folderPath}:{})}:{}),...(capturePeriod?{capturePeriod}:{}),...(favoritesOnly?{favoritesOnly:true}:{}),...(sortBy?{sortBy}:{})});
 }
 
 type View = "gallery" | "duplicates" | "folders" | "albums" | "tools";
@@ -36,10 +36,19 @@ export function App() {
 
 function GalleryApp() {
   const session = useLibrarySession();
-  const [toast,setToast]=useState<{text:string;error?:boolean}|null>(null);
+  const [toast,setToastState]=useState<{text:string;error?:boolean;persistent?:boolean}|null>(null);
+  const [notifications,setNotifications]=useState<{id:number;time:string;text:string;error?:boolean}[]>([]);
+  const notificationSeq=useRef(0);
+  const setToast=useCallback((next:{text:string;error?:boolean;persistent?:boolean}|null)=>{
+    setToastState(next);
+    if(next&&!next.persistent){
+      const time=new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+      setNotifications(prev=>[{id:++notificationSeq.current,time,text:next.text,error:next.error},...prev].slice(0,20));
+    }
+  },[]);
   useEffect(()=>{
-    if(!toast||toast.error)return;
-    const timer=setTimeout(()=>setToast(null),4500);
+    if(!toast||toast.error||toast.persistent)return;
+    const timer=setTimeout(()=>setToastState(null),4500);
     return ()=>clearTimeout(timer);
   },[toast]);
   const setActionError=(value:boolean)=>setToast(value?{text:"Não foi possível executar a ação. Confira se a imagem e a biblioteca continuam disponíveis.",error:true}:null);
@@ -57,7 +66,9 @@ function GalleryApp() {
   const [album, setAlbum] = useState<Album | null>(null);
   const [albumTarget, setAlbumTarget] = useState<string | string[] | null>(null);
   const [batchSelected, setBatchSelected] = useState<string[]>([]);
+  const [batchMode, setBatchMode] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [sortBy, setSortBy] = useState<GallerySort | undefined>(undefined);
   const lastBatchAnchor = useRef<string | null>(null);
   const canManageAlbums = !!session && !!window.photoManager?.listAlbums && !!window.photoManager?.createAlbum && !!window.photoManager?.changeAlbumMembership;
   const [favorites, setFavorites] = useState(false);
@@ -111,6 +122,7 @@ function GalleryApp() {
           ...(rootId ? {rootId, ...(folderPath ? {folderPath} : {})} : {}),
           ...(captureFilter ? {capturePeriod:captureFilter} : {}),
           ...(favorites ? {favoritesOnly:true} : {}),
+          ...(sortBy ? {sortBy} : {}),
         });
         if (epoch !== galleryEpoch.current) return;
         if (after === page.next_cursor) throw new Error("Gallery cursor did not advance");
@@ -136,7 +148,7 @@ function GalleryApp() {
     setPageError(false);
     setState({ kind: "loading" });
     const epoch = galleryEpoch.current;
-    void requestGallery(true, captureFilter, favorites, rootId, filters, album?.id, folderPath)
+    void requestGallery(true, captureFilter, favorites, rootId, filters, album?.id, folderPath, sortBy)
       .then((page) => {
         if (epoch !== galleryEpoch.current) return;
         setState({kind: "ready", page});
@@ -148,7 +160,7 @@ function GalleryApp() {
   };
   useEffect(() => {
     let active = true;
-    void requestGallery(false,captureFilter,favorites,rootId,filters,album?.id,folderPath)
+    void requestGallery(false,captureFilter,favorites,rootId,filters,album?.id,folderPath,sortBy)
       .then((page) => {
         if (!active) return;
         setState({kind: "ready", page});
@@ -158,7 +170,7 @@ function GalleryApp() {
       })
       .catch(() => { if (active) setState({ kind: "error" }); });
     return () => { active = false; };
-  }, [galleryRevision,captureFilter,favorites,rootId,filters,album?.id,folderPath]);
+  }, [galleryRevision,captureFilter,favorites,rootId,filters,album?.id,folderPath,sortBy]);
 
   const items = state.kind === "ready" ? state.page.items : [];
   // Desktop folder pages arrive scoped by root ID.
@@ -385,14 +397,26 @@ function GalleryApp() {
     : view === "albums" ? "Álbuns" : view === "folders" ? "Pastas"
     : album?.name ?? (folderPath ? folderPath.split("/").at(-1) : activeRoot?.name)
       ?? (favorites ? "Favoritos" : "Biblioteca");
+  const changeSort = (next: GallerySort) => {
+    galleryEpoch.current++; inFlight.current = false; setPaging(false); setPageError(false);
+    setState({ kind: "loading" }); setSortBy(next);
+  };
   return <div className={`app-shell${propertiesOpen ? " with-properties" : ""}`} style={{"--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--thumbnail-size": `${thumbnailSize}px`} as CSSProperties}>
       <nav className="workspace-menu" aria-label="Menus da área de trabalho">
         {session?.fileMenu ?? <DesktopMenu label="Arquivo"><button disabled>Bibliotecas indisponíveis no demo</button></DesktopMenu>}
-        <DesktopMenu label="Editar"><button disabled={!selected} onClick={()=>setPropertiesOpen(true)}>Anotações da foto</button></DesktopMenu>
+        <DesktopMenu label="Editar">
+          <button disabled={!selected} onClick={()=>setPropertiesOpen(true)}>Anotações da foto</button>
+          <button aria-pressed={batchMode} disabled={!canBatchSelect} onClick={() => setBatchMode(active => { if (active) setBatchSelected([]); return !active; })}>{batchMode ? "Sair da seleção múltipla" : "Selecionar vários"}</button>
+        </DesktopMenu>
         <DesktopMenu label="Exibir">
           <button onClick={() => changeDisplay("thumbnails")}>Miniaturas</button>
           <button onClick={() => changeDisplay("details")}>Detalhes</button>
           <button disabled={!window.photoManager?.getCalendar} onClick={()=>openCalendar(null)}>Calendário por captura</button>
+          <hr />
+          <button aria-pressed={(sortBy ?? "captured_desc") === "captured_desc"} onClick={() => changeSort("captured_desc")}>Ordenar por data (mais recentes)</button>
+          <button aria-pressed={sortBy === "captured_asc"} onClick={() => changeSort("captured_asc")}>Ordenar por data (mais antigas)</button>
+          <button aria-pressed={sortBy === "name_asc"} onClick={() => changeSort("name_asc")}>Ordenar por nome (A → Z)</button>
+          <button aria-pressed={sortBy === "name_desc"} onClick={() => changeSort("name_desc")}>Ordenar por nome (Z → A)</button>
           <hr />
           <button onClick={() => setPropertiesOpen((open) => !open)}>Mostrar / ocultar propriedades</button>
         </DesktopMenu>
@@ -405,6 +429,8 @@ function GalleryApp() {
       folder={folder} favorites={favorites} canPrepare={!!session?.catalogingEnabled||!!session?.folderImportEnabled}
       preparing={preparing} onPrepare={openFolderPicker} onFolders={() => showCollection("folders")}
       onSource={(_id, favorite) => browseAll(favorite)} onNavigate={() => showCollection("tools")}
+      notifications={notifications} onClearNotifications={() => setNotifications([])}
+      onNotice={setToast}
       onDevicesImported={(imported) => {
         if (imported.status !== "ready") return;
         galleryEpoch.current++; inFlight.current = false; setPaging(false); setPageError(false);
@@ -433,7 +459,7 @@ function GalleryApp() {
         {view === "gallery" && !calendar && display === "thumbnails" && <label className="thumbnail-range">Tamanho <input aria-label="Tamanho das miniaturas" type="range" min="110" max="240" value={thumbnailSize} onChange={(event) => setThumbnailSize(Number(event.target.value))} /></label>}
         <button aria-pressed={propertiesOpen} onClick={() => setPropertiesOpen((open) => !open)}>Propriedades</button>
         {view === "gallery" && (selected || activeBatch.length > 0) && canManageAlbums && <button onClick={() => setAlbumTarget(activeBatch.length > 0 ? activeBatch : selected)}>Adicionar a álbum…</button>}
-        {view === "gallery" && !calendar && canBatchSelect && visible.length > 0 && <button type="button" onClick={() => setBatchSelected(activeBatch.length === visible.length ? [] : visible.map(item => item.asset_id))}>{activeBatch.length === visible.length ? "Desmarcar visíveis" : "Selecionar visíveis"}</button>}
+        {view === "gallery" && !calendar && canBatchSelect && batchMode && visible.length > 0 && <button type="button" onClick={() => setBatchSelected(activeBatch.length === visible.length ? [] : visible.map(item => item.asset_id))}>{activeBatch.length === visible.length ? "Desmarcar visíveis" : "Selecionar visíveis"}</button>}
       </header>
       {view === "gallery" && !calendar && activeBatch.length > 0 && <section className="batch-toolbar" aria-label="Ações em lote">
         <strong>{activeBatch.length === 1 ? "1 item marcado" : `${activeBatch.length} itens marcados`}</strong>
@@ -525,7 +551,7 @@ function GalleryApp() {
         {state.kind === "ready" && state.page.items.length > 0 && <section className="gallery" aria-labelledby="gallery-heading">
           <h2 id="gallery-heading" className="sr-only">Fotos e vídeos</h2>
           {!visible.length && <p role="status">Nenhum item carregado corresponde aos filtros. Carregue mais itens ou altere os filtros.</p>}
-          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={`${item.asset_id}:${mediaRevision}`} item={item} batchSelected={activeBatch.includes(item.asset_id)} onToggleBatch={canBatchSelect ? (checked, shiftKey) => toggleBatch(item.asset_id, checked, shiftKey) : undefined} onAddToAlbum={canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined} selected={selected === item.asset_id} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(item.asset_id,value):undefined} onOpen={window.photoManager?.getPreview ? ()=>openAsset(item.asset_id) : undefined} onSelect={(button, event) => selectAsset(item.asset_id, button, event)} />)}</div>
+          {display === "thumbnails" ? <div className="media-grid" role="list">{visible.map((item) => <MediaCard key={`${item.asset_id}:${mediaRevision}`} item={item} batchSelected={activeBatch.includes(item.asset_id)} onToggleBatch={canBatchSelect && batchMode ? (checked, shiftKey) => toggleBatch(item.asset_id, checked, shiftKey) : undefined} onAddToAlbum={canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined} selected={selected === item.asset_id} onFavoriteChanged={canEditFavorites?(value)=>favoriteChanged(item.asset_id,value):undefined} onOpen={window.photoManager?.getPreview ? ()=>openAsset(item.asset_id) : undefined} onSelect={(button, event) => selectAsset(item.asset_id, button, event)} />)}</div>
             : <div className="gallery-table"><table><thead><tr>{canBatchSelect && <th>Sel.</th>}<th>Nome</th><th>Pasta</th><th>Formato</th><th>Disponibilidade</th><th>Favorito</th></tr></thead><tbody>{visible.map((item) => {const rowName = item.annotation.title?.trim() || item.representative_location?.relative_path || "Sem título"; return <tr key={item.asset_id} onContextMenu={event=>void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true),canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined)} onKeyDown={event=>{if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))void mediaMenu(event,item.asset_id,button=>selectAsset(item.asset_id,button),()=>openAsset(item.asset_id),()=>setActionError(true),canManageAlbums?()=>setAlbumTarget(activeBatch.includes(item.asset_id) && activeBatch.length > 1 ? activeBatch : item.asset_id):undefined);}}>{canBatchSelect && <td><input type="checkbox" className="batch-checkbox" aria-label={`Marcar ${rowName}`} checked={activeBatch.includes(item.asset_id)} onChange={event => toggleBatch(item.asset_id, event.currentTarget.checked, (event.nativeEvent as globalThis.MouseEvent).shiftKey === true)} /></td>}<td><button data-asset-id={item.asset_id} aria-pressed={selected === item.asset_id} onClick={(event) => selectAsset(item.asset_id, event.currentTarget, event)}>{rowName}</button></td><td>{item.representative_location?.root_display_name ?? "Sem localização"}</td><td>{item.media_type ?? "Desconhecido"}</td><td><AvailabilityIndicator availability={item.availability} /></td><td>{canEditFavorites?<FavoriteButton assetId={item.asset_id} favorite={item.annotation.favorite} onChanged={(value)=>favoriteChanged(item.asset_id,value)}/>:item.annotation.favorite?"★":"—"}</td></tr>;})}</tbody></table></div>}
           <div className="pagination">
             {pageError && <p role="alert">Não foi possível carregar mais itens. Tente novamente ou reabra a biblioteca.</p>}
@@ -569,11 +595,14 @@ function GalleryApp() {
   </div>;
 }
 
-export function Sidebar({canListDevices = false, view = "gallery", onNavigate, folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource, onFolders, albums, albumActive = false, onDevicesImported}: {
+export function Sidebar({canListDevices = false, view = "gallery", onNavigate, folder = null, favorites = false, canPrepare = false, preparing = false, onPrepare, onSource, onFolders, albums, albumActive = false, onDevicesImported, onNotice, notifications = [], onClearNotifications}: {
   albums?: () => void; albumActive?: boolean; canListDevices?: boolean; view?: View;
   onNavigate?: () => void; folder?: string | null; favorites?: boolean; canPrepare?: boolean;
   preparing?: boolean; onPrepare?: () => void; onSource?: (folder: string | null, favorites: boolean) => void;
   onFolders?: () => void; onDevicesImported?: (result: MediaImportResult) => void;
+  onNotice?: (notice: {text: string; error?: boolean; persistent?: boolean}) => void;
+  notifications?: {id: number; time: string; text: string; error?: boolean}[];
+  onClearNotifications?: () => void;
 }) {
   return <aside className="sidebar">
     <nav className="primary-nav" aria-label="Principal">
@@ -582,8 +611,19 @@ export function Sidebar({canListDevices = false, view = "gallery", onNavigate, f
       <NavItem icon="folder" label="Pastas" active={view === "folders" || view === "gallery" && !!folder} onClick={onFolders} />
       <NavItem icon="album" label="Álbuns" active={view === "albums" || view === "gallery" && albumActive} disabled={!albums} onClick={albums} />
     </nav>
-    <details className="sidebar-disclosure"><summary>Notificações</summary><p>{preparing ? "Consulte o andamento no painel central." : "O andamento aparece acima da galeria."}</p></details>
-    {canListDevices && <details className="sidebar-disclosure"><summary>Câmeras e mídias</summary><MediaDevicesPanel onImported={onDevicesImported} /></details>}
+    <details className="sidebar-disclosure">
+      <summary>{notifications.length ? `Notificações (${notifications.length})` : "Notificações"}</summary>
+      {preparing && <p>Consulte o andamento no painel central.</p>}
+      {notifications.length > 0 ? <>
+        <ul className="notifications-list">{notifications.map(item =>
+          <li key={item.id} className={item.error ? "is-error" : undefined}>
+            <span>{item.time}</span> · {item.text}
+          </li>
+        )}</ul>
+        {onClearNotifications && <button type="button" onClick={onClearNotifications}>Limpar notificações</button>}
+      </> : !preparing && <p>Nenhuma notificação recente.</p>}
+    </details>
+    {canListDevices && <details className="sidebar-disclosure"><summary>Câmeras e mídias</summary><MediaDevicesPanel onImported={onDevicesImported} onNotice={onNotice} /></details>}
     <nav className="primary-nav sidebar-tools" aria-label="Utilitários">
       <NavItem icon="tools" label="Ferramentas" active={view === "tools" || view === "duplicates"} onClick={onNavigate} />
     </nav>

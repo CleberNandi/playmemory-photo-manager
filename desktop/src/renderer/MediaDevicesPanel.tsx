@@ -1,12 +1,27 @@
 import { useRef, useState } from "react";
 import type { MediaDevices, MediaImportResult } from "./types";
 
-export function MediaDevicesPanel({onImported}: {onImported?: (result: MediaImportResult) => void} = {}) {
+export function MediaDevicesPanel({
+  onImported,
+  onNotice,
+}: {
+  onImported?: (result: MediaImportResult) => void;
+  onNotice?: (notice: { text: string; error?: boolean; persistent?: boolean }) => void;
+} = {}) {
   const [result, setResult] = useState<MediaDevices>();
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [organizeByDate, setOrganizeByDate] = useState(false);
   const pending = useRef(false);
+
+  function notify(text: string, error = false, persistent = false) {
+    if (onNotice) {
+      onNotice({ text, error, persistent });
+    } else {
+      setImportStatus(text);
+    }
+  }
 
   async function refresh() {
     if (pending.current || importing) return;
@@ -25,25 +40,28 @@ export function MediaDevicesPanel({onImported}: {onImported?: (result: MediaImpo
   async function importFrom(deviceId: string | null = null) {
     if (pending.current || importing || !window.photoManager?.importMediaFromDevice) return;
     setImporting(true);
-    setImportStatus("Importando mídia para a biblioteca…");
+    notify("Importando mídia para a biblioteca…", false, true);
     try {
-      const imported = await window.photoManager.importMediaFromDevice(deviceId);
+      const imported = await window.photoManager.importMediaFromDevice(deviceId, organizeByDate);
       if (imported.status === "cancelled") {
-        setImportStatus("Importação cancelada.");
+        notify("Importação cancelada.");
       } else if (imported.status === "ready") {
-        setImportStatus(
-          imported.copiedCount > 0
-            ? `${imported.copiedCount} arquivo(s) copiado(s) · ${imported.catalogedCount} catalogado(s).`
-            : imported.skippedCount > 0
-              ? `Nenhuma foto nova (${imported.skippedCount} já existente(s) no destino).`
-              : "Nenhuma imagem compatível encontrada na origem."
-        );
-        onImported?.(imported);
+        if (onImported) {
+          onImported(imported);
+        } else {
+          notify(
+            imported.copiedCount > 0
+              ? `${imported.copiedCount} arquivo(s) copiado(s) · ${imported.catalogedCount} catalogado(s).`
+              : imported.skippedCount > 0
+                ? `Nenhuma foto nova (${imported.skippedCount} já existente(s) no destino).`
+                : "Nenhuma imagem compatível encontrada na origem."
+          );
+        }
       } else {
-        setImportStatus("Não foi possível concluir a importação.");
+        notify("Não foi possível concluir a importação.", true);
       }
     } catch {
-      setImportStatus("Não foi possível concluir a importação.");
+      notify("Não foi possível concluir a importação.", true);
     } finally {
       setImporting(false);
     }
@@ -54,11 +72,17 @@ export function MediaDevicesPanel({onImported}: {onImported?: (result: MediaImpo
       {busy ? "Detectando dispositivos…" : result ? "Atualizar dispositivos" : "Detectar dispositivos"}
     </button>
     {window.photoManager?.importMediaFromDevice && (
-      <button className="nav-item" disabled={busy || importing} onClick={() => void importFrom(null)}>
-        {importing ? "Importando…" : "Importar de pasta/câmera…"}
-      </button>
+      <>
+        <label className="device-organize-toggle">
+          <input type="checkbox" checked={organizeByDate} disabled={busy || importing} onChange={event => setOrganizeByDate(event.target.checked)} />
+          Organizar por data (AAAA/MM)
+        </label>
+        <button className="nav-item" disabled={busy || importing} onClick={() => void importFrom(null)}>
+          {importing ? "Importando…" : "Importar de pasta/câmera…"}
+        </button>
+      </>
     )}
-    {importStatus && <p role="status">{importStatus}</p>}
+    {!onNotice && importStatus && <p role="status">{importStatus}</p>}
     {result?.status === "ready" && (result.devices.length ? <>
       <ul className="media-devices">{result.devices.map(device =>
         <li key={device.id}>

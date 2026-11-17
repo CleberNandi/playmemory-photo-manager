@@ -26,7 +26,9 @@ describe("gallery lifecycle", () => {
   });
   it("renders populated data without adding card tab stops", async () => {
     window.photoManager = {listGallery: vi.fn().mockResolvedValue({...empty, items: [{asset_id: "synthetic", kind: "photo", availability: "offline", annotation: {title: "   "}, representative_location: {relative_path: " "}}]}), retryGallery: vi.fn()};
-    await mount(); expect(host.querySelector(".media-card h3")?.textContent).toBe("Sem título"); expect(host.querySelector(".media-card")?.hasAttribute("tabindex")).toBe(false); expect(host.textContent).toContain("Raiz offline");
+    await mount(); expect(host.querySelector(".media-card h3")?.textContent).toBe("Sem título"); expect(host.querySelector(".media-card")?.hasAttribute("tabindex")).toBe(false);
+    await act(async () => [...host.querySelectorAll("button")].find(b => b.textContent === "Detalhes")!.click());
+    expect(host.textContent).toContain("Raiz offline");
   });
   it.each(["sync", "async", "missing"])("recovers from %s bridge failure with retry", async (failure) => {
     const success = vi.fn().mockResolvedValue(empty);

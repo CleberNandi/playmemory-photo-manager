@@ -54,7 +54,7 @@ it.each(["library", "folder"])("opens the available subfolder namesake by ID fro
   await click("teste");
   expect(window.photoManager!.listGallery).toHaveBeenLastCalledWith({pageSize:24,rootId:"root",folderPath:"teste"});
  }
- await act(async()=>host.querySelector('[data-asset-id="nested"]')!.closest(".media-card")!.querySelector<HTMLButtonElement>(".open-image")!.click());
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="nested"]')!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
  expect(window.photoManager!.getPreview).toHaveBeenCalledWith("nested");
  expect(window.photoManager!.getPreview).not.toHaveBeenCalledWith("parent");
  expect(viewerPhoto().src).toBe("data:image/jpeg;base64,/9j/AAAA");
@@ -102,11 +102,10 @@ it.each(["unavailable", "offline", "no_location"] as const)("does not open or in
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
  await act(async()=>root.render(<App/>));
  const missing=host.querySelector('[data-asset-id="missing"]')!.closest(".media-card")!;
- expect(missing.querySelector<HTMLButtonElement>(".open-image")!.disabled).toBe(true);
  await act(async()=>missing.querySelector(".media-placeholder")!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
  expect(host.querySelector(".image-viewer")).toBeNull();
  expect(window.photoManager!.getPreview).not.toHaveBeenCalled();
- await act(async()=>host.querySelector('[data-asset-id="nested"]')!.closest(".media-card")!.querySelector<HTMLButtonElement>(".open-image")!.click());
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-asset-id="nested"]')!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
  expect(host.querySelector(".viewer-caption")?.textContent).toContain("1 de 1");
  await act(async()=>viewerPhoto().click());
  expect(host.querySelectorAll(".viewer-filmstrip button")).toHaveLength(1);
@@ -123,7 +122,7 @@ it("skips unavailable photos while loading another viewer page", async () => {
   .mockResolvedValueOnce({items:[photo("missing","unavailable")],next_cursor:"page-3",has_more:true})
   .mockResolvedValueOnce({items:[photo("last","available")],next_cursor:null,has_more:false});
  window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
- await act(async()=>root.render(<App/>)); await click("Abrir imagem"); await click("Próxima");
+ await act(async()=>root.render(<App/>)); await act(async()=>host.querySelector<HTMLButtonElement>(".card-select")!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))); await click("Próxima");
  expect(window.photoManager!.listGallery).toHaveBeenNthCalledWith(2,{pageSize:24,after:"page-2"});
  expect(window.photoManager!.listGallery).toHaveBeenNthCalledWith(3,{pageSize:24,after:"page-3"});
  expect(window.photoManager!.getPreview).toHaveBeenCalledWith("last");
@@ -254,7 +253,7 @@ it("drops previous-asset previews while the next image is pending",async()=>{
 it("keeps the last navigated thumbnail selected after closing the viewer",async()=>{
  const make=(id:string)=>({asset_id:id,kind:"photo",media_type:"image/jpeg",created_at:"2026-01-01",availability:"available",annotation:{favorite:false,rating:null,title:null},representative_location:{relative_path:`${id}.jpg`,root_display_name:"Synthetic"}});
  window.photoManager!.listGallery=vi.fn().mockResolvedValue({items:[make("a"),make("b")],has_more:false,next_cursor:null});window.photoManager!.getPreview=vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
- await act(async()=>root.render(<App/>));await click("Abrir imagem");expect(host.querySelector<HTMLButtonElement>('[aria-label="Imagem anterior"]')!.disabled).toBe(true);await click("Próxima");expect(host.querySelector(".viewer-caption")!.textContent).toContain("b.jpg · 2 de 2");expect(host.querySelector<HTMLButtonElement>('[aria-label="Próxima imagem"]')!.disabled).toBe(true);await click("Fechar imagem");expect(host.querySelector('[data-asset-id="b"]')?.getAttribute("aria-pressed")).toBe("true");expect(document.activeElement).toBe(host.querySelector('[data-asset-id="b"]'));
+ await act(async()=>root.render(<App/>));await act(async()=>host.querySelector<HTMLButtonElement>(".card-select")!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));expect(host.querySelector<HTMLButtonElement>('[aria-label="Imagem anterior"]')!.disabled).toBe(true);await click("Próxima");expect(host.querySelector(".viewer-caption")!.textContent).toContain("b.jpg · 2 de 2");expect(host.querySelector<HTMLButtonElement>('[aria-label="Próxima imagem"]')!.disabled).toBe(true);await click("Fechar imagem");expect(host.querySelector('[data-asset-id="b"]')?.getAttribute("aria-pressed")).toBe("true");expect(document.activeElement).toBe(host.querySelector('[data-asset-id="b"]'));
 });
 
 it("keeps viewer navigation available after the gallery refresh replaces its page", async () => {
@@ -271,7 +270,7 @@ it("keeps viewer navigation available after the gallery refresh replaces its pag
   window.photoManager!.onGalleryChanged = listener => {refresh = listener; return () => {};};
   window.photoManager!.getPreview = vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
   await act(async () => root.render(<App/>));
-  await click("Abrir imagem");
+  await act(async()=>host.querySelector<HTMLButtonElement>(".card-select")!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
   const dialog = host.querySelector("dialog");
   await act(async () => refresh?.());
   await click("Próxima");
@@ -295,7 +294,7 @@ it("loads the next photo across pages, retries failures and keeps navigation his
   window.photoManager!.listGallery = list;
   window.photoManager!.getPreview = vi.fn().mockResolvedValue({media_type:"image/jpeg",base64:"/9j/AAAA"});
   await act(async () => root.render(<App/>));
-  await click("Abrir imagem");
+  await act(async()=>host.querySelector<HTMLButtonElement>(".card-select")!.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));
   const dialog = host.querySelector("dialog");
   await click("Próxima");
   expect(dialog?.textContent).toContain("Falha ao carregar próximas imagens");

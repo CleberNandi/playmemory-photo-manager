@@ -60,6 +60,7 @@ class GalleryQuery:
     exclude_missing: bool = False
     created_date: str | None = None
     modified_date: str | None = None
+    sort_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

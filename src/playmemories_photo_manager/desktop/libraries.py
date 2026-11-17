@@ -276,13 +276,20 @@ class LibraryDispatcher:
         if method == "devices.import":
             from .device_import import import_from_media
 
-            if not set(params) <= {"session_id", "device_id", "source_path", "destination_path"}:
+            if not set(params) <= {
+                "session_id",
+                "device_id",
+                "source_path",
+                "destination_path",
+                "organize_by_date",
+            }:
                 raise LibraryError("invalid_request")
             return import_from_media(
                 active,
                 device_id=params.get("device_id"),
                 source_path=params.get("source_path"),
                 destination_path=params.get("destination_path"),
+                organize_by_date=params.get("organize_by_date", False),
                 protected_paths=self.protected_paths,
             )
         if method == "root.remove":
@@ -497,11 +504,14 @@ class LibraryDispatcher:
                 self.images = ImageService()
             asset_id = _uuid(params["asset_id"])
             return self.images.request(active.query_connection, asset_id, variant, offset)
+        forward = {k: v for k, v in params.items() if k != "session_id"}
+        if method == "gallery.list" and "sort_by" not in forward:
+            forward["sort_by"] = "captured_desc"
         try:
             return _dispatch(
                 active.query_connection,
                 method,
-                {k: v for k, v in params.items() if k != "session_id"},
+                forward,
             )
         except BridgeRequestError:
             # `python -m ...bridge` runs its entry point as __main__; translate
