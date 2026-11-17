@@ -104,3 +104,58 @@ def test_transport_lifecycle_sanitizes_private_error(tmp_path):
         dispatcher.close()
     assert "private-name" not in output.getvalue()
     assert json.loads(output.getvalue().splitlines()[-1])["error"] == {"code": "not_found"}
+
+
+def test_root_remove_clears_catalog_entries_without_touching_disk(tmp_path):
+    from playmemories_photo_manager.catalog import Catalog
+    from playmemories_photo_manager.catalog.database import connect
+
+    media = tmp_path / "media"
+    media.mkdir()
+    photo = media / "photo.jpg"
+    photo.write_bytes(b"synthetic-photo")
+    catalog_path = tmp_path / "catalog.sqlite3"
+    dispatcher = LibraryDispatcher()
+    try:
+        state = dispatcher.request(
+            "library.create",
+            {"path": str(catalog_path), "library_handle": str(uuid4())},
+        )
+        session_id = state["session"]["session_id"]
+        with connect(catalog_path) as connection:
+            catalog = Catalog(connection)
+            root = catalog.register_root("Teste", str(media))
+            asset = catalog.create_asset("photo")
+            meta_id = str(uuid4())
+            connection.execute(
+                """INSERT INTO metadata(id, asset_id, namespace, metadata_key, source, source_key,
+                raw_value, extractor_version, extracted_at)
+                VALUES (?, ?, 'exif', 'captured_at', 'exif', 'DateTimeOriginal',
+                '2026:11:16 10:00:00', '1', '2026-11-16T10:00:00Z')""",
+                (meta_id, asset.id),
+            )
+            connection.execute(
+                """UPDATE asset SET captured_metadata_id=?, captured_source_kind='metadata',
+                captured_local_value='2026-11-16T10:00:00', captured_precision='second',
+                captured_timezone_state='unknown' WHERE id=?""",
+                (meta_id, asset.id),
+            )
+            catalog.register_location(
+                asset.id, root.id, "photo.jpg", last_seen_at="2026-11-16T00:00:00Z"
+            )
+        removed = dispatcher.request("root.remove", {"session_id": session_id, "root_id": root.id})
+        assert removed == {
+            "status": "removed",
+            "root_id": root.id,
+        }
+        assert photo.read_bytes() == b"synthetic-photo"
+        gallery = dispatcher.request(
+            "gallery.list",
+            {"session_id": session_id, "include_roots": True, "exclude_missing": True},
+        )
+        assert gallery["roots"] == []
+        assert list(gallery["items"]) == []
+        with pytest.raises(LibraryError, match="not_found"):
+            dispatcher.request("root.remove", {"session_id": session_id, "root_id": root.id})
+    finally:
+        dispatcher.close()

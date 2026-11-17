@@ -100,7 +100,7 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (!trustedSender(event, mainWindow, expectedUrl) || args.length !== count) throw new Error("invalid_request");
       if (recovering && channel !== "library:state") throw new Error("busy");
-      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","duplicates:start","devices:import","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
+      const foregroundChannels=new Set(["library:create","library:open","library:close","library:default","annotation:favorite","annotation:edit","album:action","duplicates:start","devices:import","root:remove","image:save","folder:add","ingestion:select","ingestion:prepare","ingestion:apply"]);
       const result = indexer&&foregroundChannels.has(channel)?indexer.foreground(()=>handler(...args)):handler(...args);
       return channel.startsWith("library:") ? Promise.resolve(result).then((state) => ({...(state as object), cataloging_enabled: (ingestionLab||managedMode) && !demo, folder_import_enabled:managedMode})) : result;
     });
@@ -379,6 +379,16 @@ app.whenReady().then(async () => {
       }
     }
     return {status: "ready", copiedCount, skippedCount, excludedCount, catalogedCount};
+  });
+  register("root:remove", 1, (raw) => {
+    const {sessionId, params} = envelope(raw);
+    if (demo || recovering || libraries.isBusy || folderImports?.busy || imageEdits?.busy) throw new Error("busy");
+    if (!params || typeof params !== "object" || Array.isArray(params) || Object.keys(params).join() !== "rootId") {
+      throw new Error("invalid_request");
+    }
+    const rootId = (params as {rootId: unknown}).rootId;
+    if (!canonicalId(rootId)) throw new Error("invalid_request");
+    return libraries.query("root.remove", sessionId, {root_id: rootId});
   });
   for (const [channel, method] of [["duplicates:start", "duplicates.start"], ["duplicates:list", "duplicates.list"], ["duplicates:group", "duplicates.group"], ["duplicates:decide", "duplicates.decide"], ["duplicates:remove", "duplicates.remove"]] as const) {
     register(channel, 1, (raw) => {

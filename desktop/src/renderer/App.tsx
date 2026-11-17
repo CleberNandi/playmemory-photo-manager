@@ -477,7 +477,22 @@ function GalleryApp() {
         roots={folders} root={view === "gallery" ? activeRoot : undefined}
         path={folderPath} children={subfolders} onBrowse={showFolder}
         onList={() => showCollection("folders")}
-        onAdd={session?.folderImportEnabled || session?.catalogingEnabled ? openFolderPicker : undefined} />}
+        onAdd={session?.folderImportEnabled || session?.catalogingEnabled ? openFolderPicker : undefined}
+        onRemoveRoot={session && window.photoManager?.removeLibraryRoot ? async (rootId) => {
+          try {
+            await window.photoManager!.removeLibraryRoot!(rootId);
+            setRoots(current => (current ?? []).filter(item => item.id !== rootId));
+            setSelected(null);
+            if (folder === rootId) {
+              setFolder(null);
+              setFolderPath("");
+            }
+            setGalleryRevision(value => value + 1);
+            setToast({text: "Pasta removida do catálogo (arquivos no disco preservados)."});
+          } catch {
+            setToast({text: "Não foi possível remover a pasta do catálogo.", error: true});
+          }
+        } : undefined} />}
       {view === "albums" && canManageAlbums && <AlbumPanel onOpen={openAlbum} />}
       {view === "gallery" && album && canManageAlbums && <AlbumPanel key={album.id}
         active={album} selected={activeBatch.length > 0 ? activeBatch : selected} onOpen={openAlbum} onRename={next => {setAlbum(next);setDetailsRevision(value=>value+1);}}

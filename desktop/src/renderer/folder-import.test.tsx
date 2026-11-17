@@ -3,6 +3,7 @@ import {StrictMode,act} from "react";
 import {createRoot,type Root} from "react-dom/client";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {FolderImportPanel} from "./FolderImportPanel";
+import {FolderNavigation} from "./FolderNavigation";
 let root:Root;let host:HTMLDivElement;
 const job=(state="scanning",added_count=0)=>({job_id:"job",session_id:"session",state,added_count,excluded_count:1,error:null});
 beforeEach(()=>{vi.useFakeTimers();Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});host=document.createElement("div");document.body.append(host);root=createRoot(host);window.photoManager={listGallery:vi.fn(),retryGallery:vi.fn(),addMediaFolder:vi.fn().mockResolvedValue(job()),getFolderImportStatus:vi.fn().mockResolvedValue(job("completed",125)),stopFolderImport:vi.fn().mockResolvedValue(job("stopped"))};});
@@ -30,4 +31,29 @@ it("explains that a covered subfolder belongs to the monitored parent", async ()
   expect(host.textContent).toContain("Atualizar pastas agora");
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(refresh).not.toHaveBeenCalled();
+});
+
+it("confirms before unlinking a library root in FolderNavigation", async () => {
+  const onRemoveRoot = vi.fn().mockResolvedValue(undefined);
+  await act(async () => root.render(
+    <FolderNavigation
+      roots={[{ id: "root-1", name: "Pasta Teste" }]}
+      path=""
+      children={[]}
+      onBrowse={vi.fn()}
+      onList={vi.fn()}
+      onRemoveRoot={onRemoveRoot}
+    />
+  ));
+  const removeBtn = Array.from(host.querySelectorAll("button")).find(
+    (btn) => btn.textContent === "Remover do catálogo…",
+  )!;
+  await act(async () => { removeBtn.click(); });
+  expect(onRemoveRoot).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("Os arquivos no disco não serão alterados");
+  const confirmBtn = Array.from(host.querySelectorAll("button")).find(
+    (btn) => btn.textContent === "Confirmar remoção",
+  )!;
+  await act(async () => { confirmBtn.click(); });
+  expect(onRemoveRoot).toHaveBeenCalledWith("root-1");
 });

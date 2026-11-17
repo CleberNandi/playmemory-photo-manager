@@ -247,6 +247,7 @@ class LibraryDispatcher:
             "duplicates.remove",
             "devices.list",
             "devices.import",
+            "root.remove",
             "duplicates.list",
             "duplicates.group",
         ):
@@ -284,6 +285,98 @@ class LibraryDispatcher:
                 destination_path=params.get("destination_path"),
                 protected_paths=self.protected_paths,
             )
+        if method == "root.remove":
+            if set(params) != {"session_id", "root_id"}:
+                raise LibraryError("invalid_request")
+            root_id = str(_uuid(params["root_id"]))
+            with active.command_connection() as write_connection:
+                write_connection.execute("BEGIN IMMEDIATE")
+                try:
+                    existing = write_connection.execute(
+                        "SELECT id FROM library_root WHERE id = ?",
+                        (root_id,),
+                    ).fetchone()
+                    if existing is None:
+                        raise LibraryError("not_found")
+                    decision_ids = [
+                        row[0]
+                        for row in write_connection.execute(
+                            """SELECT DISTINCT decision_id FROM exact_duplicate_decision_member
+                            WHERE library_root_id = ?
+                            UNION
+                            SELECT id FROM exact_duplicate_decision
+                            WHERE keep_location_id IN (
+                                SELECT id FROM file_location WHERE library_root_id = ?
+                            )""",
+                            (root_id, root_id),
+                        ).fetchall()
+                    ]
+                    if decision_ids:
+                        placeholders = ",".join("?" for _ in decision_ids)
+                        write_connection.execute(
+                            f"DELETE FROM exact_duplicate_decision_member "
+                            f"WHERE decision_id IN ({placeholders})",
+                            decision_ids,
+                        )
+                        write_connection.execute(
+                            f"DELETE FROM exact_duplicate_decision WHERE id IN ({placeholders})",
+                            decision_ids,
+                        )
+                    write_connection.execute(
+                        "DELETE FROM exact_duplicate_decision_member WHERE library_root_id = ?",
+                        (root_id,),
+                    )
+                    affected_assets = [
+                        row[0]
+                        for row in write_connection.execute(
+                            "SELECT DISTINCT asset_id FROM file_location WHERE library_root_id = ?",
+                            (root_id,),
+                        ).fetchall()
+                    ]
+                    write_connection.execute(
+                        "DELETE FROM file_location WHERE library_root_id = ?",
+                        (root_id,),
+                    )
+                    write_connection.execute(
+                        "DELETE FROM library_root WHERE id = ?",
+                        (root_id,),
+                    )
+                    if affected_assets:
+                        asset_placeholders = ",".join("?" for _ in affected_assets)
+                        write_connection.execute(
+                            f"UPDATE asset SET captured_metadata_id = NULL, "
+                            "captured_source_kind = 'none', "
+                            "captured_local_value = NULL, "
+                            "captured_precision = NULL, "
+                            "captured_timezone_state = NULL, "
+                            "captured_offset_minutes = NULL, "
+                            "captured_timezone_name = NULL, "
+                            "captured_selection_reason = NULL "
+                            f"WHERE id IN ({asset_placeholders}) "
+                            "AND NOT EXISTS ("
+                            "SELECT 1 FROM file_location WHERE asset_id = asset.id)",
+                            affected_assets,
+                        )
+                        write_connection.execute(
+                            f"DELETE FROM asset "
+                            f"WHERE id IN ({asset_placeholders}) "
+                            "AND NOT EXISTS ("
+                            "SELECT 1 FROM file_location WHERE asset_id = asset.id)",
+                            affected_assets,
+                        )
+                    write_connection.commit()
+                except Exception:
+                    write_connection.rollback()
+                    raise
+            self.duplicate_scan.clear_session()
+            if self.indexer is not None:
+                self.indexer.signatures.pop(root_id, None)
+                watch = self.indexer.watches.pop(root_id, None)
+                if watch is not None:
+                    watch.close()
+                self.indexer.queue = [item for item in self.indexer.queue if item != root_id]
+                self.indexer.error = None
+            return {"status": "removed", "root_id": root_id}
         if method == "asset.reveal":
             from .media_location import reveal_location
 

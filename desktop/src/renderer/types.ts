@@ -86,6 +86,7 @@ declare global {
       applyFileRename?(assetId: string, locationId: string, stem: string): Promise<RenamePreview>;
       listMediaDevices?(): Promise<MediaDevices>;
       importMediaFromDevice?(deviceId?: string | null): Promise<MediaImportResult>;
+      removeLibraryRoot?(rootId: string): Promise<{status: "removed"; root_id: string}>;
       startDuplicateScan?(): Promise<Exclude<DuplicateResult<never>, {status: "ready"}>>;
       listDuplicates?(params?: DuplicateListParams): Promise<DuplicateResult<DuplicateListPage>>;
       getDuplicateGroup?(params: DuplicateGroupParams): Promise<DuplicateResult<DuplicateGroupPage>>;
